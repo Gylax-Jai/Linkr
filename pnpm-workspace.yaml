@@ -2,3 +2,8 @@ packages:
   - "shared"
   - "client"
   - "server"
+
+# Allow esbuild (a Vite/tsx dependency) to run its install script. pnpm 10+ blocks build
+# scripts by default; without this, CI installs (e.g. Vercel) fail with ERR_PNPM_IGNORED_BUILDS.
+onlyBuiltDependencies:
+  - esbuild

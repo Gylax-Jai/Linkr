@@ -17,5 +17,8 @@
     "lint": "pnpm --recursive --parallel --if-present lint",
     "clean": "pnpm --recursive --parallel exec rimraf dist node_modules/.cache"
   },
-  "packageManager": "pnpm@11.8.0"
+  "packageManager": "pnpm@11.8.0",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
 }
