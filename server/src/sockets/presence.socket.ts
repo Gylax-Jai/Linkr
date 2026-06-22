@@ -1,0 +1,75 @@
+import type { Server, Socket } from "socket.io";
+import { SOCKET_EVENTS } from "@linkr/shared";
+import { UserModel } from "../models/User.js";
+import { FriendshipModel } from "../models/Friendship.js";
+import { requireSocketUser } from "./auth.socket.js";
+import { registerTypingHandler } from "./chat.socket.js";
+
+/** Track socket connections per user for online presence. */
+const userSockets = new Map<string, Set<string>>();
+
+async function getFriendIds(userId: string): Promise<string[]> {
+  const friendships = await FriendshipModel.find({
+    status: "accepted",
+    $or: [{ requester: userId }, { recipient: userId }],
+  }).select("requester recipient");
+
+  return friendships.map((f) => {
+    const requesterId = f.requester.toString();
+    return requesterId === userId ? f.recipient.toString() : requesterId;
+  });
+}
+
+async function broadcastToFriends(
+  io: Server,
+  userId: string,
+  event: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const friendIds = await getFriendIds(userId);
+  for (const friendId of friendIds) {
+    io.to(`user:${friendId}`).emit(event, payload);
+  }
+}
+
+/**
+ * Presence events (blueprint §11): user:online / user:offline / user:typing.
+ */
+export function registerPresenceHandlers(io: Server, socket: Socket): void {
+  const userId = requireSocketUser(socket);
+  if (!userId) return;
+
+  registerTypingHandler(io, socket);
+
+  void (async () => {
+    let sockets = userSockets.get(userId);
+    if (!sockets) {
+      sockets = new Set();
+      userSockets.set(userId, sockets);
+    }
+    sockets.add(socket.id);
+
+    if (sockets.size === 1) {
+      await UserModel.findByIdAndUpdate(userId, { online: true, lastSeen: new Date() });
+      await broadcastToFriends(io, userId, SOCKET_EVENTS.USER_ONLINE, { userId });
+    }
+  })();
+
+  socket.on("disconnect", () => {
+    void (async () => {
+      const sockets = userSockets.get(userId);
+      if (!sockets) return;
+
+      sockets.delete(socket.id);
+      if (sockets.size === 0) {
+        userSockets.delete(userId);
+        const lastSeen = new Date();
+        await UserModel.findByIdAndUpdate(userId, { online: false, lastSeen });
+        await broadcastToFriends(io, userId, SOCKET_EVENTS.USER_OFFLINE, {
+          userId,
+          lastSeen: lastSeen.toISOString(),
+        });
+      }
+    })();
+  });
+}

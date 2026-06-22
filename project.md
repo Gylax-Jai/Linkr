@@ -1,0 +1,590 @@
+# Linkr — Project Progress & Status
+
+> **Living document:** everything built so far, how to run it, and what's next.  
+> For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
+
+**Last updated:** June 23, 2026 (Phase 8 kickoff — MSG91 real SMS OTP + onboarding photo + input contrast fix)  
+**Tagline:** Connect privately. Talk freely.  
+**Brand:** Iris Violet `#7C5CFC` (gradient → `#9D7BFF`)
+
+---
+
+## Current status (at a glance)
+
+| Area | Status |
+|------|--------|
+| Monorepo + dev tooling | ✅ Done |
+| UI shell + 6 themes | ✅ Done |
+| Google login + JWT + onboarding | ✅ Done |
+| Friends (search, requests, block) | ✅ Done |
+| Real-time 1:1 chat (Socket.IO) | ✅ Done |
+| Professional UI overhaul | ✅ Done |
+| Edit profile (display name, bio, status) | ✅ Done |
+| Message actions (reply, edit, delete, react) | ✅ Done |
+| Pin chats | ✅ Done |
+| Dev test bot (`@linkr_bot`) + UX polish | ✅ Done |
+| Media messages (image + file) | ✅ Done |
+| In-app notifications | ✅ Done |
+| Block / Unblock (everywhere + in chat) | ✅ Done |
+| Friend-request actions in the bell | ✅ Done |
+| Profile photo upload | ✅ Done |
+| UX polish (scroll lock, blue ticks, close chat) | ✅ Done |
+| Unfriend + per-user delete chat | ✅ Done |
+| Composer emoji picker | ✅ Done |
+| Details Media / Files galleries | ✅ Done |
+| Media preview before send (staging) | ✅ Done |
+| Click profile → details + mobile details sheet | ✅ Done |
+| End-to-end encryption (E2EE) — text, human↔human | ✅ Done (Phase 2) |
+| Real SMS phone OTP (MSG91 widget + server token verify) | ✅ Done (dev OTP fallback kept) |
+| Onboarding profile photo (Add a photo on the Profile step) | ✅ Done |
+| Calls, groups, screen share | ❌ Phase 3 |
+
+**You are here:** **MVP complete — Sprints 0–5 done, plus Sprint 5.5 UX & social polish, Sprint 5.6 social actions + emoji + media galleries, and Sprint 5.7 "Add friend" reachability + not-friends composer gate.** Sprint 5 shipped media messages (images + files, encrypted **in transit**, with Cloudinary-or-local-disk storage) and in-app notifications (a real notification center replacing the bell stub, live over the `notification:new` socket event). Sprint 5.5 added **Block/Unblock everywhere** (the block stub is now a real round-trip), **friend-request Accept/Reject/Block inside the bell**, **profile photo upload** (same hardening as chat media), **desktop close-chat**, **blue read ticks + Online/Offline labels**, **page-scroll lock**, and **explanatory media-upload errors**. **Phase 2 then shipped end-to-end encryption for text** (libsodium sealed boxes; the server stores ciphertext only; the badge is now a real dynamic "End-to-end encrypted"). The dev bot is kept **plaintext by design** (it has no key, so the client auto-falls back) rather than retired, and **media stays in-transit only** for now — E2EE media + multi-device key sync are the remaining items in that theme. **Phase 8 has now kicked off** with pre-deploy hardening: onboarding uses a **real SMS OTP provider (MSG91 widget + server-side token re-verification)** with the dev code as a fallback, the onboarding profile step gained an **Add a photo** upload, and a dark-theme **input autofill contrast** bug was fixed.
+
+---
+
+## Timeline — what happened
+
+### Planning
+- Defined Linkr as a privacy-first messenger: strangers can be **found** but cannot **message** until friendship is accepted.
+- Chose MERN + TypeScript monorepo (`shared` / `client` / `server`), Socket.IO, MongoDB Atlas, Google OAuth, libsodium (later).
+- Wrote full blueprint in `projectlinkr.md`.
+
+### Sprint 0 — Foundation
+- Scaffolded pnpm workspace monorepo.
+- **shared:** types (User, Message, Chat, Friendship, Otp), Zod schemas, socket event constants.
+- **server:** Express app, MongoDB/Redis graceful connect, health route, middleware stubs, Mongoose models.
+- **client:** React + Vite + TS, Tailwind, 6-theme system (light/dark), 3-pane AppShell (placeholder data).
+- `pnpm dev` → client `:5173`, server `:5000`.
+
+### UI polish (post–Sprint 0)
+- Premium visual pass: gradient brand, bubble styling, theme swatches, avatar rings, design tokens.
+
+### Sprint 1 — Auth & onboarding
+- **Google Sign-In** via ID token (`@react-oauth/google` → `POST /api/auth/google`).
+- **JWT:** access token (~15m, in memory) + refresh token (~7d, HttpOnly cookie `linkr_refresh`).
+- **Onboarding wizard:** @username → phone OTP (dev mode shows code on screen) → profile.
+- Phone stored **encrypted at rest** + HMAC for uniqueness (one account per number).
+- Route guards: `/login`, `/onboarding`, `/` (AppShell).
+
+### Sprint 2 — Friends & privacy
+- Search users by `@username` (privacy-limited `PublicUser`).
+- Friend requests: send / accept / reject / cancel / block.
+- `requireFriendship` middleware (403 `NOT_FRIENDS` if not friends).
+- `PATCH /api/users/me/privacy` (API only; partial UI).
+- Friends panel in details pane + friend search in sidebar.
+
+### Header + logout (Sprint 2 follow-up)
+- Profile chip in header (avatar, display name, `@username`).
+- User dropdown: Profile, Theme, Light/Dark, **Sign out** (click name + ▼ in top-right).
+
+### Professional UI overhaul
+- Removed all user-facing “Sprint 0” placeholder text from composer.
+- iMessage-style message bubble grouping (first/middle/last in group).
+- **Sidebar:** sticky user identity row, “Search conversations”, “Find friends” modal, PINNED/RECENT sections, hover ··· menu (stub).
+- **Header:** decluttered — theme moved into user menu; notification bell stub.
+- **Details pane:** Profile / Media / Files tabs, action stubs (Mute, Block, Share).
+- **Empty state:** animated lock + “Start a new chat” CTA.
+- Design tokens: motion durations, type scale, `.glass` utility, presence colors.
+- **Edit profile:** `PATCH /api/users/me` + `/profile` page (display name, bio, status; username read-only).
+
+### Sprint 3 — Real-time chat
+- **REST:** list/create chats, paginated messages, REST send fallback.
+- **Socket.IO:** JWT auth on connect, `message:send/new/delivered/read`, `user:typing`, `user:online/offline`.
+- Friendship enforced on every chat route and socket handler.
+- Client: `socket.io-client`, `SocketProvider`, real chat list, live messages, optimistic send, typing/read receipts.
+- Friend search **Message** button opens/creates 1:1 chat.
+
+### Sprint 4 — Message actions + pin + dev bot + UX
+- **Reply:** quote a message; preview bar in composer; reply preview rendered inside the bubble.
+- **Edit:** sender-only in-place edit; `(edited)` marker; live broadcast via `message:edit`.
+- **Delete:** *for me* (hidden only for you) and *for everyone* (sender-only; body + reactions cleared, shown as “This message was deleted”); broadcast via `message:delete`.
+- **React:** one emoji per user (toggle), quick-reaction popover + reaction pills; broadcast via `message:react`.
+- **Pin chats:** per-user pin (`PATCH /api/chat/:chatId/pin`), PINNED section + pin indicator, optimistic toggle from the sidebar ··· menu.
+- **Dev test bot (`@linkr_bot`):** dev-only auto-replying account so chat is testable without a second Google login — auto-accepts friend requests and auto-replies (with a typing indicator). Gated off in production and force-disabled before E2EE.
+- **UX polish:** dedicated **Theme** button + popover in the header (6 accents + light/dark, no more digging through the user menu); **visible Logout** icon in the sidebar identity row; “Private chat / Encrypted in transit” badge copy (does **not** claim E2EE).
+- **E2EE intentionally deferred** to its own sprint: a server-side bot speaks plaintext and cannot take part in real end-to-end encryption, so libsodium lands after the bot is retired. `keys` module and E2EE stubs left in place.
+
+### Sprint 5 — Media messages + in-app notifications → **MVP complete**
+- **Media messages:** the composer paperclip now opens a file picker; selected images/files upload via `POST /api/chat/:chatId/media` (multipart) and render inline — images as click-to-open thumbnails, other files as a download chip (name + size). Reuses the normal send/emit path so it broadcasts over `message:new` (the bot still works for text).
+  - **Storage degrades gracefully:** if `CLOUDINARY_URL` is set, the buffer is uploaded to Cloudinary (`resource_type: auto`) and the secure URL is stored. Otherwise it falls back to **local disk** (`server/uploads/`, git-ignored, outside the web root), served only via an **authenticated** route (`GET /api/chat/media/:messageId`) that re-checks chat membership. The client fetches local media through the authed axios client as a blob (an `<img>`/`<a>` can't send the Bearer token), so downloads/thumbnails work without Cloudinary.
+  - **Upload hardening (per repo security rules):** allowlist by extension **and** magic-byte sniffing (the client `Content-Type` is ignored); size caps enforced before storage (images ≤ 10 MB, other files ≤ 25 MB, plus a hard multer cap); random UUID storage filename (the user filename is kept only as sanitized display metadata); stored outside the web root; downloads sent with `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`; uploads are never executed.
+- **In-app notifications:** new `Notification` model + `/api/notifications` module. Notifications are created server-side for **friend requests received**, **friend requests accepted** (incl. the bot's auto-accept), and **new messages received** (never the sender). Each is persisted and pushed live over the new `notification:new` socket event to `user:<recipientId>`.
+  - **Client:** the header bell is now a real **notification center** — unread badge, dropdown list (actor + type + relative time), click a message notification to open that chat / a friend notification to open the friends panel, and mark-all-read on open. `SocketProvider` subscribes to `notification:new` to update the list + bump the unread badge live.
+- **Honest crypto framing kept:** media is **encrypted in transit only** (consistent with text today) — the UI still says "Private chat / Encrypted in transit", not E2EE. No libsodium added.
+- **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (chunk-size warning only).
+
+### Sprint 5.5 — UX & social polish
+- **Page scroll lock:** `html, body` are now `overflow: hidden`, so the window itself never scrolls — only the inner panes do (chat list, message list, details body, notification dropdown). Full-screen routes (onboarding, profile) scroll internally so nothing is clipped under the lock.
+- **Explanatory media-upload errors:** the composer now surfaces the **server's** specific reason instead of a generic "Upload failed." The hardened validator returns clear 4xx messages that name the accepted types (unsupported type / content-extension mismatch → 415; oversized → 413, per-kind cap named) and a clean, logged 500 if a local disk write fails (no path/PII leaked). The hidden file input already advertised `accept=…`; the client keeps its size pre-check and falls back by HTTP status if the body has no `error`. (Root cause of the old message was the client swallowing the server error in `onError`, not an upload-blocking bug — multipart posting via axios already lets the browser set the multipart boundary.)
+- **Block / Unblock everywhere + in chat:** added `POST /api/friends/unblock/:userId` (only the **blocker** can lift their own block; the friendship row is deleted, so unblocking never silently recreates a friendship). Search now surfaces users **you** blocked (flagged `blockedByMe`) so you can unblock them, while a block placed by the other party stays hidden. The friends list shows an **Unblock** button; the **details-pane footer Block button is enabled** and toggles Block/Unblock for the active conversation participant; when blocked, the composer shows a friendly inline notice instead of a dead input.
+- **Friend-request actions in the bell:** `friend_request` notifications now carry a `friendshipId`, so the notification center renders inline **Accept / Reject / Block** buttons wired to the existing friend mutations. After an action the row shows its resolution and notifications/friends refresh. Message notifications keep their click-to-open behavior.
+- **Close chat on desktop:** the conversation header gained a desktop-visible **✕ Close** affordance (alongside the mobile back arrow) that returns to the "Select a conversation" empty state.
+- **Blue read ticks + clearer presence:** the "seen" receipt is now a **blue** double-check (`text-sky-500`) regardless of the active accent theme (sent = grey single, delivered = grey double). The conversation header shows **Online / Offline** instead of the `@username` when the participant isn't online.
+- **Profile photo upload:** new `POST /api/users/me/avatar` (multipart) reuses the **exact chat-media hardening** — images only, ≤ 5 MB, magic-byte verified, random UUID storage filename, stored outside the web root, Cloudinary-or-local. Local avatars are served via the authenticated `GET /api/users/avatar/:userId` route; the `Avatar` component fetches local/relative avatars as a blob (shared `useAuthedObjectUrl` hook, same pattern as chat media), while Cloudinary/Google URLs pass straight through. The profile page got a **Change photo** control (live progress + error), and the new avatar flows back through the session-user mapper so it updates everywhere instantly.
+- **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (chunk-size warning only).
+
+### Sprint 5.6 — Social actions, emoji & media galleries
+- **Unfriend (remove an accepted friend):** new `DELETE /api/friends/friend/:userId` (by target user id, so it can't collide with the `DELETE /:friendshipId` cancel route). `removeFriend` requires an **accepted** friendship and then **deletes** the row — both users return to strangers and messaging is gated off by the existing friendship check; it does **not** block. The other user is notified live over a new `friend:removed` socket event (mirrors how `friend:rejected` is emitted) and the client invalidates friends/requests/search/chats. Surfaced as an **Unfriend** action next to **Message** in `FriendActions` and in the sidebar ⋯ menu — both with a confirm.
+- **Per-user delete chat:** new `DELETE /api/chat/:chatId` (membership only — friendship isn't needed to hide a chat). Modeled as a **per-user soft delete**: the user is added to a new `Chat.hiddenFor[]` so the chat disappears from **their** list only; the other member keeps the full history. Nothing is hard-deleted — `listChats` excludes `hiddenFor` rows, and the chat **reappears** for anyone who hid it on new activity (`sendMessage` clears `hiddenFor`) or when they re-open it (`getOrCreate` un-hides the requester). If the deleted chat was active, the client clears the active chat.
+- **Sidebar ⋯ menu, expanded:** the per-chat menu (previously Pin/Unpin only) now offers **Pin/Unpin**, **Unfriend** (when currently friends), **Block / Unblock** (driven by the participant's friendship `status`/`blockedByMe`, already on the chat-list DTO since 5.5), and a danger-styled **Delete chat** (last, red, with a confirm). Closes on outside-click and Escape.
+- **Composer emoji picker:** a new **Smile** button left of the textarea toggles an emoji picker popover that inserts the chosen emoji **at the caret** (keeping focus) — plain text into the existing input, **no server changes**. Built on **`emoji-mart`** + **`@emoji-mart/react`** + **`@emoji-mart/data`**, **lazy-loaded** (`React.lazy` + dynamic `import()` of the dataset) so it lands in its own chunks and never bloats the initial bundle. Themed to the app's light/dark mode via the theme store; closes on outside-click + Escape; Enter-to-send / Shift+Enter are untouched.
+- **Details Media / Files galleries:** the previously-stubbed **Media** and **Files** tabs are now wired. They derive from the **already-cached messages** for the active chat (the `useMessages` query — no new endpoint), filtered by type: **Media** is a newest-first thumbnail grid of `image` messages (click opens full size), **Files** is a newest-first list of `file` messages reusing the existing authed download chip. Both keep empty-states and live inside the existing scroll area (5.5 scroll lock intact).
+- **Honest crypto framing kept:** still "encrypted in transit only", **E2EE remains deferred**. No new env vars.
+- **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (emoji-mart split into its own lazy chunks; chunk-size warning only).
+
+### Phase 2 — End-to-end encryption (text) 🔐
+The big one from the roadmap. **Text messages between humans are now end-to-end encrypted** with libsodium; the server stores ciphertext only and can never read them. Scope is **text-only** (media stays encrypted-in-transit for now) and the **dev bot stays plaintext** by design (see below).
+
+- **Keys (`client/src/lib/crypto/`):** each device generates an **X25519 keypair** (`crypto_box_keypair`). The **private key never leaves the browser** — it's stored in **IndexedDB** keyed by userId (`storage.ts`); the **public key** is published to the server. libsodium is loaded lazily (`sodium.ts`) and the whole layer is isolated in one folder so it can be audited/swapped.
+- **Key exchange (`/api/keys`):** the previously-stubbed keys module is now real — `POST /api/keys` publishes/rotates the caller's public key (`User.publicKey`), `GET /api/keys/:userId` returns a user's key (gated to **self or accepted friends**, mirroring who you can message). Bootstraps on login via `useE2EEInit` (ensures a keypair, publishes it).
+- **Envelope scheme (`messageCrypto.ts`):** a message is sealed with an anonymous **sealed box (`crypto_box_seal`) to EACH chat member's public key** — one copy per member, keyed by userId, packed as a JSON envelope stored in the existing `content` field with `encrypted: true`. Both the sender and recipient open their own copy with their private key. Confidentiality is end-to-end; **sender authenticity** is provided by the authenticated transport (JWT + server-stamped `sender`), documented so we never over-claim.
+- **Send/receive:** `useMessages` encrypts text before emitting `message:send` (and on edit) when the peer has a key; `useDecryptedText` decrypts bodies for the bubble, reply previews, the composer edit-prefill, and the **sidebar last-message preview**, with a small **"Decrypting…"** / **"🔒 Can't decrypt on this device"** placeholder. Decrypted plaintext is cached by message id so re-renders are cheap.
+- **No-E2EE-with-bot mode (as requested):** the client looks up a peer's public key before sending. The **dev bot has no browser, so it never publishes a key** → the client **automatically falls back to plaintext** (encrypted in transit only) so the bot can still read/echo. Same graceful fallback covers any not-yet-upgraded peer. The bot remains **force-disabled in production**.
+- **Honest, dynamic badge:** the conversation header badge now reflects reality per chat — a green **"End-to-end encrypted"** shield when the peer has a key, or **"Private chat / encrypted in transit"** otherwise (e.g. the bot). No more blanket "coming soon".
+- **Server stores ciphertext only:** `Message.encrypted` flags E2EE bodies; the server **never** builds a readable preview for them (notifications show a generic **"🔒 New message"**) and forwards/stores the envelope untouched. Media is **not** encrypted in Phase 2 (text-only), so the `encrypted` flag is ignored for media.
+- **Known limits (by design, MVP):** **single-device** — logging in on a new device (or clearing site data) generates a fresh key and **old messages become unreadable** (the accepted lost-key tradeoff); **multi-device key sync** and **E2EE media** are future work. On a transient key-fetch failure the client falls back to in-transit (never silently drops a message).
+- **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (libsodium lands in its own chunk; only the pre-existing chunk-size warning).
+
+### Phase 8 (kickoff) — Real SMS OTP (MSG91) + onboarding photo + input contrast
+Pre-deploy hardening: onboarding now uses a **real SMS OTP provider** instead of the dev code, the onboarding profile step lets you **set a photo**, and a dark-theme input-readability bug was fixed.
+- **MSG91 OTP widget (real SMS):** when `MSG91_AUTH_KEY` (server) + `VITE_MSG91_WIDGET_ID` + `VITE_MSG91_WIDGET_TOKEN` (client) are set, the phone step uses the **MSG91 OTP widget** — the widget sends + verifies the code **client-side** and returns a signed **access token (JWT)**; the client posts it to **`POST /api/auth/otp/msg91-verify`**, and the server **re-verifies it with MSG91 using the server-only Authkey** and reads the **trusted** phone from MSG91's response (the client never asserts its own number). The verified phone is then bound to the user via the shared **`bindVerifiedPhone`** helper (same encrypted-at-rest + HMAC-uniqueness path as the dev flow → one account per number). When the env vars are **unset**, the built-in **dev OTP** flow runs unchanged (a `devCode` hint in non-production), so local dev still needs no SMS provider.
+  - **Client lib (`client/src/lib/msg91/`):** lazy-loads the widget script, exposes `isMsg91Enabled` / `sendMsg91Otp` / `verifyMsg91Otp` (promise-wrapped), polls for the widget's async-exposed methods, renders the captcha into a dedicated container, and surfaces MSG91's real error text. `usePhoneVerification` (in `useOnboarding.ts`) abstracts MSG91-vs-dev so the wizard UI is identical either way.
+  - **Server (`server/src/modules/auth/msg91.service.ts`):** posts the access token to MSG91's `verifyAccessToken` endpoint (JSON-first with a form-urlencoded fallback + authkey header for robustness), extracts the phone from the response body or by decoding the JWT payload, normalizes to E.164, and logs MSG91's raw failure reason on rejection. Wired via `otpMsg91Verify` (controller) + `msg91VerifySchema` (shared Zod).
+  - **Dev-only cleanup script:** `server/scripts/delete-user.ts` (`pnpm --filter @linkr/server delete-user <email>`) fully removes a user + their chats/messages/friendships/notifications/OTP rows, so a phone/username can be re-tested.
+- **Onboarding "Add a photo":** the profile step (step 3) now has the **same avatar upload** as the Edit-Profile page — a camera button + **Add a photo / Change photo / Discard**, client-side type/size validation, and a live preview. **Stage-then-upload:** the file is only uploaded on **Finish** (via `useUpdateAvatarMutation`), then its URL is threaded into the onboarding payload so it's saved as the avatar; with no pick it still defaults to the Google photo. Reuses the hardened `POST /api/users/me/avatar` (auth-only, doesn't require completed onboarding).
+- **Input contrast fix (dark theme):** browser **autofill** was painting a white background with faint text over dark inputs (the onboarding phone/profile fields). The `:-webkit-autofill` / `:autofill` rule in `globals.css` now uses `!important` (the browser applies autofill styles at very high priority) to force the themed surface + bright text and freeze the white flash.
+- **Verified green:** lint clean; client TypeScript diagnostics clean on the edited onboarding files.
+
+### Sprint 5.11 — sidebar user-row cleanup (de-duplicated actions)
+- **Removed the redundant Settings + Logout from the sidebar user row (client-only):** the sticky identity row at the top of the left pane previously carried a **Settings** link (→ `/profile`) and a **Logout** button, but **both already live in the header's user menu** (avatar → Profile / Settings / Logout), so they were duplicated. They're gone from the sidebar row — logout/profile now have a single, canonical home in the header to avoid confusion and accidental sign-outs.
+- **Replaced them with discovery actions:** the row now shows a **Find friends** button (`UserPlus`) next to the existing **New chat** button (`PenSquare`); both open the friend-search modal (`openFriendSearch`), which is the single entry point for finding people and starting a conversation. This "covers" the space the removed icons left and makes the most-common action (reach someone new) more obvious.
+- **Cleanup:** dropped the now-unused imports/logic from `Sidebar.tsx` — `LogOut`, `Settings`, `Link`, `useNavigate`, `useLogoutMutation`, `PATHS`, and the local `handleLogout`/`logout`/`navigate`. No server, shared-type, schema, API, or socket changes; the header user menu (the real logout/profile path) is untouched.
+- **Verified green:** `tsc --noEmit` for the client (no errors), lint clean on `Sidebar.tsx`.
+
+### Sprint 5.10 — unread/badge sync, avatar cache-bust, dev-bot ticks
+- **No phantom unread on the chat you're viewing (client-only):** the sidebar row used to flash/stick a "1" when a message arrived for the chat you were actively reading, because `SocketProvider.onNewMessage` always invalidated the chat list (which refetches the still-unread `unreadCount` before the read is recorded). Now, when a new message lands in the chat whose id matches `useUIStore.getState().activeChatId` (read at event time, never a stale closure) **and** it's from the other user, the row is patched **directly** in the `chatKeys.list()` cache (new last message + `unreadCount: 0`) **instead of** invalidating — so there's no refetch race that can momentarily re-show "1". The existing `MessageList` read effect still emits `MESSAGE_READ`, so the server records the read and any later refetch / other device agrees. Messages for **other** chats are unchanged: they still invalidate the list and show their unread badge (a message in chat B while viewing A still shows "1" on B). `useMarkReadMutation` now also optimistically zeroes its chat's row on mutate, so **opening** a chat with an unread last message clears the badge immediately (and stays cleared, since the server records the read on the same event) — fixing the badge that used to stick at "1" while the chat was open.
+- **Bell stays consistent:** the Sprint 5.9 behavior is untouched — a `message` notification for the chat you're viewing is still suppressed (no badge bump) and marked read server-side, and mark-all-read-on-bell-open still clears the count. The new sidebar fix doesn't create or read notifications, so there's no double-counting; the bell's `unread-count` query stays authoritative via its own refetch.
+- **Avatars update immediately after Save (server resolver, no hard refresh):** local avatars resolved to a **stable** `/users/avatar/<userId>` URL, so after an upload `setUser` ran but `user.avatar` was the *same string* → `useAuthedObjectUrl` never refetched → the old cached blob showed until a hard refresh. The stored ref is actually `local:<uuid><ext>` and the **uuid changes on every upload**, so `resolveAvatarUrl` now appends a short, URL-safe `?v=<token>` derived from that ref (`User` has no `updatedAt` — `timestamps.updatedAt: false`). The avatar route ignores the query string, so matching is unaffected, but the resolved URL is now a **new string per upload** → `useAuthedObjectUrl` refetches and the new photo appears instantly. Cloudinary/Google URLs already change per upload and pass through unchanged. The fix lives entirely in `avatar.helpers.ts`, so **every** mapper that returns avatars (session user, friends, users search, chat participant, notification actor) benefits with no signature change; the avatar-upload controller already returns the freshly-resolved (now versioned) URL via `toSessionUser`, so `setUser` flips the avatar without a reload.
+- **Dev bot now shows delivered → blue-read ticks (server-only, dev-only):** receipts are normally driven by the recipient's client, but the test bot has no browser, so a human's messages to it stayed on a single grey ✓. `maybeAutoReply` now (best-effort, gated by `isBotEnabled()`) simulates the bot **receiving and reading** the human's message: a new `markIncomingMessagesDelivered(chatId, botId)` flips the human's `sent` messages to `delivered` and emits `MESSAGE_DELIVERED { message }` per message to `user:<senderId>` (✓✓ grey), then a moment later `markMessagesRead(chatId, botId)` flips them to `read` and emits `MESSAGE_READ { chatId, messages }` (blue ✓✓ — mirroring the shape the client's `onRead` expects). Human-ish delays (~400 ms delivered, ~0.7–2 s read) make it look natural. Strictly dev-only (the bot is force-disabled in production and before E2EE); human↔human chats are never affected (real clients drive their own receipts). The existing auto-reply is unchanged and the simulation is wrapped in try/catch + logger.
+- **Bug split:** BUG 1 was **client-only** (`SocketProvider`, `useMessages`); BUG 2 was **server-only** (`avatar.helpers.ts`); BUG 3 was **server-only** (`bot.service.ts` + a small `chat.service.ts` helper). No `shared` changes (events + DTO shapes already existed).
+- **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (chunk-size warning only).
+
+### Sprint 5.9 — Notification & avatar-preview fixes
+- **Message notifications no longer nag while you're in that chat (client-only):** the server still creates a `message` notification for every received message (it has no reliable knowledge of which chat the recipient is actively viewing), so the fix lives in `SocketProvider`'s `onNotification`. When an incoming notification has `type === "message"` **and** its `chatId` matches `useUIStore.getState().activeChatId` (read at event time, never a stale closure), it's treated as already-seen: the unread badge is **not** incremented, and the row is inserted as **`read: true`** while the client also fires a best-effort `PATCH /api/notifications/:id/read` (failures ignored) so the persisted state stays consistent. Because the server row is flipped to `read: true`, a later refetch of **`unread-count`** (which counts `read:false`) and the **list** both agree — no double-counting. Every other case (a different chat, or `friend_request` / `friend_accepted` types) keeps the **exact** previous behavior, and the existing mark-all-read-on-open + optimistic updates are untouched. No server or shared-type change.
+- **Profile photo is now "preview then Save" (no auto-upload on pick, client-only):** picking a photo on the profile page no longer uploads immediately. The file is **staged** in local state and shown as a **local preview** (`URL.createObjectURL`) in the avatar (the preview src overrides `user.avatar` while staged); the object URL is **revoked** on replace / discard / unmount via an effect, so there are no leaks. A **Discard (✕)** affordance clears the staged photo and reverts to the current avatar. The actual commit happens on **Save changes**: the staged avatar uploads first (`useUpdateAvatarMutation`), then the text fields patch (`useUpdateProfileMutation`). That order leaves the auth store correct because `PATCH /users/me` echoes the **full** session user (avatar included), so the final `setUser` carries both the new photo and the new displayName/bio/status. Photo-only saves (no text edits) still work; an avatar-upload failure surfaces `avatarErrorMessage` and aborts before the profile patch; the existing "Profile saved." confirmation shows on success and clears the staged file. Reuses the `useProfile.ts` contract unchanged. Net UX: pick → see how it looks → **Save changes** commits; navigating away without saving never changes your avatar (fixing the old "only updates when I leave" confusion).
+- **Client-only:** no server, shared types, schema, API, or socket changes — reuses the existing notification read endpoint, avatar/profile mutations, and UI store.
+- **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (chunk-size warning only).
+
+### Sprint 5.8 — Media preview before send, profile-opens-details, mobile details sheet
+- **Media preview before send (no more auto-send):** picking a file in the composer no longer uploads immediately. The file is **staged** in local component state and previewed inside the composer — images show a thumbnail (a `URL.createObjectURL` object URL, **revoked** on remove / chat-switch / unmount so there are no leaks), other files show an icon + name + human-readable size chip. A **✕** discards the staged file. The text box becomes the **caption** (placeholder hints "Add a caption…"); **Send** (button or Enter, Shift+Enter still newlines) uploads the staged file via the existing `useUploadMediaMutation` with the caption, shows the existing uploading state, then clears the file + caption on success and surfaces the same `uploadErrorMessage` on failure. The client size pre-check runs both when staging **and** again on send. With a file staged, Send sends the **file**; with no file, Send behaves exactly as before (text message); empty + no file can't be sent. Attachment staging stays disabled while **editing** a message (attachments aren't editable).
+- **Click the recipient profile → open details:** the conversation header's **avatar + name** are now a single real `<button>` ("View contact info", keyboard-focusable, hover affordance) that opens the details — `setDetailsOpen(true)` for the desktop aside and the new mobile sheet on small screens, via one `openDetails()` handler. The ✕ close and call buttons are unchanged.
+- **Mobile details sheet:** the details pane was desktop-only (`lg+`). The inner content was refactored into a shared **`DetailsContent`** component used by **both** the desktop aside and a new **`MobileDetailsSheet`** — a `lg:hidden` slide-up bottom sheet (backdrop click + ✕ + **Escape** to dismiss, internal scroll honoring the Sprint 5.5 page-scroll lock, `z-50` above the shell). It shows the **same** Profile / Media / Files tabs + footer actions for the active chat. To avoid the sheet popping open by default (`detailsOpen` defaults to `true`), a dedicated **`mobileDetailsOpen`** flag (default **false**) gates it, additionally requiring an `activeChatId`; switching/closing the active chat resets it. The header profile tap and the bell's friend-notification handler both open it.
+- **Client-only:** no server, shared types, schema, API, or socket changes — reuses the existing media upload contract and UI store.
+- **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (chunk-size warning only).
+
+### Sprint 5.7 — "Add friend" reachability + not-friends composer gate
+- **The gap it closes:** two users become **strangers** after **Unblock** or **Unfriend** (both delete the friendship row). Until now there was **no way to re-add a friend from an existing chat** — "Add" only lived in Find-friends search — and the chat composer only gated on `blocked`, so when you were simply *not friends* the input still rendered and sends failed server-side with `NOT_FRIENDS`. Both are now fixed; no new endpoints (reuses send/accept/reject/cancel).
+- **Chat participant friendship DTO extended (additive):** `ChatParticipantFriendship` (in `shared/src/types/chat-api.ts`) now also carries `direction?: "incoming" | "outgoing"` and `friendshipId?` alongside `status` + `blockedByMe`. The server chat-list mapper (`chat.service.ts`) populates them from the already-fetched relationship doc (`direction` only for pending; `friendshipId` always), so the chat UI can tell **stranger** ("Add friend") from **pending-outgoing** ("Requested"/Cancel) from **pending-incoming** ("Accept") and call accept/reject/cancel directly. `useChatById` (active chat) reads the same list cache, so Sidebar / DetailsPane / ConversationPane all agree.
+- **Add friend from the sidebar ⋯ menu:** the per-chat menu gained relationship branches under Pin — **Add friend** (stranger), **Cancel request** (pending-outgoing), **Accept request** (pending-incoming) — beside the existing Unfriend / Block-Unblock / Pin / Delete (Delete stays last/danger).
+- **Add friend from the details pane:** a compact relationship control sits just above the Mute/Block/Share footer — **Add friend** (stranger), **Requested + Cancel** (outgoing), **Accept + reject** (incoming). Friends and blocked render nothing here (Block/Unblock stays in the footer).
+- **Composer gates on not-friends, not just blocked:** the composer now shows a friendly inline notice whenever the participant isn't an accepted friend — *stranger* → "not friends … Add friend to start messaging" + **Add friend**; *pending-outgoing* → "request sent … once {name} accepts"; *pending-incoming* → "{name} sent you a friend request" + **Accept**; *blocked* → the existing notice (unchanged). Accepted → the normal composer (unchanged).
+- **Caches flip without a reload:** the existing friend mutations already invalidate friends/requests/search/**chats**, so acting from any surface refreshes the chat list (and thus the active chat). `SocketProvider` now also refreshes friends/search/**chats** on `friend:request` **and** `friend:accepted` (not just `friend:removed`), so when the other side accepts the UI flips "Requested" → normal composer live. With the dev bot the request auto-accepts in the POST response, so messaging unlocks immediately.
+- **Privacy rule preserved:** Add friend sends a **request** (recipient must accept) — strangers still can't message until accepted; only the dev bot auto-accepts.
+- **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (chunk-size warning only).
+
+### Dev environment notes (learned the hard way)
+- **Vite env:** root `.env` is loaded via `envDir` in `client/vite.config.ts` (same file as server).
+- **Google OAuth:** Client ID only (no secret needed for ID-token flow). Add Gmail as **Test user** in Google Cloud Console. Origins: `http://localhost:5173`.
+- **Phone OTP:** with `MSG91_AUTH_KEY` + `VITE_MSG91_WIDGET_ID` + `VITE_MSG91_WIDGET_TOKEN` set, real SMS via the MSG91 widget (server re-verifies the token). Without them, dev mode shows the code in the UI. MSG91 dashboard tips: **disable captcha** for localhost, and if testing hammers it, **unblock your IP** + raise throttle limits.
+- **OneDrive:** project lives in OneDrive; sync can cause flaky typecheck during heavy edits — wait for sync or use `C:\dev\linkr` if issues persist.
+- **Ports:** kill stray `node.exe` if `:5000` / `:5173` are in use (`taskkill /F /IM node.exe`).
+
+---
+
+## Sprint checklist (MVP Phase 1)
+
+| Sprint | Goal | Status |
+|--------|------|--------|
+| **0** | Monorepo, shared types, AppShell, themes, DB connect | ✅ |
+| **1** | Google login, JWT, onboarding (username + OTP + profile) | ✅ |
+| **2** | Search, friend requests, block, privacy enforcement | ✅ |
+| **3** | Real-time 1:1 chat, typing, receipts, presence | ✅ |
+| **4** | Message actions (reply/edit/delete/react), pin chats, dev test bot, UX polish | ✅ |
+| **4.5** | E2EE (libsodium) — **shipped as Phase 2** (text-only; bot stays plaintext by design) | ✅ |
+| **5** | Media messages (image + file), in-app notifications → **MVP complete** | ✅ |
+| **5.5** | UX & social polish: scroll lock, upload errors, block/unblock, bell actions, close chat, blue ticks, profile photo | ✅ |
+| **5.6** | Social actions (unfriend, per-user delete chat, expanded sidebar menu), composer emoji picker, Details Media/Files galleries | ✅ |
+| **5.7** | "Add friend" reachable from chat (sidebar ⋯ + details pane); composer gates on not-friends, not just blocked | ✅ |
+| **5.8** | Media preview before send (staging), click recipient profile → details, mobile details bottom sheet | ✅ |
+| **5.9** | Notification fix (suppress/auto-read message alerts for the chat you're viewing) + profile photo preview-then-Save flow | ✅ |
+| **5.10** | Unread/badge sync (no phantom unread on the active chat), avatar cache-bust (versioned URL → updates without hard refresh), dev-bot delivered/blue-read ticks | ✅ |
+
+### Post-MVP phases (named roadmap)
+- **Phase 2 — E2EE (text)** ✅ **Done** — libsodium sealed-box encryption for human↔human text; keys module live; bot stays plaintext by design. *Still open in this theme: E2EE media + multi-device key sync.*
+- **Phase 3 — Realtime calling** — voice + video (WebRTC), screen share, TURN/coturn; wire the disabled header call buttons.
+- **Phase 4 — Chat UX & account controls** — mute, archive, share, message forward, report user, privacy-settings UI (API exists), account deletion.
+- **Phase 5 — Notifications++** — web push (Service Worker + VAPID) for background alerts (generic content to preserve E2EE).
+- **Phase 6 — Groups & discovery** — group chats + admins, group calls, in-chat search; later stories / disappearing messages / channels / polls.
+- **Phase 7 — AI & mobile** — on-device/opt-in AI assistant, voice transcription, spam detection, React Native app.
+- **Phase 8 — Production & scale** — ✅ **real OTP provider (MSG91)** done; remaining: deploy (Vercel + Render/Railway + Atlas), Cloudinary, Redis for multi-instance sockets, HTTPS/WSS, monitoring, CI/CD.
+
+---
+
+## What's built — backend
+
+**Pattern everywhere:** `route → controller → service → model`, Zod validation at edges, `ApiError` + global `{ error, code }` handler.
+
+### Auth (`/api/auth`)
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/google` | Verify Google ID token, find/create user, issue JWTs |
+| POST | `/refresh` | Refresh access token (HttpOnly cookie) |
+| POST | `/logout` | Clear refresh cookie |
+| GET | `/me` | Current session user |
+| POST | `/otp/send` | Send phone OTP (dev flow: returns `devCode`) |
+| POST | `/otp/verify` | Verify dev-flow OTP for onboarding |
+| POST | `/otp/msg91-verify` | Verify a MSG91 widget access token server-side (re-checks with the Authkey, binds the trusted phone) |
+
+### Users (`/api/users`)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/username-available?username=` | Check @username availability |
+| GET | `/search?q=` | Search by username (PublicUser + friendship context) |
+| POST | `/onboarding` | Complete onboarding (requires verified phone) |
+| PATCH | `/me` | Update display name, bio, status |
+| PATCH | `/me/privacy` | Update privacy settings |
+| POST | `/me/avatar` | Upload a profile photo (multipart `file`; images ≤ 5 MB, same hardening as chat media) |
+| GET | `/avatar/:userId` | Authenticated stream of a locally-stored avatar (Cloudinary avatars served directly) |
+
+### Friends (`/api/friends`) — all require auth
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Accepted friends list |
+| GET | `/pending` | Incoming + outgoing requests |
+| POST | `/request` | Send friend request `{ recipientId }` |
+| POST | `/:friendshipId/accept` | Accept |
+| POST | `/:friendshipId/reject` | Reject |
+| DELETE | `/:friendshipId` | Cancel outgoing pending |
+| DELETE | `/friend/:userId` | Unfriend an accepted friend (deletes the row → strangers; emits `friend:removed`; does **not** block) |
+| POST | `/block/:userId` | Block user |
+| POST | `/unblock/:userId` | Remove a block you placed (blocker-only; deletes the row — no auto friendship) |
+
+### Chat (`/api/chat`) — all require auth + friendship for messaging
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | List 1:1 chats with last message + unread |
+| POST | `/` | Get or create chat `{ participantId }` |
+| GET | `/:chatId/messages` | Paginated history (`?before=&limit=50`) |
+| POST | `/:chatId/messages` | REST send (fallback; supports `replyTo`) |
+| PATCH | `/messages/:messageId` | Edit a message body (sender only) |
+| DELETE | `/messages/:messageId` | Delete `{ scope: "me" \| "everyone" }` |
+| POST | `/messages/:messageId/react` | Toggle an emoji reaction |
+| PATCH | `/:chatId/pin` | Pin/unpin chat for current user `{ pinned }` |
+| DELETE | `/:chatId` | Per-user delete (hide from your list via `hiddenFor`; the other member keeps history) |
+| POST | `/:chatId/media` | Upload an attachment (multipart `file` + optional `caption`) → creates a media message |
+| GET | `/media/:messageId` | Authenticated download for locally-stored media (re-checks chat membership) |
+
+### Notifications (`/api/notifications`) — all require auth
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Recent notifications (newest first, capped) |
+| GET | `/unread-count` | Unread notification count `{ count }` |
+| PATCH | `/read` | Mark all of the user's notifications read |
+| PATCH | `/:id/read` | Mark a single notification read (owner only) |
+
+### Other
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Liveness + mongo/redis status |
+| POST | `/api/keys` | Publish/rotate the caller's E2EE public key (Phase 2) |
+| GET | `/api/keys/:userId` | Fetch a user's public key — self or accepted friends only (Phase 2) |
+
+### Socket.IO (JWT on connect)
+| Event | Purpose |
+|-------|---------|
+| `message:send` | Send message (with ack) |
+| `message:new` | New message to both participants |
+| `message:delivered` | Delivery receipt |
+| `message:read` | Read receipt |
+| `message:edit` | Edited message broadcast to both participants |
+| `message:delete` | Delete-for-everyone broadcast (body cleared) |
+| `message:react` | Reaction change broadcast |
+| `user:typing` | Typing indicator |
+| `user:online` / `user:offline` | Presence to friends |
+| `friend:request` / `friend:accepted` / `friend:rejected` | Friend events (REST is primary; client now refreshes friends/search/**chats** on `friend:request` + `friend:accepted` so the chat's Add/Accept/Requested controls + composer gate flip live — Sprint 5.7) |
+| `friend:removed` | Unfriend broadcast to the other user (Sprint 5.6) — client refreshes friends/chats/search |
+| `notification:new` | New in-app notification to `user:<recipientId>` (Sprint 5; `friend_request` payloads now carry `friendshipId` for inline accept/reject — Sprint 5.5) |
+
+### Data models (MongoDB)
+- **User** — googleId, email, username (sparse unique), displayName, avatar, bio, status, onboarded, phoneEnc/phoneHash (encrypted, never sent to client), privacy, online/lastSeen.
+- **Friendship** — requester, recipient, status (pending/accepted/rejected/blocked).
+- **Chat** — type `1:1`, members, `pinnedBy` (per-user pins), `hiddenFor` (Sprint 5.6; per-user soft-delete — chat is hidden from these members' lists, re-appears on new activity), lastMessage.
+- **Message** — chatId, sender, type, content (plaintext until the future E2EE sprint), `mediaUrl`/`mediaName`/`mediaSize`/`mediaMime` (Sprint 5; `mediaUrl` stores a Cloudinary secure URL or an internal `local:<uuid>` ref), status, readBy, `replyTo`, `reactions`, `editedAt`, `deletedFor` (per-user), `deletedForEveryone`.
+- **Notification** (Sprint 5; `friendshipId?` added Sprint 5.5) — `user` (recipient, indexed), `type` (`friend_request` | `friend_accepted` | `message`), `actor` (ref User), `chatId?`, `friendshipId?` (set on `friend_request` so the bell can accept/reject inline), `messagePreview?` (short plaintext snippet), `read` (default false), `createdAt`.
+- **User (test bot)** — a single dev-only `@linkr_bot` row seeded at startup (skipped in production); auto-accepts requests and auto-replies.
+- **Otp** — phone hash, code hash, expiry, attempts.
+
+---
+
+## What's built — frontend
+
+### Routes
+| Path | Guard | Purpose |
+|------|-------|---------|
+| `/login` | Public | Google sign-in |
+| `/onboarding` | Auth | Username + phone + profile |
+| `/` | Auth + onboarded | Main AppShell (chats) |
+| `/profile` | Auth + onboarded | Edit display name, bio, status |
+
+### Main UI (AppShell)
+- **Header:** Linkr brand, **notification center** (bell + unread badge + dropdown), **dedicated Theme button** (palette popover), details toggle, **user menu** (Profile, Theme, Dark/Light, Sign out).
+- **Sidebar:** Your identity row (with **visible Logout** icon), search conversations, find friends, PINNED/RECENT chat list (media last-messages show as 📷 Photo / 📎 File), per-chat ··· menu (**Pin/Unpin, Add friend / Accept / Cancel request** (Sprint 5.7), Unfriend, Block/Unblock, Delete chat).
+- **Conversation:** Bubble grouping, reply/edit/delete/react actions on hover, reaction pills, reply preview, `(edited)`/deleted rendering, **inline media** (image thumbnails + file download chips), composer with a working **attach** button that **stages a preview** before sending (Sprint 5.8 — thumbnail / file chip + size, ✕ to discard, text box becomes the caption, Send uploads) and a lazy-loaded **emoji picker** (Sprint 5.6), typing indicator, private-chat badge, a clickable **header profile** (avatar + name → opens details, Sprint 5.8), and a **not-friends composer gate** (Sprint 5.7) that replaces the input with an Add friend / Accept / Requested notice whenever the participant isn't an accepted friend.
+- **Details pane:** Profile tab + wired **Media** (image thumbnail grid) / **Files** (download list) tabs (Sprint 5.6), friends/requests panel, an **Add friend / Accept / Requested** relationship control above the footer (Sprint 5.7), working **Block/Unblock** footer button (Mute/Share still stubs). The content is shared (`DetailsContent`) between the desktop aside and a **mobile slide-up sheet** (Sprint 5.8).
+
+### Client features (`client/src/features/`)
+- `auth/` — LoginPage, SessionProvider, logout
+- `onboarding/` — 3-step wizard (username → **phone OTP via MSG91 widget or dev fallback** → profile with an **Add a photo** upload)
+- `profile/` — ProfilePage (**Change photo** now stages a local preview and commits on **Save changes**, Sprint 5.9) + PATCH `/me` + POST `/me/avatar`
+- `friends/` — search, requests, FriendsPanel, Message button, **block + unblock + unfriend** mutations
+- `chat/` — SocketProvider, useChats (+ pin/**delete**), useMessages (send/edit/delete/react/**upload media**), MessageMedia (image/file rendering), **EmojiPicker** (lazy), reply/edit/delete/react UI
+- `notifications/` — useNotifications (list/unread/mark-read) + NotificationCenter (header bell)
+- `settings/` — ThemePanel (dedicated header button) + ThemeSwitcher (user menu)
+
+### Theme system
+Six themes × light/dark via CSS variables: **Iris** (default), Emerald, Ocean, Sunset, Rose, Midnight.  
+Switch via the dedicated **Theme button (palette icon) in the header**, or the user menu Theme/Light-Dark options.
+
+---
+
+## Environment setup
+
+Copy `.env.example` → `.env` at repo root. Minimum for full app:
+
+```env
+PORT=5000
+MONGODB_URI=mongodb+srv://.../Linkr?...
+JWT_ACCESS_SECRET=<random-32+-chars>
+JWT_REFRESH_SECRET=<different-random>
+GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+VITE_GOOGLE_CLIENT_ID=<same-as-GOOGLE_CLIENT_ID>
+VITE_API_URL=http://localhost:5000
+CLIENT_URL=http://localhost:5173
+```
+
+Optional (graceful without):
+- `REDIS_URL` — multi-instance Socket.IO adapter + richer presence
+- `GOOGLE_CLIENT_SECRET` — not required for ID-token flow
+- `MSG91_AUTH_KEY` — **server-only**; enables real SMS OTP by re-verifying the MSG91 widget access token. Pair with the two client vars below. Without all three, onboarding uses the dev OTP (code shown in the UI).
+- `VITE_MSG91_WIDGET_ID` — MSG91 OTP widget id (public, client)
+- `VITE_MSG91_WIDGET_TOKEN` — MSG91 OTP widget token (public, client)
+- `OTP_PROVIDER_KEY` — **deprecated** placeholder (superseded by MSG91; kept for compatibility)
+- `PHONE_ENC_KEY` — dedicated phone encryption key
+- `CLOUDINARY_URL` — Sprint 5 media
+
+**Google Cloud Console:**
+1. OAuth consent screen → **Test users** → add your Gmail
+2. Credentials → Web client → **Authorized JavaScript origins:** `http://localhost:5173`
+
+---
+
+## How to run
+
+```powershell
+cd "C:\Users\jsindhu\OneDrive - Cisco\Desktop\LINKr"
+pnpm install
+pnpm dev
+```
+
+- Client: http://localhost:5173  
+- Server: http://localhost:5000  
+- Health: http://localhost:5000/health  
+
+```powershell
+pnpm typecheck    # all packages
+pnpm build        # production build
+```
+
+---
+
+## How to test (two accounts)
+
+1. **Account A:** Sign in with Google → complete onboarding → note `@username`.
+2. **Account B** (incognito, different Gmail): Sign in → onboarding → search `@accountA` → **Add** friend.
+3. **Account A:** Details pane → accept request.
+4. Either account: **Find friends** → **Message** → send messages in real time.
+5. **Message actions:** hover a bubble → react (emoji popover), reply (quote bar), or ··· → copy / edit (your own) / delete for me / delete for everyone (your own).
+6. **Pin chats:** sidebar row → ··· → **Pin chat** (jumps to the PINNED section; pin icon shown).
+7. **Theme:** header **palette button** → pick an accent + Light/Dark.
+8. **Profile:** User menu → Profile → edit display name / bio / status.
+9. **Logout:** the **Logout icon** in the sidebar identity row (or User menu → Sign out).
+
+### How to test Phase 2 (end-to-end encryption, text)
+> Needs **two real human accounts** (two browsers / profiles, or one normal + one incognito), since the dev bot is intentionally plaintext.
+
+1. **Become friends** on accounts A and B and open the chat on both.
+2. **Badge:** the conversation header shows a green **"End-to-end encrypted"** shield (hover for the tooltip) on both sides — because each peer has published a key.
+3. **Send text A → B:** it appears as normal plaintext in both UIs. **It's ciphertext on the wire/DB** — verify in DevTools → Network → the `message:send` socket frame (or the Mongo `messages.content`) is a JSON envelope, **not** your words.
+4. **Edit / reply / sidebar preview** all show the decrypted text on both sides; the sidebar last-message preview decrypts too (no "🔒"/"Decrypting…" sticking).
+5. **Notifications stay generic:** B's bell shows **"🔒 New message"** (the server can't read E2EE text), while the chat itself shows the real decrypted message.
+6. **Bot is plaintext (by design):** open the **Linkr Bot** chat → the badge is the **"Private chat / in transit"** lock (not the green shield), and chat works exactly as before. This is the "no-E2EE-with-bot" mode.
+7. **Lost-key behavior (optional):** clear site data / open a fresh browser for account A → it generates a new key; **old** messages show **"🔒 Can't decrypt on this device"** while **new** messages work (expected single-device MVP tradeoff).
+
+### How to test Phase 8 kickoff (MSG91 OTP + onboarding photo + contrast)
+> Real SMS needs `MSG91_AUTH_KEY` + `VITE_MSG91_WIDGET_ID` + `VITE_MSG91_WIDGET_TOKEN` in `.env` and a restart (Vite reads env at boot). Without them you get the dev OTP.
+
+1. **Real OTP:** sign in with a fresh Google account → onboarding → enter a phone in **E.164** (`+9193…`) → **Send code** → you receive a real SMS. Enter it → **Verify** → "Phone verified", and **Continue** enables. (MSG91 dashboard: disable captcha for localhost; unblock your IP / raise throttle if you've been testing a lot.)
+2. **Dev fallback:** unset the three vars → the same step shows the **dev code** in the UI and verifies locally (no SMS).
+3. **Add a photo:** on the **Profile** step, click the **camera / Add a photo** → pick a PNG/JPG/GIF/WEBP (≤ 5 MB) → a preview shows (nothing uploads yet) → **Discard** reverts. Click **Finish** → the photo uploads then onboarding completes, and the new avatar shows in the header/sidebar. With no pick, it defaults to the Google photo.
+4. **Input contrast:** trigger browser autofill on the onboarding phone / profile fields → the text stays **bright on the dark surface** (no white box with faint text). Hard-refresh after pulling the CSS change.
+5. **Re-test a number:** `pnpm --filter @linkr/server delete-user you@example.com` fully removes the account so the phone/username free up for another run.
+
+### How to test the bot (no second account needed)
+> Dev only — requires `MONGODB_URI` set and `NODE_ENV` ≠ `production` (and `ENABLE_TEST_BOT` ≠ `false`).
+
+1. Open **Find friends** (sidebar) and search `linkr_bot`.
+2. Send a **friend request** — the bot **auto-accepts** instantly.
+3. Open the chat with **Linkr Bot** and send a message.
+4. The bot shows a typing indicator and **auto-replies** in real time — exercise reply / edit / delete / react / pin against it.
+
+### How to test Sprint 5 (media + notifications)
+> Works solo against the bot, or with a real friend. Local-disk media needs no Cloudinary creds.
+
+1. **Send an image:** open a chat (e.g. with **Linkr Bot**) → click the **paperclip** → pick a PNG/JPG/GIF/WEBP (≤ 10 MB). It uploads (spinner), then renders as an inline thumbnail. Click it to open full size in a new tab.
+2. **Send a file:** paperclip → pick a PDF / txt / doc(x) / xls(x) / ppt(x) / zip (≤ 25 MB). It renders as a download chip (name + size); click to download.
+3. **Caption:** type some text first, then attach — the text is sent as the caption alongside the attachment.
+4. **Notifications:** with a **second account** (or watch the bell after the bot replies/accepts), a red **unread badge** appears on the header bell. Click it to open the dropdown; clicking a **message** notification opens that chat, a **friend** notification opens the friends panel. The badge clears (mark-all-read) when the dropdown opens, and updates live via `notification:new`.
+5. **Storage mode:** without `CLOUDINARY_URL`, files are stored in `server/uploads/` (git-ignored) and streamed through the authenticated `GET /api/chat/media/:id` route. Set `CLOUDINARY_URL` to push uploads to Cloudinary instead (the client then loads the public secure URL directly).
+
+### How to test Sprint 5.5 (UX & social polish)
+1. **Page scroll lock:** resize the window short — the page itself never scrolls; only the chat list, message list, details body and the bell dropdown scroll. The mobile list↔conversation slide still works.
+2. **Upload error messages:** in a chat, attach an unsupported file (e.g. `.exe`) → you get a specific "not supported / accepted types …" message; attach an oversized file → a "too large (max N MB)" message; rename a `.txt` to `.png` and attach → "contents don't match its extension." (The picker's `accept` already filters most bad picks.)
+3. **Block → Unblock (friends):** Find friends → search a user → **Block** (⊘). Search them again → the row now shows **Unblock** → click it; they're back to a normal "Add" state (no auto-friendship).
+4. **Block / Unblock (in chat):** open a chat → details pane → footer **Block** → the composer shows a "You blocked … Unblock to message" notice → footer button becomes **Unblock** → click to restore messaging.
+5. **Friend-request actions from the bell:** with a second account (or the bot), send yourself a friend request → open the **bell** → the request row shows inline **Accept / Reject / Block**; act on it and the row shows the resolution, with friends + notifications refreshing.
+6. **Close chat on desktop:** open a chat → click the **✕** at the right of the conversation header → returns to "Select a conversation". (Mobile back arrow unchanged.)
+7. **Blue ticks + presence:** send a message and have it read → the receipt turns **blue** (✓✓). The header reads **Online** / **Offline** for the participant. *(Since Sprint 5.10 the dev bot also simulates delivered/read in dev, so you'll see ✓✓ → blue ✓✓ against the bot too — see "How to test Sprint 5.10".)*
+8. **Profile photo:** User menu → Profile → **Change photo** (camera button on the avatar) → pick a PNG/JPG/GIF/WEBP (≤ 5 MB). It uploads (spinner) and the new avatar appears immediately in the header, sidebar and details pane. Bad type/size shows a specific error.
+
+### How to test Sprint 5.6 (social actions, emoji & galleries)
+1. **Unfriend (FriendActions):** open **Find friends** / the friends panel → for an accepted friend, click the **Unfriend** (person-minus) icon next to **Message** → confirm. They drop out of your friends list and the chat composer is gated until you're friends again.
+2. **Unfriend (sidebar menu + live):** with a **second account** (or the bot), open a chat → its sidebar **⋯ → Unfriend** → confirm. On the **other** account, the friend/chat state refreshes **live** (via `friend:removed`) without a reload.
+3. **Composer emoji:** open a chat → click the **Smile** button left of the message box → pick emoji; they insert **at the caret** and the box keeps focus. Click outside or press **Escape** to close. Enter still sends; Shift+Enter still makes a newline.
+4. **Sidebar ⋯ menu:** hover a chat row → **⋯** → exercise **Pin/Unpin**, **Unfriend** (when friends), **Block / Unblock**, and **Delete chat** (red, last; confirm).
+5. **Delete chat (per-user):** **⋯ → Delete chat** → it leaves **your** list only. The other person still sees the conversation and full history; if they send a new message (or you re-open via **Message**), it comes back for you.
+6. **Media / Files tabs:** in a chat that has **sent images and files**, open the details pane → **Media** shows a thumbnail grid (click a thumb to open full size) and **Files** shows a download list (name + size). Chats with none show the empty state.
+
+### How to test Sprint 5.7 ("Add friend" reachability + not-friends composer gate)
+1. **Become strangers from a chat:** open a chat with a friend → **⋯ → Unfriend** (or details-pane footer **Block** then **Unblock**) → confirm. You're now strangers but the chat row + history remain.
+2. **Add friend from the ⋯ menu:** on that same chat row → **⋯** now shows **Add friend** → click it; a request is sent (the row's relationship flips to a pending state).
+3. **Add friend from the details pane:** open the chat → the details pane shows an **Add friend** button just above the Mute/Block/Share footer (and **Requested + Cancel** once a request is out).
+4. **Composer gate:** the message box is replaced by a friendly notice — *stranger* → "You're not friends … Add friend to start messaging" with an **Add friend** button; *after sending* → "Friend request sent … once {name} accepts"; *if they requested you* → "{name} sent you a friend request" with an **Accept** button. Accepted → the normal composer returns.
+5. **Bot auto-accept unlocks messaging:** do this against **Linkr Bot** — click **Add friend** anywhere (⋯ / details / composer) and the bot **auto-accepts** instantly; the composer flips back to the normal input and you can message again, no reload.
+6. **Live flip with a real friend:** with a **second account**, Add from one side → the other side's bell shows the request (Accept there) → back on the first account the chat list/composer refreshes **live** (via `friend:accepted`) from "Requested" to a normal composer without a manual reload.
+
+### How to test Sprint 5.9 (notification + avatar-preview fixes)
+1. **No nag while viewing a chat:** open a chat and keep it active, then have the other side (or **Linkr Bot**) send a message **in that chat**. The message arrives in the thread but the **bell unread badge does not increment**; the bell list shows the row as already-read. Reload — the badge stays correct (the server row was auto-marked read).
+2. **Other chats still notify:** with chat A active, receive a message in chat **B** → the badge **does** increment as before; clicking it opens chat B. Friend-request / friend-accepted notifications are unchanged (still increment + show inline Accept/Reject).
+3. **Mark-all-read still works:** open the bell → it clears the badge (mark-all-read) and stays cleared after a refetch.
+4. **Avatar preview → Save:** User menu → Profile → **Change photo** → pick a PNG/JPG/GIF/WEBP (≤ 5 MB). The avatar shows a **local preview immediately** but **nothing uploads yet** ("New photo selected — Save changes to apply."). Click **Discard (✕)** to revert to the current photo.
+5. **Commit on Save:** with a photo staged (optionally also edit display name / bio / status), click **Save changes** → spinner → "Profile saved." The new photo + text persist together (visible in header / sidebar / details immediately). 
+6. **Navigate-away safety:** pick a photo but **don't** Save, then leave the page → your avatar is **unchanged** (no auto-upload). Bad type/size still shows a specific error.
+
+### How to test Sprint 5.11 (sidebar user-row cleanup)
+1. **No more duplicate Settings/Logout:** look at the top **user row** of the left sidebar — it now shows your avatar + name and **two icons only**: **Find friends** (person-plus) and **New chat** (pen). There is **no Settings cog and no Logout** icon in that row anymore.
+2. **Logout/Profile still reachable:** click your **avatar in the header** (top-right) → the user menu still has **Profile / Settings / Logout**, all working as before. Logging out still returns you to the login screen.
+3. **Both sidebar icons open friend search:** click **Find friends** (person-plus) or **New chat** (pen) → the same **Find friends** modal opens; search a user and start/continue a chat.
+
+### How to test Sprint 5.10 (unread/badge sync, avatar cache-bust, dev-bot ticks)
+1. **No phantom unread on the active chat:** open a chat and keep it focused, then have the other side (or **Linkr Bot**) send a message **in that chat**. The message appears in the thread but the **sidebar row never shows a "1"** (no flash, no stick). The bell badge also stays put (Sprint 5.9).
+2. **Other chats still count:** with chat A active, receive a message in chat **B** → B's sidebar row shows **1** as before; open B → its badge clears immediately and stays cleared after a refetch.
+3. **Open clears a stale badge:** if a chat already shows an unread "1", clicking it clears the badge right away (and it doesn't pop back).
+4. **Avatar updates without a refresh:** User menu → Profile → **Change photo** → pick a new image → **Save changes**. The new photo appears **immediately** in the header / sidebar / details — **no hard refresh** needed (the resolved avatar URL is now versioned per upload).
+5. **Dev-bot ticks (solo):** open the chat with **Linkr Bot** and send a message. Your message advances **✓ (sent) → ✓✓ grey (delivered) → blue ✓✓ (read)** before the bot's typing + auto-reply arrives — the bot now simulates delivered/read in dev (real users already drive their own receipts; this is dev-only and off in production).
+
+### How to test Sprint 5.8 (media preview, profile-opens-details, mobile details sheet)
+1. **Stage an image → preview → caption → Send:** open a chat (e.g. **Linkr Bot**) → click the **paperclip** → pick a PNG/JPG/GIF/WEBP. It does **not** send yet — a **thumbnail preview** appears above the composer with a ✕. Optionally type a **caption** (placeholder reads "Add a caption…"), then press **Send** (button or Enter) → it uploads (spinner) and the image arrives with your caption. The staged preview + caption clear on success.
+2. **Stage a file:** paperclip → pick a PDF / doc / zip → a **file chip** (icon + name + size) appears; Send uploads it. Bad type/size shows the same specific error as before (the size pre-check runs at staging **and** on send).
+3. **Remove a staged file:** after staging, click the **✕** on the preview → the file is discarded (no upload) and the box goes back to a normal text message.
+4. **Text still works:** with **nothing** staged, type and Send a plain text message exactly as before (Enter sends, Shift+Enter = newline). You can't send an empty message with no file and no text.
+5. **Click profile → details (desktop):** click the **avatar + name** in the conversation header → the details pane opens (Profile / Media / Files + footer). The ✕ close and (disabled) call buttons still work.
+6. **Mobile details sheet:** narrow the window (below `lg`) → open a chat → tap the **avatar + name** in the header → a **slide-up sheet** rises over the conversation with the same details content. Dismiss it via the **backdrop**, the **✕**, or **Escape**. It scrolls internally (the page never scrolls) and is **not** open by default — only after you tap. A friend notification in the **bell** also opens it (when a chat is active).
+
+---
+
+## Known gaps & stubs (not bugs)
+
+| Item | Notes |
+|------|--------|
+| **E2EE** | ✅ **Text is end-to-end encrypted** (Phase 2) — libsodium sealed boxes, server stores ciphertext only, dynamic "End-to-end encrypted" badge. **Media is still in-transit only** (text-only scope); the **dev bot stays plaintext by design** (no published key → automatic fallback). **Single-device** only — new device / cleared storage = fresh key, old messages unreadable (accepted MVP tradeoff). Multi-device sync + E2EE media are future work |
+| **Calls** | Still disabled stubs in the header — **composer emoji picker is now wired** (Sprint 5.6) |
+| **Details pane Mute / Share** | Still stubs — **Block/Unblock is wired**; **Unfriend** lives in FriendActions + the sidebar ⋯ menu; **Add friend / Accept / Requested** now reachable from the details pane (Sprint 5.7) |
+| **Add friend after unblock/unfriend** | ✅ **Closed** (Sprint 5.7) — reachable from the chat's ⋯ menu, the details pane, and the composer; the composer now gates on **not-friends**, not only blocked |
+| **Details Media / Files tabs** | ✅ **Wired** (Sprint 5.6) — thumbnail grid of images + a download list of files, derived from the active chat's messages |
+| **Mobile details bottom sheet** | ✅ **Closed** (Sprint 5.8) — `MobileDetailsSheet` (`lg:hidden` slide-up, backdrop/✕/Escape) shares `DetailsContent` with the desktop aside |
+| **Media preview before send** | ✅ **Closed** (Sprint 5.8) — picking a file stages a preview (thumbnail / file chip + size); the text box is the caption; Send uploads it |
+| **Message notification while viewing that chat** | ✅ **Closed** (Sprint 5.9) — a `message` notification for the chat you're actively viewing is suppressed (no badge bump) and auto-marked read on the server, so `unread-count` + list stay consistent; other chats/types unchanged |
+| **Phantom sidebar unread on the active chat** | ✅ **Closed** (Sprint 5.10) — a message in the chat you're viewing patches the row to `unreadCount: 0` instead of invalidating (no flash/stick); opening a chat optimistically clears its badge. Other chats still count normally |
+| **Avatar needs a hard refresh after upload** | ✅ **Closed** (Sprint 5.10) — `resolveAvatarUrl` appends a `?v=` token derived from the per-upload `local:<uuid>` ref, so the URL changes and the client refetches without a reload |
+| **Dev bot never showed delivered/blue ticks** | ✅ **Closed** (Sprint 5.10, dev-only) — the bot now simulates delivered → read receipts so you can see ✓✓ → blue ✓✓ when testing solo; production/human↔human unchanged |
+| **Duplicate Settings/Logout in the sidebar row** | ✅ **Closed** (Sprint 5.11) — removed from the sidebar user row (they still live in the header user menu); replaced with **Find friends** (`UserPlus`) + **New chat** (`PenSquare`), both opening friend search |
+| **Profile photo preview before save** | ✅ **Closed** (Sprint 5.9) — picking a photo stages a local preview (no auto-upload); **Save changes** uploads the avatar then patches the profile so the store ends correct; Discard reverts |
+| **Click profile → details** | ✅ **Closed** (Sprint 5.8) — the header avatar + name is a button that opens the details aside (desktop) / sheet (mobile) |
+| **Redis** | Optional; single-instance sockets work without it |
+| **Account deletion** | Blueprint §4 — not implemented yet |
+| **keys module** | ✅ **Live** (Phase 2) — `POST /api/keys` publishes a public key, `GET /api/keys/:userId` returns it (self/friends only) |
+
+---
+
+## What's next
+
+### Phase 2 — E2EE (text) ✅ Done
+- ✅ libsodium keypairs (private key in IndexedDB, public key on server via `/api/keys`)
+- ✅ Encrypt/decrypt text client-side (sealed box per member); server stores ciphertext only
+- ✅ Bot kept dev-only & plaintext **by design** (no key → automatic fallback) instead of retired
+- ✅ Badge is now a real, dynamic “End-to-end encrypted” when the peer has a key
+- ⏭️ Follow-ups: **E2EE media**, **multi-device key sync**, optional key-fingerprint verification UI
+
+### Sprint 5 — Media + notifications → MVP complete ✅
+- ✅ Media messages (images + files) → Cloudinary **or** local-disk dev fallback, encrypted in transit
+- ✅ In-app notifications (friend request / accepted / message) with live `notification:new` + a header notification center
+- Still open for later: voice/video media, web **push** notifications (background), archive/mute full wiring, per-chat Media/Files galleries
+
+---
+
+## Repo layout (quick reference)
+
+```
+LINKr/
+├── projectlinkr.md    # Original blueprint (vision + full spec)
+├── project.md         # This file — progress & status
+├── README.md          # Setup quick start
+├── .env.example       # Env template (secrets in .env only)
+├── package.json       # Root scripts: pnpm dev, typecheck, build
+├── shared/            # @linkr/shared — types, schemas, constants
+├── server/            # @linkr/server — Express + Socket.IO + Mongoose
+└── client/            # @linkr/client — React + Vite + Tailwind
+```
+
+---
+
+## Commands cheat sheet
+
+| Task | Command |
+|------|---------|
+| Install deps | `pnpm install` |
+| Dev (client + server) | `pnpm dev` |
+| Typecheck | `pnpm typecheck` |
+| Build client | `pnpm --filter @linkr/client build` |
+| Free stuck ports | `taskkill /F /IM node.exe` |
+
+---
+
+## Continuing in a new Cursor chat
+
+If context fills up, start a fresh chat with:
+
+> Continue Linkr. Read `project.md` and `projectlinkr.md`. We finished Sprints 0–4 (message actions, pin chats, dev bot, UX). E2EE is deferred to its own sprint. Start Sprint 5 (encrypted media + notifications).
+
+Pin or keep `projectlinkr.md` + this `project.md` in the repo root so any new session has full context.

@@ -1,0 +1,128 @@
+/*
+ * Linkr theme system (blueprint §6).
+ * - Neutral tokens come from light (default) vs the `.dark` class on <html>.
+ * - Each named theme (data-theme="...") only swaps the brand/accent tokens.
+ * Result: switching theme OR mode just swaps a CSS variable set — components never change.
+ *
+ * Design tokens (added in the polish pass) are ALSO driven by these variables so depth,
+ * gradients and glows automatically re-tint with every theme/mode:
+ *   --gradient-primary : the brand gradient (#7C5CFC → #9D7BFF for Iris) used on the logo,
+ *                        active states, avatars and the send button.
+ *   --shadow-soft      : default elevation for cards/bubbles (lighter in light, deeper in dark).
+ *   --shadow-elevated  : stronger elevation for floating surfaces.
+ *   --shadow-glow      : accent-tinted glow derived from --color-primary (color-mix).
+ *   --color-online     : semantic presence dot (not part of the brand palette).
+ */
+
+/* ---- Neutral tokens: LIGHT (default) ---- */
+:root {
+  --color-bg: #f7f7fb;
+  --color-surface: #ffffff;
+  --color-surface-2: #f1f1f6;
+  --color-border: #e5e7eb;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+
+  /* Brand defaults to Iris until a data-theme is applied. */
+  --color-primary: #7c5cfc;
+  --color-primary-hover: #6b4ae8;
+  --color-primary-foreground: #ffffff;
+  --color-ring: #7c5cfc;
+
+  /* Brand gradient (Iris by default) — blueprint §1. */
+  --gradient-primary: linear-gradient(135deg, #7c5cfc 0%, #9d7bff 100%);
+
+  /* Semantic, non-brand status colour. */
+  --color-online: #22c55e;
+
+  /* Elevation tokens (light). */
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 16px rgba(16, 24, 40, 0.06);
+  --shadow-elevated: 0 4px 12px rgba(16, 24, 40, 0.08), 0 16px 40px rgba(16, 24, 40, 0.1);
+  /* Accent glow follows whichever brand colour is active. */
+  --shadow-glow: 0 8px 24px -6px color-mix(in srgb, var(--color-primary) 45%, transparent);
+
+  /* Motion & spacing design tokens */
+  --duration-instant: 100ms;
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 400ms;
+  --space-chat-gap: 0.75rem;
+  --space-bubble-gap: 0.125rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+}
+
+/* ---- Neutral tokens: DARK ---- */
+.dark {
+  --color-bg: #0b0b12;
+  --color-surface: #15151f;
+  --color-surface-2: #1e1e2a;
+  --color-border: #2a2a38;
+  --color-text: #f3f4f6;
+  --color-text-muted: #9ca3af;
+
+  /* Deeper, softer shadows read better on dark surfaces. */
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.45), 0 18px 48px rgba(0, 0, 0, 0.55);
+  --shadow-glow: 0 8px 28px -6px color-mix(in srgb, var(--color-primary) 55%, transparent);
+}
+
+/* ---- Brand/accent tokens per theme (apply in both light + dark) ---- */
+[data-theme="iris"] {
+  --color-primary: #7c5cfc;
+  --color-primary-hover: #6b4ae8;
+  --color-primary-foreground: #ffffff;
+  --color-ring: #7c5cfc;
+  --gradient-primary: linear-gradient(135deg, #7c5cfc 0%, #9d7bff 100%);
+}
+
+[data-theme="emerald"] {
+  --color-primary: #10b981;
+  --color-primary-hover: #0e9f6e;
+  --color-primary-foreground: #ffffff;
+  --color-ring: #10b981;
+  --gradient-primary: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+}
+
+[data-theme="ocean"] {
+  --color-primary: #0ea5e9;
+  --color-primary-hover: #0b8fcc;
+  --color-primary-foreground: #ffffff;
+  --color-ring: #0ea5e9;
+  --gradient-primary: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
+}
+
+[data-theme="sunset"] {
+  --color-primary: #f97316;
+  --color-primary-hover: #e2620c;
+  --color-primary-foreground: #ffffff;
+  --color-ring: #f97316;
+  --gradient-primary: linear-gradient(135deg, #f97316 0%, #fb923c 100%);
+}
+
+[data-theme="rose"] {
+  --color-primary: #f43f5e;
+  --color-primary-hover: #e11d48;
+  --color-primary-foreground: #ffffff;
+  --color-ring: #f43f5e;
+  --gradient-primary: linear-gradient(135deg, #f43f5e 0%, #fb7185 100%);
+}
+
+[data-theme="midnight"] {
+  --color-primary: #6366f1;
+  --color-primary-hover: #4f52e0;
+  --color-primary-foreground: #ffffff;
+  --color-ring: #6366f1;
+  --gradient-primary: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+}
+
+/* Midnight leans into a sleek near-black even in dark mode (blueprint §6). */
+[data-theme="midnight"].dark {
+  --color-bg: #07070d;
+  --color-surface: #101018;
+  --color-surface-2: #181826;
+  --color-border: #24243a;
+}

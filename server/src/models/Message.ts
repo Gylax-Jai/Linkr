@@ -1,0 +1,44 @@
+import { Schema, model, Types, type InferSchemaType } from "mongoose";
+import { MESSAGE_TYPES, MESSAGE_STATUSES } from "@linkr/shared";
+
+/**
+ * Message model (blueprint §12). `content` holds ciphertext only — the server never
+ * stores readable message bodies (E2EE, blueprint §9).
+ */
+const messageSchema = new Schema(
+  {
+    chatId: { type: Types.ObjectId, ref: "Chat", required: true, index: true },
+    sender: { type: Types.ObjectId, ref: "User", required: true },
+    type: { type: String, enum: MESSAGE_TYPES, default: "text" },
+    content: { type: String },
+    /**
+     * True when `content` is an end-to-end-encrypted envelope (Phase 2, blueprint §9). The server
+     * stores it verbatim and never reads it; only chat members can decrypt client-side.
+     */
+    encrypted: { type: Boolean, default: false },
+    mediaUrl: { type: String },
+    /** Sanitized original filename — display metadata only, never used for storage. */
+    mediaName: { type: String },
+    /** Attachment size in bytes. */
+    mediaSize: { type: Number },
+    /** Server-validated MIME type of the attachment. */
+    mediaMime: { type: String },
+    replyTo: { type: Types.ObjectId, ref: "Message" },
+    reactions: [
+      {
+        user: { type: Types.ObjectId, ref: "User", required: true },
+        emoji: { type: String, required: true },
+      },
+    ],
+    pinned: { type: Boolean, default: false },
+    deletedFor: [{ type: Types.ObjectId, ref: "User" }],
+    deletedForEveryone: { type: Boolean, default: false },
+    status: { type: String, enum: MESSAGE_STATUSES, default: "sent" },
+    readBy: [{ type: Types.ObjectId, ref: "User" }],
+    editedAt: { type: Date },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+
+export type MessageDoc = InferSchemaType<typeof messageSchema>;
+export const MessageModel = model("Message", messageSchema);

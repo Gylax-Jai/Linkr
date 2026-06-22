@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment / secrets (NEVER commit real env files)
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Caches
+.cache/
+.vite/
+coverage/
+
+# Local media uploads (Sprint 5 dev fallback when Cloudinary is not configured)
+server/uploads/
+.cursor/
+*.local
