@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { CallMedia, PublicUser } from "@linkr/shared";
+import type { AudioRouteKind } from "@/features/calls/audioRoute";
 
 /**
  * Call state machine (Phase 3). One active call at a time. The CallProvider drives transitions
@@ -32,8 +33,10 @@ interface CallState {
   /** The other party's public profile (for the call UI). */
   peer: PublicUser | null;
   muted: boolean;
-  /** Speaker (loudspeaker) routing toggle — applied to the remote audio sink where supported. */
-  speakerOn: boolean;
+  /** The current call-audio output route (bluetooth/headset/speaker/earpiece/default). */
+  audioRoute: AudioRouteKind;
+  /** Routes available to cycle through on this device (drives the audio button + label). */
+  availableRoutes: AudioRouteKind[];
   /** Full-screen vs minimized bar. Minimizing keeps the call alive in the background. */
   uiMode: CallUiMode;
   /**
@@ -55,8 +58,8 @@ interface CallState {
   setRinging: (ringing: boolean) => void;
   toggleMute: () => void;
   setMuted: (muted: boolean) => void;
-  toggleSpeaker: () => void;
-  setSpeaker: (on: boolean) => void;
+  setAudioRoute: (route: AudioRouteKind) => void;
+  setAvailableRoutes: (routes: AudioRouteKind[]) => void;
   minimize: () => void;
   expand: () => void;
   endCall: (reason: CallEndReason) => void;
@@ -71,8 +74,11 @@ const initial = {
   direction: null,
   peer: null,
   muted: false,
-  speakerOn: false,
-  uiMode: "expanded" as CallUiMode,
+  audioRoute: "default" as AudioRouteKind,
+  availableRoutes: ["default"] as AudioRouteKind[],
+  // Default to the minimized WhatsApp-style bar so the call lives in the background; the user can
+  // expand to the full-screen surface anytime.
+  uiMode: "minimized" as CallUiMode,
   ringing: false,
   connectedAt: null,
   connection: "new" as RTCPeerConnectionState,
@@ -98,8 +104,8 @@ export const useCallStore = create<CallState>((set) => ({
   toggleMute: () => set((s) => ({ muted: !s.muted })),
   setMuted: (muted) => set({ muted }),
 
-  toggleSpeaker: () => set((s) => ({ speakerOn: !s.speakerOn })),
-  setSpeaker: (speakerOn) => set({ speakerOn }),
+  setAudioRoute: (audioRoute) => set({ audioRoute }),
+  setAvailableRoutes: (availableRoutes) => set({ availableRoutes }),
 
   minimize: () => set({ uiMode: "minimized" }),
   expand: () => set({ uiMode: "expanded" }),

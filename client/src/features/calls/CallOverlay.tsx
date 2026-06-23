@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Mic, MicOff, PhoneOff, Volume2, VolumeX } from "lucide-react";
+import { Bluetooth, ChevronDown, Headphones, Mic, MicOff, Phone, PhoneOff, Speaker, Volume2 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useCallStore } from "@/lib/store";
 import type { CallEndReason } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { routeLabel, type AudioRouteKind } from "./audioRoute";
 import { useCallActions } from "./CallProvider";
+
+const ROUTE_ICON: Record<AudioRouteKind, LucideIcon> = {
+  bluetooth: Bluetooth,
+  headset: Headphones,
+  speaker: Speaker,
+  earpiece: Phone,
+  default: Volume2,
+};
 
 const END_LABELS: Record<CallEndReason, string> = {
   hangup: "Call ended",
@@ -56,10 +66,11 @@ export function CallOverlay() {
   const uiMode = useCallStore((s) => s.uiMode);
   const peer = useCallStore((s) => s.peer);
   const muted = useCallStore((s) => s.muted);
-  const speakerOn = useCallStore((s) => s.speakerOn);
+  const audioRoute = useCallStore((s) => s.audioRoute);
+  const availableRoutes = useCallStore((s) => s.availableRoutes);
   const connectedAt = useCallStore((s) => s.connectedAt);
   const connection = useCallStore((s) => s.connection);
-  const { hangUp, toggleMute, toggleSpeaker, minimize } = useCallActions();
+  const { hangUp, toggleMute, cycleAudioRoute, minimize } = useCallActions();
   const statusText = useCallStatusText();
 
   // The incoming modal owns "incoming"; this overlay covers the rest — but only when expanded.
@@ -68,6 +79,8 @@ export function CallOverlay() {
 
   const name = peer.displayName || peer.username || "Unknown";
   const ringingPhase = phase === "outgoing" || phase === "connecting";
+  const RouteIcon = ROUTE_ICON[audioRoute];
+  const canSwitchRoute = availableRoutes.length > 1;
 
   const dotClass =
     connection === "connected"
@@ -130,15 +143,19 @@ export function CallOverlay() {
           {phase !== "ended" ? (
             <button
               type="button"
-              onClick={toggleSpeaker}
-              aria-label={speakerOn ? "Speaker off" : "Speaker on"}
-              aria-pressed={speakerOn}
+              onClick={cycleAudioRoute}
+              disabled={!canSwitchRoute}
+              aria-label={`Audio output: ${routeLabel(audioRoute)}`}
+              title={routeLabel(audioRoute)}
               className={cn(
-                "grid h-14 w-14 place-items-center rounded-full shadow-soft transition-transform hover:scale-105 active:scale-95",
-                speakerOn ? "bg-primary text-primary-foreground" : "bg-surface-2 text-text",
+                "relative grid h-14 w-14 place-items-center rounded-full bg-surface-2 text-text shadow-soft transition-transform hover:scale-105 active:scale-95",
+                !canSwitchRoute && "opacity-50",
               )}
             >
-              {speakerOn ? <Volume2 className="h-6 w-6" /> : <VolumeX className="h-6 w-6" />}
+              <RouteIcon className="h-6 w-6" />
+              <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] text-text-muted">
+                {routeLabel(audioRoute)}
+              </span>
             </button>
           ) : null}
 

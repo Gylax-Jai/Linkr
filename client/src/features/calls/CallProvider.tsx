@@ -15,6 +15,7 @@ import type { CallEndReason } from "@/lib/store";
 import { CallEngine } from "./CallEngine";
 import { fetchIceConfig } from "./useIceConfig";
 import { startCallTone, stopCallTone, playEndTone } from "./callSounds";
+import { listAudioRoutes, nextRoute, pickPreferredRoute, type AudioRoute } from "./audioRoute";
 import { CallOverlay } from "./CallOverlay";
 import { CallBar } from "./CallBar";
 import { IncomingCallModal } from "./IncomingCallModal";
@@ -25,7 +26,8 @@ interface CallActions {
   rejectCall: () => void;
   hangUp: () => void;
   toggleMute: () => void;
-  toggleSpeaker: () => void;
+  /** Cycle call audio through the available outputs (bluetooth → headset → speaker → …). */
+  cycleAudioRoute: () => void;
   minimize: () => void;
   expand: () => void;
 }
@@ -53,6 +55,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   // Buffer signaling that can arrive before the engine exists (offer / early ICE candidates).
   const pendingOfferRef = useRef<WebRtcSdpPayload | null>(null);
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
+  // Audio-output routes available on this device (re-scanned on connect + device changes).
+  const routesRef = useRef<AudioRoute[]>([]);
 
   const actions = useMemo<CallActions>(() => {
     const emit = (event: string, payload: unknown) => getSocket()?.emit(event, payload);
@@ -62,10 +66,31 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       engineRef.current = null;
       pendingOfferRef.current = null;
       pendingIceRef.current = [];
+      routesRef.current = [];
       useCallStore.getState().endCall(reason);
       if (endTimerRef.current) window.clearTimeout(endTimerRef.current);
       // Briefly show the end state, then return to idle.
       endTimerRef.current = window.setTimeout(() => useCallStore.getState().reset(), 1400);
+    };
+
+    /** Apply a route to the engine + reflect it in the store. */
+    const applyRoute = (route: AudioRoute) => {
+      useCallStore.getState().setAudioRoute(route.kind);
+      void engineRef.current?.setSinkId(route.deviceId);
+    };
+
+    /**
+     * Re-scan output devices, publish them to the store, and (re)apply the best route. Called once
+     * media is live and again whenever devices change (e.g. Bluetooth connects mid-call). Keeps the
+     * user's current route if it's still available; otherwise auto-picks the preferred one.
+     */
+    const refreshRoutes = async () => {
+      const routes = await listAudioRoutes();
+      routesRef.current = routes;
+      useCallStore.getState().setAvailableRoutes(routes.map((r) => r.kind));
+      const current = useCallStore.getState().audioRoute;
+      const stillThere = routes.find((r) => r.kind === current);
+      applyRoute(stillThere ?? pickPreferredRoute(routes));
     };
 
     // Wire engine callbacks for the current call (caller + callee share this).
@@ -84,9 +109,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       });
       await engine.startLocalMedia();
       engineRef.current = engine;
-      // Apply the saved mute/speaker preferences, then flush any buffered remote signaling.
+      // Apply mute, scan + apply the audio route, then flush any buffered remote signaling.
       engine.setMuted(useCallStore.getState().muted);
-      void engine.setSpeaker(useCallStore.getState().speakerOn);
+      void refreshRoutes();
       for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
       pendingIceRef.current = [];
       return engine;
@@ -96,6 +121,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (useCallStore.getState().phase !== "idle") return;
       const callId = crypto.randomUUID();
       useCallStore.getState().startOutgoing({ callId, chatId, media, peer });
+
+      // Scan audio routes early so the route button is meaningful while ringing.
+      void refreshRoutes();
 
       getSocket()?.emit(
         SOCKET_EVENTS.CALL_INITIATE,
@@ -163,15 +191,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       engineRef.current?.setMuted(useCallStore.getState().muted);
     };
 
-    const toggleSpeaker: CallActions["toggleSpeaker"] = () => {
-      useCallStore.getState().toggleSpeaker();
-      void engineRef.current?.setSpeaker(useCallStore.getState().speakerOn);
+    const cycleAudioRoute: CallActions["cycleAudioRoute"] = () => {
+      const routes = routesRef.current;
+      if (routes.length <= 1) return;
+      applyRoute(nextRoute(routes, useCallStore.getState().audioRoute));
     };
 
     const minimize: CallActions["minimize"] = () => useCallStore.getState().minimize();
     const expand: CallActions["expand"] = () => useCallStore.getState().expand();
 
-    return { startCall, acceptCall, rejectCall, hangUp, toggleMute, toggleSpeaker, minimize, expand };
+    return { startCall, acceptCall, rejectCall, hangUp, toggleMute, cycleAudioRoute, minimize, expand };
   }, []);
 
   // Subscribe to call signaling once authenticated. Handlers read fresh state via getState().
@@ -221,8 +250,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           });
           await engine.startLocalMedia();
           engine.setMuted(useCallStore.getState().muted);
-          void engine.setSpeaker(useCallStore.getState().speakerOn);
           engineRef.current = engine;
+          // Scan + apply the audio route now that media is live.
+          void (async () => {
+            const routes = await listAudioRoutes();
+            routesRef.current = routes;
+            useCallStore.getState().setAvailableRoutes(routes.map((r) => r.kind));
+            const cur = useCallStore.getState().audioRoute;
+            const route = routes.find((r) => r.kind === cur) ?? pickPreferredRoute(routes);
+            useCallStore.getState().setAudioRoute(route.kind);
+            void engine.setSinkId(route.deviceId);
+          })();
           for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
           pendingIceRef.current = [];
 
@@ -305,6 +343,27 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       socket.off(SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, onIce);
     };
   }, [status, accessToken]);
+
+  // Re-scan audio routes when devices change mid-call (e.g. Bluetooth earbuds connect). Keeps the
+  // current route if still present, otherwise auto-picks the new preferred one.
+  useEffect(() => {
+    const md = navigator.mediaDevices;
+    if (!md?.addEventListener) return;
+    const onChange = () => {
+      if (!engineRef.current) return;
+      void (async () => {
+        const routes = await listAudioRoutes();
+        routesRef.current = routes;
+        useCallStore.getState().setAvailableRoutes(routes.map((r) => r.kind));
+        const cur = useCallStore.getState().audioRoute;
+        const route = routes.find((r) => r.kind === cur) ?? pickPreferredRoute(routes);
+        useCallStore.getState().setAudioRoute(route.kind);
+        void engineRef.current?.setSinkId(route.deviceId);
+      })();
+    };
+    md.addEventListener("devicechange", onChange);
+    return () => md.removeEventListener("devicechange", onChange);
+  }, []);
 
   return (
     <CallActionsContext.Provider value={actions}>

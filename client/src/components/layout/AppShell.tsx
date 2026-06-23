@@ -3,7 +3,7 @@ import { Sidebar } from "./Sidebar";
 import { ConversationPane } from "./ConversationPane";
 import { DetailsPane, MobileDetailsSheet } from "./DetailsPane";
 import { Lightbox } from "@/components/ui/Lightbox";
-import { useUIStore } from "@/lib/store";
+import { useUIStore, useCallStore } from "@/lib/store";
 import { useVisualViewport } from "@/lib/hooks/useVisualViewport";
 import { cn } from "@/lib/utils";
 
@@ -16,11 +16,17 @@ export function AppShell() {
   const detailsOpen = useUIStore((s) => s.detailsOpen);
   const showConversation = Boolean(activeChatId);
 
+  // When a call is minimized, the WhatsApp-style CallBar occupies a thin strip at the very top, so
+  // pad the whole shell down by its height (h-11 = 2.75rem) instead of letting it float over content.
+  const callPhase = useCallStore((s) => s.phase);
+  const callUiMode = useCallStore((s) => s.uiMode);
+  const callBarVisible = callUiMode === "minimized" && callPhase !== "idle" && callPhase !== "incoming";
+
   // Keep the layout glued to the visible area when the mobile soft keyboard opens (Sprint I).
   useVisualViewport();
 
   return (
-    <div className="flex h-full flex-col bg-bg text-text">
+    <div className={cn("flex h-full flex-col bg-bg text-text", callBarVisible && "pt-11")}>
       {/* On mobile, an open chat goes full-screen (app-like): hide the global Linkr bar so only the
           conversation header shows. Always visible from md up (3-pane desktop layout). Sprint H. */}
       <Header className={cn(showConversation && "hidden md:flex")} />

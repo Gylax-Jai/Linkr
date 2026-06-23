@@ -1,101 +1,115 @@
-import { Mic, MicOff, Phone, PhoneOff, Volume2, VolumeX } from "lucide-react";
-import { Avatar } from "@/components/ui/Avatar";
+import { Bluetooth, Headphones, Mic, MicOff, Phone, PhoneOff, Speaker, Volume2 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useCallStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { routeLabel, type AudioRouteKind } from "./audioRoute";
 import { useCallActions } from "./CallProvider";
 import { CallTimer, useCallStatusText } from "./CallOverlay";
 
+const ROUTE_ICON: Record<AudioRouteKind, LucideIcon> = {
+  bluetooth: Bluetooth,
+  headset: Headphones,
+  speaker: Speaker,
+  earpiece: Phone,
+  default: Volume2,
+};
+
 /**
- * Slim, always-on-top call bar shown while a call is minimized — the call keeps running in the
- * background so the user can browse chats. Tap the bar to expand back to the full-screen surface.
+ * WhatsApp-style call bar (Sprint 3.1.2): a thin, full-width strip glued to the very top of the app
+ * while a call is minimized. It pushes the app content down (see AppShell) rather than floating over
+ * the header. Tap the bar to expand back to the full-screen call surface.
  */
 export function CallBar() {
   const phase = useCallStore((s) => s.phase);
   const uiMode = useCallStore((s) => s.uiMode);
   const peer = useCallStore((s) => s.peer);
   const muted = useCallStore((s) => s.muted);
-  const speakerOn = useCallStore((s) => s.speakerOn);
+  const audioRoute = useCallStore((s) => s.audioRoute);
+  const availableRoutes = useCallStore((s) => s.availableRoutes);
   const connectedAt = useCallStore((s) => s.connectedAt);
-  const connection = useCallStore((s) => s.connection);
-  const { hangUp, toggleMute, toggleSpeaker, expand } = useCallActions();
+  const { hangUp, toggleMute, cycleAudioRoute, expand } = useCallActions();
   const statusText = useCallStatusText();
 
   if (phase === "idle" || phase === "incoming" || !peer) return null;
   if (uiMode !== "minimized") return null;
 
   const name = peer.displayName || peer.username || "Unknown";
-  const dotClass =
-    connection === "connected"
-      ? "bg-online"
-      : connection === "failed" || connection === "disconnected"
-        ? "bg-red-500"
-        : "bg-amber-400";
+  const RouteIcon = ROUTE_ICON[audioRoute];
+  const canSwitchRoute = availableRoutes.length > 1;
+  const live = phase !== "ended";
 
   return (
-    <div className="fixed inset-x-0 top-2 z-[115] flex justify-center px-2 animate-fade-in-up">
-      <div className="flex w-full max-w-md items-center gap-3 rounded-2xl border border-border bg-surface/95 px-3 py-2 shadow-elevated backdrop-blur-sm">
+    <div className="fixed inset-x-0 top-0 z-[120] h-11 bg-primary text-primary-foreground shadow-soft">
+      <div className="mx-auto flex h-full max-w-screen-2xl items-center gap-2 px-3">
+        {/* Tap target: name + status, expands the call. */}
         <button
           type="button"
           onClick={expand}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1 py-0.5 text-left transition-colors hover:bg-surface-2"
-          aria-label="Expand call"
+          className="flex h-full min-w-0 flex-1 items-center gap-2 text-left"
+          aria-label="Return to call"
         >
-          <span className="relative shrink-0">
-            <Avatar name={name} src={peer.avatar} size="sm" />
-            <span
-              className={cn(
-                "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-surface",
-                phase === "active" ? dotClass : "bg-primary animate-pulse",
-              )}
-              aria-hidden="true"
-            />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold text-text">{name}</span>
-            <span className="block truncate text-xs text-text-muted">
-              {phase === "active" && connectedAt ? <CallTimer connectedAt={connectedAt} /> : statusText}
-            </span>
+          <Phone className="h-4 w-4 shrink-0 animate-pulse" aria-hidden="true" />
+          <span className="min-w-0 truncate text-sm font-medium">
+            {phase === "active" && connectedAt ? (
+              <>
+                {name} · <CallTimer connectedAt={connectedAt} />
+              </>
+            ) : (
+              <>
+                {statusText} · {name}
+              </>
+            )}
           </span>
         </button>
 
-        <div className="flex shrink-0 items-center gap-1.5">
-          {phase !== "ended" ? (
+        {/* Compact controls. Stop click bubbling so they don't expand the call. */}
+        {live ? (
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
-              onClick={toggleMute}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleMute();
+              }}
               aria-label={muted ? "Unmute" : "Mute"}
               aria-pressed={muted}
               className={cn(
-                "grid h-9 w-9 place-items-center rounded-full transition-colors",
-                muted ? "bg-text text-surface" : "bg-surface-2 text-text hover:opacity-80",
+                "grid h-8 w-8 place-items-center rounded-full transition-colors",
+                muted ? "bg-primary-foreground text-primary" : "hover:bg-black/10",
               )}
             >
               {muted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </button>
-          ) : null}
-          {phase !== "ended" ? (
             <button
               type="button"
-              onClick={toggleSpeaker}
-              aria-label={speakerOn ? "Speaker off" : "Speaker on"}
-              aria-pressed={speakerOn}
+              onClick={(e) => {
+                e.stopPropagation();
+                cycleAudioRoute();
+              }}
+              disabled={!canSwitchRoute}
+              aria-label={`Audio output: ${routeLabel(audioRoute)}`}
+              title={routeLabel(audioRoute)}
               className={cn(
-                "grid h-9 w-9 place-items-center rounded-full transition-colors",
-                speakerOn ? "bg-primary text-primary-foreground" : "bg-surface-2 text-text hover:opacity-80",
+                "grid h-8 w-8 place-items-center rounded-full transition-colors hover:bg-black/10",
+                !canSwitchRoute && "opacity-50",
               )}
             >
-              {speakerOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              <RouteIcon className="h-4 w-4" />
             </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={hangUp}
-            aria-label="End call"
-            className="grid h-9 w-9 place-items-center rounded-full bg-red-500 text-white transition-transform hover:scale-105 active:scale-95"
-          >
-            {phase === "ended" ? <Phone className="h-4 w-4" /> : <PhoneOff className="h-4 w-4" />}
-          </button>
-        </div>
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            hangUp();
+          }}
+          aria-label="End call"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-red-500 text-white transition-transform hover:scale-105 active:scale-95"
+        >
+          {phase === "ended" ? <Phone className="h-4 w-4" /> : <PhoneOff className="h-4 w-4" />}
+        </button>
       </div>
     </div>
   );

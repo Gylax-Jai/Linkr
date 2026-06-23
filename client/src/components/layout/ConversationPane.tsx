@@ -902,8 +902,9 @@ function CallLogRow({ message, mine }: { message: MessageDTO; mine: boolean }) {
       Icon = PhoneMissed;
   }
 
+  // Align like chat bubbles: outgoing (mine) hug the right edge, incoming/missed hug the left.
   return (
-    <div className="my-[var(--space-chat-gap)] flex justify-center">
+    <div className={cn("my-[var(--space-chat-gap)] flex", mine ? "justify-end" : "justify-start")}>
       <span
         className={cn(
           "inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs shadow-soft",

@@ -20,8 +20,8 @@ export class CallEngine {
   private localStream: MediaStream | null = null;
   private remoteStream = new MediaStream();
   private remoteAudio: HTMLAudioElement | null = null;
-  /** Desired loudspeaker routing; re-applied whenever the remote audio element is (re)created. */
-  private speakerOn = false;
+  /** Desired output device id; re-applied whenever the remote audio element is (re)created. */
+  private sinkId = "";
   private readonly media: CallMedia;
   private readonly cb: CallEngineCallbacks;
 
@@ -55,6 +55,11 @@ export class CallEngine {
       const sender = this.pc.addTrack(track, this.localStream);
       if (track.kind === "audio") void applyAudioBitrate(sender);
     }
+  }
+
+  /** Whether the local mic stream has been captured (so mute can apply pre-connect). */
+  hasLocalMedia(): boolean {
+    return this.localStream !== null;
   }
 
   /** Caller: create + return a quality-tuned offer. */
@@ -93,30 +98,20 @@ export class CallEngine {
   }
 
   /**
-   * Route remote audio to the loudspeaker vs the default device, best-effort. Uses `setSinkId`
-   * (Chrome/Edge/Android) to pick a non-default output when speaker is on; unsupported browsers
-   * (Safari/Firefox) keep the system default. Always ensures full playback volume.
+   * Route remote audio to a specific output device (Sprint 3.1.2). `deviceId` comes from the
+   * audioRoute manager; "" = system default. Best-effort: `setSinkId` is Chromium-only, so on
+   * unsupported browsers this no-ops and the OS handles routing. Always keeps full volume.
    */
-  async setSpeaker(on: boolean): Promise<void> {
-    this.speakerOn = on;
+  async setSinkId(deviceId: string): Promise<void> {
+    this.sinkId = deviceId;
     const el = this.remoteAudio as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
     if (!el) return;
     el.volume = 1;
     if (typeof el.setSinkId !== "function") return;
     try {
-      if (!on) {
-        await el.setSinkId("");
-        return;
-      }
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const outputs = devices.filter((d) => d.kind === "audiooutput");
-      // Prefer a device that looks like a speaker; otherwise the first non-default output.
-      const speaker =
-        outputs.find((d) => /speaker/i.test(d.label)) ??
-        outputs.find((d) => d.deviceId !== "default" && d.deviceId !== "communications");
-      await el.setSinkId(speaker?.deviceId ?? "");
+      await el.setSinkId(deviceId);
     } catch {
-      // setSinkId can reject without an explicit device permission; keep the default sink.
+      // setSinkId can reject (no permission / device gone); keep the current sink.
     }
   }
 
@@ -145,8 +140,8 @@ export class CallEngine {
     void this.remoteAudio.play().catch(() => {
       /* Autoplay may be blocked until a user gesture; the accept/start click satisfies it. */
     });
-    // Re-apply the desired speaker routing now that the element exists.
-    if (this.speakerOn) void this.setSpeaker(true);
+    // Re-apply the desired output device now that the element exists.
+    if (this.sinkId) void this.setSinkId(this.sinkId);
   }
 
   /** Tear everything down: stop local capture, stop playback, close the connection. */
