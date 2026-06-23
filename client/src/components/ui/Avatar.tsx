@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
 import { useUIStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,8 @@ interface AvatarProps {
   pulseRing?: boolean;
   /** When true and a photo is present, clicking the avatar opens a full-screen lightbox. */
   zoomable?: boolean;
+  /** Render this icon instead of initials when no photo is present (e.g. "Saved messages"). */
+  icon?: ReactNode;
   className?: string;
 }
 
@@ -47,6 +50,7 @@ export function Avatar({
   online = false,
   pulseRing = false,
   zoomable = false,
+  icon,
   className,
 }: AvatarProps) {
   // Local avatars are served from an authenticated route; fetch them as a blob. Public URLs
@@ -86,7 +90,7 @@ export function Avatar({
           showImage && "hidden",
         )}
       >
-        {getInitials(name)}
+        {icon ?? getInitials(name)}
       </span>
       {online ? (
         <span

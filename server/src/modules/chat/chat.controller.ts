@@ -100,7 +100,8 @@ export const postMedia = asyncHandler(async (req, res) => {
     const chat = await getChatForUser(chatId, userId);
     const otherId = await getOtherMemberId(chat, userId);
     io.to(`user:${userId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
-    io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
+    // Skip the peer emit for self ("Saved messages") chats — otherId === userId there.
+    if (otherId !== userId) io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
   }
 
   res.status(201).json({ message });

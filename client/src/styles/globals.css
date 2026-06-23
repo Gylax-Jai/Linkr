@@ -209,3 +209,15 @@
     transition-duration: 0.001ms !important;
   }
 }
+
+/*
+ * Emoji picker (Sprint C.2): emoji-mart's <em-emoji-picker> grows to fit ALL its rows by default,
+ * which made it a tall, near-full-screen panel on mobile. The host element lives in light DOM, so
+ * we can cap its height here; its internal category list then scrolls. Keep it a compact rectangle.
+ */
+em-emoji-picker {
+  height: 18rem;
+  max-height: min(18rem, 45vh);
+  min-height: 0;
+  --shadow: none;
+}

@@ -50,8 +50,10 @@ export function registerChatHandlers(io: Server, socket: Socket): void {
 
       const chat = await getChatForUser(payload.chatId, userId);
       const otherId = await getOtherMemberId(chat, userId);
+      // Self ("Saved messages") chats have no peer — otherId === userId, so skip the friend gate.
+      const selfChat = otherId === userId;
 
-      if (!(await areFriends(userId, otherId))) {
+      if (!selfChat && !(await areFriends(userId, otherId))) {
         ack?.("NOT_FRIENDS");
         return;
       }
@@ -61,7 +63,9 @@ export function registerChatHandlers(io: Server, socket: Socket): void {
         replyTo: payload.replyTo,
         encrypted: payload.encrypted,
       });
-      io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
+      // Always deliver to the sender; for a real 1:1 also deliver to the peer (avoid a duplicate
+      // MESSAGE_NEW to the same room in a self chat).
+      if (!selfChat) io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
       io.to(`user:${userId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
       ack?.();
 

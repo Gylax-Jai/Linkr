@@ -80,7 +80,8 @@ export interface MessageDTO {
 /** Chat list row returned by GET /api/chat. */
 export interface ChatListItem {
   _id: ID;
-  type: "1:1";
+  /** "self" is the user's own "Saved messages" chat (Sprint C.2); otherwise a 1:1. */
+  type: "1:1" | "self";
   participant: ChatParticipant;
   lastMessage?: MessageDTO;
   pinned: boolean;

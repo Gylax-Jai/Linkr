@@ -17,6 +17,38 @@ export function formatChatListTime(iso: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/**
+ * Presence subtitle for the chat header when a contact is offline (Sprint C.2), e.g.
+ * "last seen just now" / "last seen 12m ago" / "last seen yesterday" / "last seen on Mar 3".
+ * Returns null when there's no timestamp (so the caller can fall back to a plain "Offline").
+ */
+export function formatLastSeen(iso?: string): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+
+  if (diffMin < 1) return "last seen just now";
+  if (diffMin < 60) return `last seen ${diffMin}m ago`;
+
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24 && date.toDateString() === now.toDateString()) {
+    return `last seen ${diffHr}h ago`;
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) {
+    const t = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return `last seen yesterday at ${t}`;
+  }
+
+  return `last seen on ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
 /** Human-friendly day separator label. */
 export function formatDayLabel(iso: string): string {
   const date = new Date(iso);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Ban,
+  Bookmark,
   Check,
   ChevronDown,
   Clock,
@@ -17,7 +18,7 @@ import type { ChatListItem } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import { FriendSearchModal } from "@/features/friends/FriendSearchModal";
 import { FriendsPanel } from "@/features/friends";
-import { useChatList, useDeleteChatMutation, usePinChatMutation } from "@/features/chat";
+import { useChatList, useCreateChatMutation, useDeleteChatMutation, usePinChatMutation } from "@/features/chat";
 import {
   useAcceptFriendRequestMutation,
   useBlockUserMutation,
@@ -85,14 +86,17 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
 
   const participantId = chat.participant._id;
   const friendship = chat.participant.friendship;
+  // Self ("Saved messages") chat: own notes, no presence/friend actions (Sprint C.2).
+  const isSelf = chat.type === "self";
+  const displayName = isSelf ? "Saved messages" : chat.participant.displayName;
   const isFriend = friendship?.status === "accepted";
   const isBlocked = friendship?.status === "blocked";
   const blockedByMe = Boolean(friendship?.blockedByMe);
   const isPending = friendship?.status === "pending";
   const pendingOutgoing = isPending && friendship?.direction === "outgoing";
   const pendingIncoming = isPending && friendship?.direction === "incoming";
-  // No friendship (or a stale rejected row) = strangers → offer to add them.
-  const isStranger = !isFriend && !isBlocked && !isPending;
+  // No friendship (or a stale rejected row) = strangers → offer to add them. Never for self.
+  const isStranger = !isSelf && !isFriend && !isBlocked && !isPending;
   const friendshipId = friendship?.friendshipId;
 
   useEffect(() => {
@@ -153,13 +157,19 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
         )}
         aria-hidden="true"
       />
-      <Avatar name={chat.participant.displayName} src={chat.participant.avatar} size="md" online={online} />
+      <Avatar
+        name={displayName}
+        src={chat.participant.avatar}
+        size="md"
+        online={isSelf ? false : online}
+        icon={isSelf ? <Bookmark className="h-4 w-4" /> : undefined}
+      />
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1">
             {chat.pinned ? <Pin className="h-3 w-3 shrink-0 text-primary" aria-label="Pinned" /> : null}
             <span className={cn("truncate text-sm", active ? "font-semibold text-text" : "font-medium text-text")}>
-              {chat.participant.displayName}
+              {displayName}
             </span>
           </span>
           <span
@@ -383,6 +393,8 @@ export function Sidebar() {
   const [search, setSearch] = useState("");
   const view = useUIStore((s) => s.sidebarView);
   const setView = useUIStore((s) => s.setSidebarView);
+  // "Saved messages": open (or create) the user's own self chat (Sprint C.2).
+  const openSelfChat = useCreateChatMutation();
 
   const { data: chats = [], isLoading } = useChatList();
 
@@ -391,6 +403,7 @@ export function Sidebar() {
     if (!q) return chats;
     return chats.filter(
       (c) =>
+        (c.type === "self" && "saved messages".includes(q)) ||
         c.participant.displayName.toLowerCase().includes(q) ||
         c.participant.username?.toLowerCase().includes(q),
     );
@@ -413,6 +426,16 @@ export function Sidebar() {
               {user.username ? `@${user.username}` : user.email}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => openSelfChat.mutate(user._id)}
+            disabled={openSelfChat.isPending}
+            aria-label="Saved messages"
+            title="Saved messages (message yourself)"
+            className="grid h-8 w-8 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-primary disabled:opacity-50"
+          >
+            <Bookmark className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={openFriendSearch}

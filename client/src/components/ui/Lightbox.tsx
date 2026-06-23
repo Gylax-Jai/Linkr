@@ -38,12 +38,16 @@ export function Lightbox() {
       >
         <X className="h-5 w-5" />
       </button>
-      <img
-        src={lightbox.src}
-        alt={`${lightbox.name}'s photo`}
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] max-w-[85vw] rounded-2xl object-contain shadow-elevated"
-      />
+      {/* Professional circular viewer (Sprint C.2): the photo fills a fixed circle (object-cover) with
+          a soft ring, and the contact's name sits below — like WhatsApp/Telegram profile photos. */}
+      <div className="flex flex-col items-center gap-4" onClick={(e) => e.stopPropagation()}>
+        <img
+          src={lightbox.src}
+          alt={`${lightbox.name}'s photo`}
+          className="h-[min(20rem,70vw)] w-[min(20rem,70vw)] rounded-full object-cover shadow-elevated ring-2 ring-white/15"
+        />
+        <p className="text-base font-semibold text-white">{lightbox.name}</p>
+      </div>
     </div>
   );
 }

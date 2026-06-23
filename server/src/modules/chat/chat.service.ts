@@ -119,7 +119,14 @@ async function getMessageForUser(messageId: string, userId: string): Promise<Mes
   return message;
 }
 
+/** A self ("Saved messages") chat has a single member: the owner (Sprint C.2). */
+function isSelfChat(chat: ChatDocument): boolean {
+  return chat.type === "self" || chat.members.length === 1;
+}
+
 async function getOtherMemberId(chat: ChatDocument, userId: string): Promise<string> {
+  // Self chats have no "other" side — the counterpart is the user themselves.
+  if (isSelfChat(chat)) return userId;
   const other = chat.members.find((m) => m.toString() !== userId);
   if (!other) {
     throw ApiError.badRequest("Invalid chat members");
@@ -127,10 +134,30 @@ async function getOtherMemberId(chat: ChatDocument, userId: string): Promise<str
   return other.toString();
 }
 
+/**
+ * Find or create the user's "Saved messages" chat (Sprint C.2) — a single-member self chat used to
+ * jot notes / send things to yourself. E2EE still applies (the client seals to your own key).
+ */
+export async function getOrCreateSelfChat(userId: string): Promise<ChatDocument> {
+  const existing = await ChatModel.findOne({ type: "self", members: { $all: [userId], $size: 1 } });
+  if (existing) {
+    if ((existing.hiddenFor ?? []).some((id) => id.toString() === userId)) {
+      existing.set(
+        "hiddenFor",
+        existing.hiddenFor.filter((id) => id.toString() !== userId),
+      );
+      await existing.save();
+    }
+    return existing;
+  }
+  return ChatModel.create({ type: "self", members: [userId], pinnedBy: [] });
+}
+
 /** Find or create a 1:1 chat between friends. */
 export async function getOrCreateDirectChat(userId: string, participantId: string): Promise<ChatDocument> {
   if (userId === participantId) {
-    throw ApiError.badRequest("Cannot chat with yourself");
+    // Self chats are a distinct, single-member type ("Saved messages").
+    return getOrCreateSelfChat(userId);
   }
 
   const participant = await UserModel.findById(participantId);
@@ -167,7 +194,12 @@ export async function getOrCreateDirectChat(userId: string, participantId: strin
 
 /** List all 1:1 chats for the user with participant info and last message preview. */
 export async function listChatsForUser(userId: string): Promise<ChatListItem[]> {
-  const chats = await ChatModel.find({ members: userId, type: "1:1", hiddenFor: { $ne: userId } })
+  // Include the user's own self ("Saved messages") chat alongside their 1:1s (Sprint C.2).
+  const chats = await ChatModel.find({
+    members: userId,
+    type: { $in: ["1:1", "self"] },
+    hiddenFor: { $ne: userId },
+  })
     .sort({ updatedAt: -1 })
     .populate<{ lastMessage: MessageDocument | null }>({
       path: "lastMessage",
@@ -178,6 +210,7 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
   const items: ChatListItem[] = [];
 
   for (const chat of chats) {
+    const selfChat = isSelfChat(chat);
     const participantId = await getOtherMemberId(chat, userId);
     const participant = await UserModel.findById(participantId).select(
       "username displayName avatar online lastSeen bio status statusExpiresAt",
@@ -194,8 +227,9 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
 
     // Relationship context so the UI can offer Block/Unblock plus Add/Accept/Requested for the
     // participant (Sprint 5.5 + 5.7). `direction`/`friendshipId` let the chat UI act on pending
-    // requests; the relationship doc is already fetched here, so this stays cheap.
-    const relationship = await findFriendshipBetween(userId, participantId);
+    // requests; the relationship doc is already fetched here, so this stays cheap. Self chats have
+    // no relationship.
+    const relationship = selfChat ? null : await findFriendshipBetween(userId, participantId);
     let friendship: ChatParticipantFriendship | undefined;
     if (relationship) {
       friendship = {
@@ -210,7 +244,7 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
 
     items.push({
       _id: chat._id.toString(),
-      type: "1:1",
+      type: selfChat ? "self" : "1:1",
       participant: {
         _id: participant.id,
         username: participant.username ?? undefined,
@@ -304,8 +338,10 @@ export async function sendMessage(
 ): Promise<MessageDTO> {
   const chat = await getChatForUser(chatId, senderId);
   const otherId = await getOtherMemberId(chat, senderId);
+  const selfChat = isSelfChat(chat);
 
-  if (!(await areFriends(senderId, otherId))) {
+  // Self ("Saved messages") chats have no peer to befriend; only gate real 1:1 chats on friendship.
+  if (!selfChat && !(await areFriends(senderId, otherId))) {
     throw ApiError.forbidden("NOT_FRIENDS", "You must be friends to send messages");
   }
 
@@ -348,14 +384,17 @@ export async function sendMessage(
 
   if (replyId) await message.populate(REPLY_POPULATE);
 
-  // Notify the recipient (best-effort; never blocks or breaks the send).
-  void createNotification({
-    userId: otherId,
-    type: "message",
-    actorId: senderId,
-    chatId,
-    messagePreview: buildMessagePreview(media, content, encrypted),
-  });
+  // Notify the recipient (best-effort; never blocks or breaks the send). Skip for self chats —
+  // there's no one else to notify, and you shouldn't ping yourself.
+  if (!selfChat) {
+    void createNotification({
+      userId: otherId,
+      type: "message",
+      actorId: senderId,
+      chatId,
+      messagePreview: buildMessagePreview(media, content, encrypted),
+    });
+  }
 
   return toMessageDTO(message);
 }

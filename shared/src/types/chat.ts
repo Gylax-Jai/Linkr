@@ -1,6 +1,6 @@
 import type { ID, Timestamp } from "./common.js";
 
-export type ChatType = "1:1" | "group";
+export type ChatType = "1:1" | "group" | "self";
 
 /** A conversation between two users (1:1) or many (group, Phase 2) (blueprint §12). */
 export interface Chat {

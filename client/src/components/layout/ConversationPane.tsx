@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import {
   ArrowLeft,
   Ban,
+  Bookmark,
   Check,
   CheckCheck,
   Copy,
@@ -13,6 +14,7 @@ import {
   Paperclip,
   Pencil,
   Phone,
+  Quote,
   Send,
   Share2,
   ShieldOff,
@@ -56,7 +58,7 @@ import { useThemeStore } from "@/lib/store/themeStore";
 import { useDecryptedText, usePeerHasKey } from "@/lib/crypto";
 import { EmojiPickerPopover } from "@/features/chat/EmojiPicker";
 import { bubbleRadiusClasses, getBubblePosition } from "@/lib/utils/bubbleGrouping";
-import { formatDayLabel, formatMessageTime } from "@/lib/utils/formatTime";
+import { formatDayLabel, formatLastSeen, formatMessageTime } from "@/lib/utils/formatTime";
 import { cn } from "@/lib/utils";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -131,6 +133,7 @@ export function ConversationPane() {
         participantId={chat.participant._id}
         participantName={chat.participant.displayName}
         friendship={chat.participant.friendship}
+        isSelf={chat.type === "self"}
         target={target}
         onClearTarget={() => setTarget({ replyTo: null, editing: null })}
       />
@@ -147,6 +150,9 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
   const online = onlineOverrides[chat.participant._id] ?? chat.participant.online;
   // E2EE is active for this chat once the peer has published a public key (Phase 2).
   const e2ee = usePeerHasKey(chat.participant._id) === true;
+  // Self ("Saved messages") chat: no peer presence/status/friend actions (Sprint C.2).
+  const isSelf = chat.type === "self";
+  const title = isSelf ? "Saved messages" : chat.participant.displayName;
 
   // One handler for both breakpoints: reveal the desktop aside and open the mobile slide-up sheet.
   const openDetails = () => {
@@ -166,10 +172,18 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
         title="View contact info"
         className="-ml-1 flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1 py-1 text-left transition-colors hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <Avatar name={chat.participant.displayName} src={chat.participant.avatar} size="sm" online={online} />
+        <Avatar
+          name={title}
+          src={chat.participant.avatar}
+          size="sm"
+          online={isSelf ? false : online}
+          icon={isSelf ? <Bookmark className="h-4 w-4" /> : undefined}
+        />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{chat.participant.displayName}</p>
-          {isTyping ? (
+          <p className="truncate text-sm font-semibold">{title}</p>
+          {isSelf ? (
+            <p className="truncate text-xs text-text-muted">Message yourself</p>
+          ) : isTyping ? (
             <p className="truncate text-xs text-primary">
               typing
               <span className="typing-dots" aria-hidden="true">
@@ -178,17 +192,16 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
                 <span>.</span>
               </span>
             </p>
-          ) : chat.participant.status?.trim() ? (
-            // A custom status (e.g. "At the gym") takes the subtitle; presence is still conveyed by
-            // the avatar dot. Falls back to Online/Offline when no status is set (Sprint C.1).
-            <p className="truncate text-xs text-text-muted">{chat.participant.status}</p>
           ) : (
+            // Presence is the source of truth in the subtitle (Sprint C.2): Online, or a relative
+            // "last seen …" when offline. The custom status moved to a floating chip (see below).
             <p className="truncate font-mono text-xs text-text-muted">
-              {online ? "Online" : "Offline"}
+              {online ? "Online" : (formatLastSeen(chat.participant.lastSeen) ?? "Offline")}
             </p>
           )}
         </div>
       </button>
+      {!isSelf && chat.participant.status?.trim() ? <StatusChip status={chat.participant.status.trim()} /> : null}
       <EncryptedBadge iconOnly e2ee={e2ee} />
       <div className="flex items-center gap-0.5">
         <CallButton label="Voice call" icon={<Phone className="h-4 w-4" />} />
@@ -209,6 +222,64 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
 }
 
 /**
+ * Compact custom-status chip in the chat header (Sprint C.2). Shows a small quote icon (plus a
+ * short snippet on wider screens); hover or tap reveals a floating popover with the full status so
+ * long text never crowds the name/presence. Closes on outside-click / Escape.
+ */
+function StatusChip({ status }: { status: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div
+      ref={ref}
+      className="relative hidden sm:block"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        aria-label={`Status: ${status}`}
+        title="Status"
+        className="flex max-w-[10rem] items-center gap-1.5 rounded-full border border-border bg-surface-2/70 px-2.5 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text"
+      >
+        <Quote className="h-3 w-3 shrink-0 text-primary" />
+        <span className="truncate">{status}</span>
+      </button>
+      {open ? (
+        <div
+          role="tooltip"
+          className="absolute right-0 top-full z-50 mt-2 w-64 max-w-[min(16rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface p-3 shadow-elevated"
+        >
+          <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+            <Quote className="h-3 w-3 text-primary" />
+            Status
+          </p>
+          <p className="mt-1 break-words text-sm leading-snug text-text">{status}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Overflow (⋮) menu in the chat header (Sprint C.1): contact info, mute (soon), block/unblock,
  * unfriend, and share (soon). Closes on outside-click / Escape / action.
  */
@@ -221,6 +292,7 @@ function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () =
 
   const participant = chat.participant;
   const friendship = participant.friendship;
+  const isSelf = chat.type === "self";
   const blocked = friendship?.status === "blocked";
   const blockedByMe = Boolean(friendship?.blockedByMe);
   const isFriend = friendship?.status === "accepted";
@@ -271,7 +343,8 @@ function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () =
         >
           <HeaderMenuItem icon={<Info className="h-4 w-4" />} label="Contact info" onClick={() => run(onViewInfo)} />
           <HeaderMenuItem icon={<VolumeX className="h-4 w-4" />} label="Mute" disabled hint="Soon" />
-          {isFriend ? (
+          {/* Friend/block/share actions are meaningless for the self ("Saved messages") chat. */}
+          {!isSelf && isFriend ? (
             <HeaderMenuItem
               icon={<UserMinus className="h-4 w-4" />}
               label="Unfriend"
@@ -279,14 +352,14 @@ function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () =
               onClick={() => run(() => unfriend.mutate(participant._id))}
             />
           ) : null}
-          {blocked && blockedByMe ? (
+          {!isSelf && blocked && blockedByMe ? (
             <HeaderMenuItem
               icon={<ShieldOff className="h-4 w-4" />}
               label="Unblock"
               disabled={pending}
               onClick={() => run(() => unblock.mutate(participant._id))}
             />
-          ) : !blocked ? (
+          ) : !isSelf && !blocked ? (
             <HeaderMenuItem
               icon={<Ban className="h-4 w-4" />}
               label="Block"
@@ -295,7 +368,9 @@ function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () =
               onClick={() => run(() => block.mutate(participant._id))}
             />
           ) : null}
-          <HeaderMenuItem icon={<Share2 className="h-4 w-4" />} label="Share contact" disabled hint="Soon" />
+          {!isSelf ? (
+            <HeaderMenuItem icon={<Share2 className="h-4 w-4" />} label="Share contact" disabled hint="Soon" />
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -843,6 +918,7 @@ function Composer({
   participantId,
   participantName,
   friendship,
+  isSelf = false,
   target,
   onClearTarget,
 }: {
@@ -850,6 +926,7 @@ function Composer({
   participantId: string;
   participantName: string;
   friendship?: ChatParticipantFriendship;
+  isSelf?: boolean;
   target: ComposerTarget;
   onClearTarget: () => void;
 }) {
@@ -998,7 +1075,8 @@ function Composer({
 
   // Messaging is gated server-side by friendship (NOT_FRIENDS / blocked). Rather than render an input
   // that would just fail on send, show a friendly inline notice with the right action (Sprint 5.7).
-  if (friendship?.status !== "accepted") {
+  // Self ("Saved messages") chats have no peer, so they're never gated (Sprint C.2).
+  if (!isSelf && friendship?.status !== "accepted") {
     return (
       <ComposerGate
         participantId={participantId}

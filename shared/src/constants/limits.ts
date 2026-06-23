@@ -24,7 +24,7 @@ export const OTP_RESEND_COOLDOWN_MS = 30_000; // min gap between resend requests
 export const FRIENDSHIP_STATUSES = ["pending", "accepted", "rejected", "blocked"] as const;
 export const MESSAGE_TYPES = ["text", "image", "video", "file", "voice"] as const;
 export const MESSAGE_STATUSES = ["sent", "delivered", "read"] as const;
-export const CHAT_TYPES = ["1:1", "group"] as const;
+export const CHAT_TYPES = ["1:1", "group", "self"] as const;
 export const VISIBILITY_VALUES = ["everyone", "friends", "nobody"] as const;
 
 /** In-app notification kinds (Sprint 5). */

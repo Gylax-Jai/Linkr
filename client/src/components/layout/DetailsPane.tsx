@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Ban, Check, Clock, Image, Info, Share2, ShieldCheck, ShieldOff, UserPlus, VolumeX, X } from "lucide-react";
+import { Ban, Bookmark, Check, Clock, Image, Info, Share2, ShieldCheck, ShieldOff, UserPlus, VolumeX, X } from "lucide-react";
 import type { ChatParticipantFriendship, MessageDTO } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
@@ -58,7 +58,9 @@ export function MobileDetailsSheet() {
         aria-label="Close contact info"
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
       />
-      <div className="absolute inset-x-0 bottom-0 top-12 flex animate-fade-in-up flex-col overflow-hidden rounded-t-2xl border-t border-border bg-surface shadow-elevated">
+      {/* Phones: bottom slide-up sheet. Tablet/medium widths (sm–lg): a right-side drawer so the
+          contact "side profile" reads the same as the desktop pane (Sprint C.2). */}
+      <div className="absolute inset-x-0 bottom-0 top-12 flex animate-fade-in-up flex-col overflow-hidden rounded-t-2xl border-t border-border bg-surface shadow-elevated sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-96 sm:rounded-t-none sm:border-l sm:border-t-0">
         <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
           <span className="text-sm font-semibold tracking-tight">Contact info</span>
           <button
@@ -87,7 +89,10 @@ function DetailsContent() {
   const [tab, setTab] = useState<TabId>("profile");
 
   const participant = chat?.participant;
-  const online = participant ? (onlineOverrides[participant._id] ?? participant.online) : false;
+  // Self ("Saved messages") chat: own space, no presence/relationship/block actions (Sprint C.2).
+  const isSelf = chat?.type === "self";
+  const displayName = isSelf ? "Saved messages" : participant?.displayName;
+  const online = !isSelf && participant ? (onlineOverrides[participant._id] ?? participant.online) : false;
 
   const block = useBlockUserMutation();
   const unblock = useUnblockUserMutation();
@@ -99,18 +104,19 @@ function DetailsContent() {
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex flex-col items-center gap-3 border-b border-border px-6 py-8 text-center">
         <Avatar
-          name={participant?.displayName ?? "Linkr"}
+          name={displayName ?? "Linkr"}
           src={participant?.avatar}
           size="xl"
           ring
           online={online}
           pulseRing={online}
-          zoomable
+          zoomable={!isSelf}
+          icon={isSelf ? <Bookmark className="h-7 w-7" /> : undefined}
         />
         <div className="space-y-1">
-          <p className="text-lg font-semibold tracking-tight">{participant?.displayName ?? "Select a chat"}</p>
+          <p className="text-lg font-semibold tracking-tight">{displayName ?? "Select a chat"}</p>
           <p className="font-mono text-xs text-text-muted">
-            {participant?.username ? `@${participant.username}` : "—"}
+            {isSelf ? "Only you" : participant?.username ? `@${participant.username}` : "—"}
           </p>
         </div>
         <EncryptedBadge className="mt-1" />
@@ -136,11 +142,13 @@ function DetailsContent() {
         {tab === "profile" ? (
           <div className="space-y-4">
             <DetailSection icon={<Info className="h-4 w-4" />} label="About">
-              {participant
-                ? (participant.bio?.trim()
-                  ? participant.bio
-                  : `You're connected with ${participant.displayName}. Only friends can message and call on Linkr.`)
-                : (sessionUser?.bio ?? "Select a conversation to view contact details.")}
+              {isSelf
+                ? "Your personal space — jot notes, save links, and message yourself. Messages here are just for you."
+                : participant
+                  ? (participant.bio?.trim()
+                    ? participant.bio
+                    : `You're connected with ${participant.displayName}. Only friends can message and call on Linkr.`)
+                  : (sessionUser?.bio ?? "Select a conversation to view contact details.")}
             </DetailSection>
 
             <DetailSection icon={<ShieldCheck className="h-4 w-4" />} label="Privacy">
@@ -157,7 +165,7 @@ function DetailsContent() {
         {tab === "files" ? <FilesTab chatId={activeChatId} /> : null}
       </div>
 
-      {participant ? (
+      {participant && !isSelf ? (
         <RelationshipControl participantId={participant._id} friendship={participant.friendship} />
       ) : null}
 
@@ -166,7 +174,7 @@ function DetailsContent() {
           <VolumeX className="h-4 w-4" />
           Mute
         </Button>
-        {blocked && !blockedByMe ? (
+        {isSelf ? null : blocked && !blockedByMe ? (
           // A block placed by the other user can't be lifted here.
           <Button variant="ghost" size="sm" disabled className="flex-1" title="This user has blocked you">
             <Ban className="h-4 w-4" />

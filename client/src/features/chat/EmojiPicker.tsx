@@ -33,7 +33,7 @@ export function EmojiPickerPopover({
   }, []);
 
   return (
-    <div className="absolute bottom-full left-0 z-40 mb-2 w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl shadow-elevated">
+    <div className="absolute bottom-full left-0 z-40 mb-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl shadow-elevated">
       {data ? (
         <Suspense fallback={<PickerSkeleton />}>
           <Picker
@@ -42,11 +42,11 @@ export function EmojiPickerPopover({
             previewPosition="none"
             skinTonePosition="none"
             navPosition="top"
-            // Fixed grid (8 per line) keeps a tidy rectangle instead of a full-width stretched strip
-            // on mobile; the picker fits inside the responsive container above.
-            perLine={8}
-            emojiButtonSize={34}
-            emojiSize={22}
+            // Compact rectangle: a fixed 7-per-line grid + small buttons, and the host height is
+            // capped in globals.css so the category list scrolls instead of filling the screen.
+            perLine={7}
+            emojiButtonSize={30}
+            emojiSize={20}
             onEmojiSelect={(emoji: EmojiSelectEvent) => {
               if (emoji.native) onSelect(emoji.native);
             }}
@@ -62,7 +62,7 @@ export function EmojiPickerPopover({
 function PickerSkeleton() {
   return (
     <div
-      className="h-[22rem] w-full animate-pulse rounded-xl border border-border bg-surface"
+      className="h-[18rem] w-full animate-pulse rounded-xl border border-border bg-surface"
       aria-hidden="true"
     />
   );
