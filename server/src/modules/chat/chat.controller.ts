@@ -16,8 +16,10 @@ import {
   deleteChatForUser,
   deleteMessage,
   editMessage,
+  getChatForUser,
   getMessageForUser,
   getOrCreateDirectChat,
+  getOtherMemberId,
   listChatsForUser,
   listMessages,
   reactToMessage,
@@ -90,11 +92,15 @@ export const postMedia = asyncHandler(async (req, res) => {
     },
   });
 
-  // Broadcast to both members so it renders live (mirrors the socket send path).
+  // Broadcast to BOTH members so it renders live (mirrors the socket send path). The recipient is
+  // the other chat member — emitting to `message.sender` would just notify the uploader twice, so
+  // the recipient's media never arrived until their next chat-list refetch.
   const io = getSocketServer();
   if (io) {
+    const chat = await getChatForUser(chatId, userId);
+    const otherId = await getOtherMemberId(chat, userId);
     io.to(`user:${userId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
-    io.to(`user:${message.sender}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
+    io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
   }
 
   res.status(201).json({ message });

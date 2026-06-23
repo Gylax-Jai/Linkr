@@ -160,7 +160,8 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
     .sort({ updatedAt: -1 })
     .populate<{ lastMessage: MessageDocument | null }>({
       path: "lastMessage",
-      select: "content sender status readBy createdAt chatId type",
+      select:
+        "content sender status readBy createdAt chatId type encrypted mediaUrl mediaName mediaSize mediaMime deletedForEveryone",
     });
 
   const items: ChatListItem[] = [];
