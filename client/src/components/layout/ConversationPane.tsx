@@ -153,20 +153,22 @@ export function ConversationPane() {
 }
 
 /**
- * Mobile-only status strip under the chat header (Sprint F), styled like WhatsApp's status line below
- * the name. Collapses (height + opacity) when scrolled away from the latest messages. On sm+ the
- * compact `StatusChip` in the header covers this instead, so it's hidden there.
+ * Mobile-only floating status bubble just under the chat header (Sprint G), WhatsApp-style: a small
+ * left-aligned pill indented to sit under the avatar/name — NOT a full-width bar. Collapses (height +
+ * opacity + slide) when scrolled away from the latest messages. On sm+ the compact `StatusChip` in
+ * the header row covers this instead, so it's hidden there.
  */
 function ConversationStatusBanner({ status, visible }: { status: string; visible: boolean }) {
   return (
     <div
       aria-hidden={!visible}
       className={cn(
-        "overflow-hidden border-b border-border bg-surface/70 backdrop-blur-sm transition-all duration-300 ease-out sm:hidden",
-        visible ? "max-h-12 opacity-100" : "max-h-0 border-b-0 opacity-0",
+        "pointer-events-none flex overflow-hidden px-3 transition-all duration-300 ease-out sm:hidden",
+        visible ? "max-h-12 translate-y-0 py-1.5 opacity-100" : "max-h-0 -translate-y-1 py-0 opacity-0",
       )}
     >
-      <div className="flex items-center gap-2 px-4 py-2">
+      {/* Indented past the back button so the bubble floats under the avatar, not the screen edge. */}
+      <div className="ml-11 inline-flex max-w-[calc(100vw-7rem)] items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 shadow-soft">
         <Quote className="h-3 w-3 shrink-0 text-primary" />
         <p className="truncate text-xs text-text-muted">{status}</p>
       </div>
@@ -210,8 +212,8 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
   };
 
   return (
-    <div className="relative z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-surface/80 px-4 shadow-soft backdrop-blur-sm">
-      <Button variant="ghost" size="icon" className="md:hidden" onClick={onBack} aria-label="Back to chat list">
+    <div className="relative z-30 flex h-16 shrink-0 items-center gap-2 border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm sm:gap-3 sm:px-4">
+      <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onBack} aria-label="Back to chat list">
         <ArrowLeft className="h-4 w-4" />
       </Button>
       <button
@@ -219,7 +221,7 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
         onClick={openDetails}
         aria-label="View contact info"
         title="View contact info"
-        className="-ml-1 flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1 py-1 text-left transition-colors hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="-ml-1 flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1 py-1 text-left transition-colors hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:gap-3"
       >
         <Avatar
           name={title}
@@ -253,10 +255,10 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
       {chat.participant.status?.trim() ? <StatusChip status={chat.participant.status.trim()} /> : null}
       <EncryptedBadge iconOnly e2ee={e2ee} />
       <div className="flex shrink-0 items-center gap-0.5">
-        {/* Call actions are placeholders; hide them on phones so the name + last seen never get
-            squeezed (Sprint F). They reappear from sm upwards where there's room. */}
-        <CallButton label="Voice call" icon={<Phone className="h-4 w-4" />} className="hidden sm:grid" />
-        <CallButton label="Video call" icon={<Video className="h-4 w-4" />} className="hidden sm:grid" />
+        {/* Voice/video are placeholders but kept visible everywhere (Sprint G); they're compact on
+            phones (see CallButton) so the name + last seen stay readable. */}
+        <CallButton label="Voice call" icon={<Phone className="h-4 w-4" />} />
+        <CallButton label="Video call" icon={<Video className="h-4 w-4" />} />
         <HeaderMenu chat={chat} onViewInfo={toggleDetails} />
         <button
           type="button"
@@ -464,7 +466,8 @@ function CallButton({ label, icon, className }: { label: string; icon: ReactNode
       aria-label={`${label} (coming soon)`}
       title={`${label} — coming soon`}
       className={cn(
-        "h-9 w-9 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50",
+        // Compact on phones so name + last seen keep room; full size from sm up (Sprint G).
+        "grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50 sm:h-9 sm:w-9",
         className,
       )}
     >

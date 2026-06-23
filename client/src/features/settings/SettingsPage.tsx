@@ -1,14 +1,14 @@
 import { Link } from "react-router-dom";
-import { ArrowLeft, ChevronRight, ShieldCheck, UserCog } from "lucide-react";
+import { ArrowLeft, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RecoveryCard } from "@/features/security";
 import { PATHS } from "@/routes/paths";
 import { SessionsCard } from "./SessionsCard";
 
 /**
- * Settings hub (Sprint E). The canonical home for account security: multi-device encryption setup /
- * restore (Security) and the signed-in devices list (Devices). Editing the profile itself stays on
- * its own page, linked from here.
+ * Settings hub (Sprint E/G). The canonical home for account security only: multi-device encryption
+ * setup / restore (Security) and the signed-in devices list (Devices). Editing the profile lives on
+ * its own page (reached from the user menu); the two are intentionally kept separate (Sprint G).
  */
 export function SettingsPage() {
   return (
@@ -23,20 +23,6 @@ export function SettingsPage() {
       </header>
 
       <div className="mx-auto w-full max-w-lg space-y-8 p-6">
-        <Link
-          to={PATHS.profile}
-          className="flex items-center gap-3 rounded-2xl border border-border bg-surface p-4 shadow-soft transition-colors hover:bg-surface-2"
-        >
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-surface-2 text-text-muted">
-            <UserCog className="h-5 w-5" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-text">Edit profile</p>
-            <p className="truncate text-xs text-text-muted">Photo, name, bio, and status</p>
-          </div>
-          <ChevronRight className="h-4 w-4 shrink-0 text-text-muted" />
-        </Link>
-
         <section className="space-y-3">
           <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
             <ShieldCheck className="h-4 w-4" />
