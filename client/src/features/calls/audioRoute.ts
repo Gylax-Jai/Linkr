@@ -1,11 +1,8 @@
 /**
- * Audio output routing for calls (Sprint 3.1.2). Classifies the browser's audio-output devices into
- * friendly "routes" (bluetooth / headset / speaker / earpiece) so the user can switch where call
- * audio plays, with sensible auto-priority (Bluetooth > wired headset > speaker/earpiece).
- *
- * Web limits: switching the output sink requires `HTMLMediaElement.setSinkId`, which is supported on
- * Chromium (desktop + Android) but NOT on iOS Safari/Firefox. On unsupported browsers we expose only
- * the system "default" route and the OS controls routing.
+ * Audio output routing for calls. Exposes user-facing routes (Bluetooth / Earpiece / Speaker /
+ * Headset) with stable logical ids so the dropdown always works on mobile — even when the browser
+ * exposes no switchable output devices. `resolveSinkId` maps a logical route to a real device id for
+ * `setSinkId` where supported.
  */
 
 export type AudioRouteKind = "bluetooth" | "headset" | "speaker" | "earpiece" | "default";
@@ -16,18 +13,35 @@ export interface AudioRoute {
   label: string;
 }
 
-/** Priority order when auto-selecting a route: earbuds/headset first, speaker last. */
+/** Stable ids for logical routes (used in the dropdown + store). */
+export const LOGICAL_ROUTE_ID = {
+  bluetooth: "__bluetooth__",
+  headset: "__headset__",
+  earpiece: "__earpiece__",
+  speaker: "__speaker__",
+} as const;
+
+/** Priority when auto-selecting: BT first, then earpiece (phone receiver), then wired, speaker last. */
 const PRIORITY: AudioRouteKind[] = ["bluetooth", "headset", "earpiece", "speaker", "default"];
 
-/** Whether this browser can actually switch the audio output sink. */
+const BLUETOOTH_RE =
+  /bluetooth|airpod|buds|wireless|\bbt\b|\btws\b|handsfree|jabra|jbl|boat|sony wf|galaxy buds|wh-1000|qc35|qc45/;
+const HEADSET_RE = /head(set|phone)|earphone|wired|earpods|usb audio|\baux\b/;
+const SPEAKER_RE = /speaker|loud/;
+const EARPIECE_RE = /earpiece|receiver|telephone|handset/;
+/** Built-in phone mic/speaker labels — must NOT count as external headset/BT. */
+const BUILTIN_RE =
+  /built-in|internal|^default$|phone microphone|microphone array|iphone microphone|ipad microphone|android microphone/;
+
+export function isMobilePhone(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android|iPhone|iPod/i.test(navigator.userAgent);
+}
+
+/** Whether this browser can call `HTMLMediaElement.setSinkId`. */
 export function canSwitchOutput(): boolean {
   return typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
 }
-
-const BLUETOOTH_RE = /bluetooth|airpod|buds|wireless|\bbt\b|\btws\b|handsfree|jabra|jbl|boat|sony wf|galaxy buds/;
-const HEADSET_RE = /head(set|phone)|earphone|wired|earpods|usb audio|\baux\b/;
-const SPEAKER_RE = /speaker|loud/;
-const EARPIECE_RE = /earpiece|receiver/;
 
 function classify(label: string): AudioRouteKind {
   const l = label.toLowerCase();
@@ -38,88 +52,138 @@ function classify(label: string): AudioRouteKind {
   return "default";
 }
 
-/**
- * Detect what peripheral is physically connected by scanning ALL device labels (inputs included).
- * On Android Chrome the only *output* device is often the pseudo "Default" whose real target follows
- * the OS — but a connected Bluetooth/wired headset still shows up as an *input* device, so we can
- * infer the true active route from there and label the OS-default sink correctly.
- */
-function detectPeripheral(devices: MediaDeviceInfo[]): AudioRouteKind | null {
-  const labels = devices
-    .map((d) => d.label.toLowerCase())
-    .filter(Boolean)
-    .join(" | ");
-  if (BLUETOOTH_RE.test(labels)) return "bluetooth";
-  if (HEADSET_RE.test(labels)) return "headset";
-  return null;
+function isExternalLabel(label: string): boolean {
+  const l = label.toLowerCase();
+  if (!l) return false;
+  return !BUILTIN_RE.test(l);
+}
+
+/** True when a **connected external** Bluetooth audio device is visible in device labels. */
+export function detectBluetoothConnected(devices: MediaDeviceInfo[]): boolean {
+  return devices.some((d) => {
+    const l = d.label.toLowerCase();
+    return l && isExternalLabel(l) && BLUETOOTH_RE.test(l);
+  });
+}
+
+/** True when a wired external headset is connected (not built-in, not Bluetooth). */
+function detectWiredHeadset(devices: MediaDeviceInfo[]): boolean {
+  return devices.some((d) => {
+    const l = d.label.toLowerCase();
+    return l && isExternalLabel(l) && HEADSET_RE.test(l) && !BLUETOOTH_RE.test(l);
+  });
 }
 
 /**
- * Enumerate audio-output devices and map them to call routes. Best-effort: labels are only populated
- * after a getUserMedia permission grant (which a call already obtains).
- *
- * The OS-default sink ("default"/"communications" pseudo-devices, or an unlabeled output) is relabeled
- * to the *connected peripheral* (Bluetooth/headset) when one is detected — otherwise it's the phone's
- * loudspeaker. This makes the icon reflect reality (e.g. Bluetooth when earbuds are connected) instead
- * of a meaningless "Default". De-dupes by kind, preferring a real device id over a pseudo one.
+ * Mobile menu: always Earpiece + Speaker; add Bluetooth / wired Headset when connected.
+ * Discord/WhatsApp-style — dropdown is never empty on a phone.
+ */
+function buildMobileRoutes(devices: MediaDeviceInfo[]): AudioRoute[] {
+  const routes: AudioRoute[] = [];
+  if (detectBluetoothConnected(devices)) {
+    routes.push({ kind: "bluetooth", deviceId: LOGICAL_ROUTE_ID.bluetooth, label: routeLabel("bluetooth") });
+  }
+  if (detectWiredHeadset(devices)) {
+    routes.push({ kind: "headset", deviceId: LOGICAL_ROUTE_ID.headset, label: routeLabel("headset") });
+  }
+  routes.push({ kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") });
+  routes.push({ kind: "speaker", deviceId: LOGICAL_ROUTE_ID.speaker, label: routeLabel("speaker") });
+  return routes;
+}
+
+/** Desktop: enumerate real outputs, de-duped by kind; fall back to speaker. */
+function buildDesktopRoutes(devices: MediaDeviceInfo[]): AudioRoute[] {
+  const outputs = devices.filter((d) => d.kind === "audiooutput");
+  const byKind = new Map<AudioRouteKind, AudioRoute>();
+
+  const add = (route: AudioRoute) => {
+    const existing = byKind.get(route.kind);
+    if (!existing || (!existing.deviceId && route.deviceId)) byKind.set(route.kind, route);
+  };
+
+  for (const d of outputs) {
+    const kind = classify(d.label);
+    if (kind === "default") continue;
+    add({ kind, deviceId: d.deviceId, label: d.label || routeLabel(kind) });
+  }
+
+  const routes = [...byKind.values()];
+  if (routes.length === 0) {
+    routes.push({ kind: "speaker", deviceId: "", label: routeLabel("speaker") });
+  }
+  return routes;
+}
+
+/**
+ * List routes for the audio dropdown. On phones this is always ≥ 2 (Earpiece + Speaker, + BT when
+ * connected). Labels must be populated — call after `getUserMedia`.
  */
 export async function listAudioRoutes(): Promise<AudioRoute[]> {
   if (!navigator.mediaDevices?.enumerateDevices) {
-    return [{ kind: "speaker", deviceId: "", label: "Speaker" }];
+    return isMobilePhone()
+      ? [
+          { kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") },
+          { kind: "speaker", deviceId: LOGICAL_ROUTE_ID.speaker, label: routeLabel("speaker") },
+        ]
+      : [{ kind: "speaker", deviceId: "", label: routeLabel("speaker") }];
   }
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const peripheral = detectPeripheral(devices);
-    const outputs = devices.filter((d) => d.kind === "audiooutput");
-
-    // Many mobile browsers (Android Chrome, iOS Safari) DON'T support `setSinkId` and expose no real
-    // output devices — the OS owns routing. We can't offer switching there, but we MUST still show the
-    // correct icon, so infer it from the connected peripheral (Bluetooth/headset) detected via the
-    // input/device labels. Returns a single, non-switchable route.
-    if (!canSwitchOutput() || outputs.length === 0) {
-      const kind = peripheral ?? "speaker";
-      return [{ kind, deviceId: "", label: routeLabel(kind) }];
-    }
-
-    // Desktop Chromium path: real output devices we can switch between.
-    const byKind = new Map<AudioRouteKind, AudioRoute>();
-    const add = (route: AudioRoute) => {
-      const existing = byKind.get(route.kind);
-      // Prefer a concrete device id over the OS-default pseudo so switching actually targets it.
-      if (!existing || (!existing.deviceId && route.deviceId)) byKind.set(route.kind, route);
-    };
-
-    for (const d of outputs) {
-      const isPseudo = d.deviceId === "default" || d.deviceId === "communications" || !d.label;
-      let kind = classify(d.label);
-      if (kind === "default" || isPseudo) {
-        // The OS-default sink routes to the connected peripheral if any, else the loudspeaker.
-        kind = peripheral ?? "speaker";
-      }
-      add({ kind, deviceId: d.deviceId, label: d.label || routeLabel(kind) });
-    }
-
-    const routes = [...byKind.values()];
-    if (routes.length === 0) {
-      const kind = peripheral ?? "speaker";
-      routes.push({ kind, deviceId: "", label: routeLabel(kind) });
-    }
-    return routes;
+    return isMobilePhone() ? buildMobileRoutes(devices) : buildDesktopRoutes(devices);
   } catch {
-    return [{ kind: "speaker", deviceId: "", label: "Speaker" }];
+    return isMobilePhone()
+      ? [
+          { kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") },
+          { kind: "speaker", deviceId: LOGICAL_ROUTE_ID.speaker, label: routeLabel("speaker") },
+        ]
+      : [{ kind: "speaker", deviceId: "", label: routeLabel("speaker") }];
   }
 }
 
-/** Pick the highest-priority available route (earbuds/headset before speaker). */
+/** Default route: Bluetooth if connected, else Earpiece on phone, else best desktop route. */
 export function pickPreferredRoute(routes: AudioRoute[]): AudioRoute {
   for (const kind of PRIORITY) {
     const match = routes.find((r) => r.kind === kind);
     if (match) return match;
   }
-  return routes[0] ?? { kind: "default", deviceId: "", label: "Default" };
+  return routes[0] ?? { kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") };
 }
 
-/** Short human label for a route, for buttons/tooltips. */
+/** Map a logical (or real) route to the device id passed to `setSinkId`. Best-effort on mobile. */
+export async function resolveSinkId(route: AudioRoute): Promise<string> {
+  if (!canSwitchOutput() || !navigator.mediaDevices?.enumerateDevices) return "";
+
+  try {
+    const outputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audiooutput");
+
+    switch (route.deviceId) {
+      case LOGICAL_ROUTE_ID.speaker: {
+        const speaker =
+          outputs.find((d) => SPEAKER_RE.test(d.label)) ??
+          outputs.find((d) => d.deviceId !== "default" && d.deviceId !== "communications");
+        return speaker?.deviceId ?? "";
+      }
+      case LOGICAL_ROUTE_ID.earpiece: {
+        const earpiece = outputs.find((d) => EARPIECE_RE.test(d.label));
+        const comm = outputs.find((d) => d.deviceId === "communications");
+        return earpiece?.deviceId ?? comm?.deviceId ?? "default";
+      }
+      case LOGICAL_ROUTE_ID.bluetooth: {
+        const bt = outputs.find((d) => BLUETOOTH_RE.test(d.label));
+        return bt?.deviceId ?? "";
+      }
+      case LOGICAL_ROUTE_ID.headset: {
+        const hs = outputs.find((d) => HEADSET_RE.test(d.label) && !BLUETOOTH_RE.test(d.label));
+        return hs?.deviceId ?? "";
+      }
+      default:
+        return route.deviceId;
+    }
+  } catch {
+    return "";
+  }
+}
+
 export function routeLabel(kind: AudioRouteKind): string {
   switch (kind) {
     case "bluetooth":
@@ -135,9 +199,17 @@ export function routeLabel(kind: AudioRouteKind): string {
   }
 }
 
-/** The next route to use when the user taps the audio button (cycles through available ones). */
+/** Find a route in the list by logical/real device id or by kind. */
+export function findRoute(routes: AudioRoute[], deviceIdOrKind: string): AudioRoute | undefined {
+  return (
+    routes.find((r) => r.deviceId === deviceIdOrKind) ??
+    routes.find((r) => r.kind === deviceIdOrKind)
+  );
+}
+
+/** The next route when cycling (legacy). */
 export function nextRoute(routes: AudioRoute[], current: AudioRouteKind): AudioRoute {
-  if (routes.length <= 1) return routes[0] ?? { kind: "default", deviceId: "", label: "Default" };
+  if (routes.length <= 1) return routes[0] ?? { kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: "Earpiece" };
   const idx = routes.findIndex((r) => r.kind === current);
   return routes[(idx + 1) % routes.length]!;
 }

@@ -16,7 +16,7 @@ import { CallEngine } from "./CallEngine";
 import { fetchIceConfig } from "./useIceConfig";
 import { startCallTone, stopCallTone, playEndTone } from "./callSounds";
 import { audioConstraints } from "./callConfig";
-import { listAudioRoutes, nextRoute, pickPreferredRoute, type AudioRoute } from "./audioRoute";
+import { listAudioRoutes, nextRoute, pickPreferredRoute, findRoute, resolveSinkId, type AudioRoute } from "./audioRoute";
 import { CallOverlay } from "./CallOverlay";
 import { CallBar } from "./CallBar";
 import { IncomingCallModal } from "./IncomingCallModal";
@@ -63,6 +63,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const earlyStreamRef = useRef<MediaStream | null>(null);
   // Audio-output routes available on this device (re-scanned on connect + device changes).
   const routesRef = useRef<AudioRoute[]>([]);
+  const noticeTimerRef = useRef<number | null>(null);
+  /** Lets socket/devicechange handlers call the latest route helpers from useMemo. */
+  const routeHelpersRef = useRef<{
+    refreshRoutes: (opts?: { initial?: boolean; deviceChange?: boolean }) => Promise<void>;
+    applyRoute: (route: AudioRoute) => void;
+  }>({
+    refreshRoutes: async () => {},
+    applyRoute: () => {},
+  });
 
   const actions = useMemo<CallActions>(() => {
     const emit = (event: string, payload: unknown) => getSocket()?.emit(event, payload);
@@ -82,23 +91,51 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       endTimerRef.current = window.setTimeout(() => useCallStore.getState().reset(), 1400);
     };
 
-    /** Apply a route to the engine + reflect it in the store. */
+    /** Apply a route to the store + engine (resolves logical ids to real sink ids). */
     const applyRoute = (route: AudioRoute) => {
       useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
-      void engineRef.current?.setSinkId(route.deviceId);
+      void (async () => {
+        const sinkId = await resolveSinkId(route);
+        void engineRef.current?.setSinkId(sinkId);
+      })();
+    };
+
+    const showNotice = (message: string) => {
+      useCallStore.getState().setCallNotice(message);
+      if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = window.setTimeout(() => useCallStore.getState().setCallNotice(null), 4500);
     };
 
     /**
-     * Re-scan output devices, publish them to the store, and (re)apply the best route. Called once
-     * media is live and again whenever devices change (e.g. Bluetooth connects mid-call). Keeps the
-     * user's current route if it's still available; otherwise auto-picks the preferred one.
+     * Re-scan routes and update the dropdown. On first connect picks Earpiece (or BT if connected).
+     * On devicechange auto-switches to/from Bluetooth; otherwise keeps the user's choice.
      */
-    const refreshRoutes = async () => {
+    const refreshRoutes = async (opts?: { initial?: boolean; deviceChange?: boolean }) => {
       const routes = await listAudioRoutes();
       routesRef.current = routes;
       useCallStore.getState().setAvailableRoutes(routes);
-      const { audioDeviceId, audioRoute } = useCallStore.getState();
-      const stillThere = routes.find((r) => r.deviceId === audioDeviceId) ?? routes.find((r) => r.kind === audioRoute);
+
+      const { audioRoute } = useCallStore.getState();
+      const hasBt = routes.some((r) => r.kind === "bluetooth");
+      const wasBt = audioRoute === "bluetooth";
+
+      if (opts?.deviceChange && hasBt && !wasBt) {
+        const bt = routes.find((r) => r.kind === "bluetooth");
+        if (bt) applyRoute(bt);
+        return;
+      }
+      if (opts?.deviceChange && !hasBt && wasBt) {
+        applyRoute(routes.find((r) => r.kind === "earpiece") ?? pickPreferredRoute(routes));
+        return;
+      }
+      if (opts?.initial) {
+        applyRoute(pickPreferredRoute(routes));
+        return;
+      }
+
+      const { audioDeviceId } = useCallStore.getState();
+      const stillThere =
+        findRoute(routes, audioDeviceId) ?? routes.find((r) => r.kind === audioRoute);
       applyRoute(stillThere ?? pickPreferredRoute(routes));
     };
 
@@ -120,7 +157,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       engineRef.current = engine;
       // Apply mute, scan + apply the audio route, then flush any buffered remote signaling.
       engine.setMuted(useCallStore.getState().muted);
-      void refreshRoutes();
+      void refreshRoutes({ initial: !useCallStore.getState().audioDeviceId });
       for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
       pendingIceRef.current = [];
       return engine;
@@ -128,38 +165,38 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     const startCall: CallActions["startCall"] = ({ chatId, peer, media = "audio" }) => {
       if (useCallStore.getState().phase !== "idle") return;
-      const callId = crypto.randomUUID();
-      useCallStore.getState().startOutgoing({ callId, chatId, media, peer });
 
-      // Grab the mic now (caller) so device labels unlock and the audio-route icon is correct while
-      // "Calling…" — then scan routes. The stream is adopted by the engine once the callee accepts.
       void (async () => {
+        // Mic permission MUST succeed before the call starts — no ringback/signaling until allowed.
         try {
           earlyStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
         } catch {
-          /* Mic blocked/denied — routes still scan, just without unlocked labels. */
+          showNotice("Microphone access is required to place a call.");
+          return;
         }
-        await refreshRoutes();
-      })();
 
-      getSocket()?.emit(
-        SOCKET_EVENTS.CALL_INITIATE,
-        { callId, chatId, media },
-        (res?: CallInitiateAck) => {
-          if (res?.ok) {
-            // ringing=true → callee device is live ("Ringing…"); false → offline ("Calling…").
-            useCallStore.getState().setRinging(Boolean(res.ringing));
-            return;
-          }
-          const reason: CallEndReason =
-            res?.reason === "BUSY"
-              ? "busy"
-              : res?.reason === "UNAVAILABLE"
-                ? "unavailable"
-                : "failed";
-          teardown(reason);
-        },
-      );
+        const callId = crypto.randomUUID();
+        useCallStore.getState().startOutgoing({ callId, chatId, media, peer });
+        await refreshRoutes({ initial: true });
+
+        getSocket()?.emit(
+          SOCKET_EVENTS.CALL_INITIATE,
+          { callId, chatId, media },
+          (res?: CallInitiateAck) => {
+            if (res?.ok) {
+              useCallStore.getState().setRinging(Boolean(res.ringing));
+              return;
+            }
+            const reason: CallEndReason =
+              res?.reason === "BUSY"
+                ? "busy"
+                : res?.reason === "UNAVAILABLE"
+                  ? "unavailable"
+                  : "failed";
+            teardown(reason);
+          },
+        );
+      })();
     };
 
     const acceptCall: CallActions["acceptCall"] = () => {
@@ -214,13 +251,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       applyRoute(nextRoute(routes, useCallStore.getState().audioRoute));
     };
 
-    const selectAudioRoute: CallActions["selectAudioRoute"] = (deviceId) => {
-      const route = routesRef.current.find((r) => r.deviceId === deviceId);
+    const selectAudioRoute: CallActions["selectAudioRoute"] = (deviceIdOrKind) => {
+      const route = findRoute(routesRef.current, deviceIdOrKind);
       if (route) applyRoute(route);
     };
 
     const minimize: CallActions["minimize"] = () => useCallStore.getState().minimize();
     const expand: CallActions["expand"] = () => useCallStore.getState().expand();
+
+    routeHelpersRef.current = { refreshRoutes, applyRoute };
 
     return {
       startCall,
@@ -285,19 +324,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           earlyStreamRef.current = null;
           engine.setMuted(useCallStore.getState().muted);
           engineRef.current = engine;
-          // Scan + apply the audio route now that media is live.
-          void (async () => {
-            const routes = await listAudioRoutes();
-            routesRef.current = routes;
-            useCallStore.getState().setAvailableRoutes(routes);
-            const { audioDeviceId, audioRoute } = useCallStore.getState();
-            const route =
-              routes.find((r) => r.deviceId === audioDeviceId) ??
-              routes.find((r) => r.kind === audioRoute) ??
-              pickPreferredRoute(routes);
-            useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
-            void engine.setSinkId(route.deviceId);
-          })();
+          await routeHelpersRef.current.refreshRoutes();
           for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
           pendingIceRef.current = [];
 
@@ -381,24 +408,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     };
   }, [status, accessToken]);
 
-  // Re-scan audio routes when devices change mid-call (e.g. Bluetooth earbuds connect). Keeps the
-  // current route if still present, otherwise auto-picks the new preferred one.
+  // Re-scan routes when devices change (BT connect/disconnect) — also during outgoing before engine.
   useEffect(() => {
     const md = navigator.mediaDevices;
     if (!md?.addEventListener) return;
     const onChange = () => {
-      if (!engineRef.current) return;
-      void (async () => {
-        const routes = await listAudioRoutes();
-        routesRef.current = routes;
-        useCallStore.getState().setAvailableRoutes(routes);
-        // A new peripheral (e.g. Bluetooth) auto-wins; otherwise keep the user's chosen device.
-        const { audioDeviceId } = useCallStore.getState();
-        const stillThere = routes.find((r) => r.deviceId === audioDeviceId && r.deviceId);
-        const route = stillThere ?? pickPreferredRoute(routes);
-        useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
-        void engineRef.current?.setSinkId(route.deviceId);
-      })();
+      const phase = useCallStore.getState().phase;
+      if (phase === "idle" || phase === "ended") return;
+      void routeHelpersRef.current.refreshRoutes({ deviceChange: true });
     };
     md.addEventListener("devicechange", onChange);
     return () => md.removeEventListener("devicechange", onChange);
@@ -408,6 +425,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     <CallActionsContext.Provider value={actions}>
       {children}
       <CallSounds />
+      <CallNotice />
       <IncomingCallModal />
       <CallBar />
       <CallOverlay />
@@ -440,4 +458,18 @@ function CallSounds() {
   }, [phase, direction]);
 
   return null;
+}
+
+/** Brief toast when mic permission is denied or another call notice is set. */
+function CallNotice() {
+  const notice = useCallStore((s) => s.callNotice);
+  if (!notice) return null;
+  return (
+    <div
+      role="status"
+      className="pointer-events-none fixed bottom-6 left-1/2 z-[200] max-w-sm -translate-x-1/2 rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-text shadow-elevated animate-fade-in-up"
+    >
+      {notice}
+    </div>
+  );
 }

@@ -51,6 +51,8 @@ interface CallState {
   /** Live RTCPeerConnection state for the quality/connection indicator. */
   connection: RTCPeerConnectionState;
   endReason: CallEndReason | null;
+  /** Brief user-visible message (e.g. mic denied) — cleared automatically by CallProvider. */
+  callNotice: string | null;
 
   startOutgoing: (args: { callId: string; chatId: string; media: CallMedia; peer: PublicUser }) => void;
   receiveIncoming: (args: { callId: string; chatId: string; media: CallMedia; peer: PublicUser }) => void;
@@ -62,6 +64,7 @@ interface CallState {
   setMuted: (muted: boolean) => void;
   setAudioRoute: (route: AudioRouteKind, deviceId: string) => void;
   setAvailableRoutes: (routes: AudioRoute[]) => void;
+  setCallNotice: (callNotice: string | null) => void;
   minimize: () => void;
   expand: () => void;
   endCall: (reason: CallEndReason) => void;
@@ -86,6 +89,7 @@ const initial = {
   connectedAt: null,
   connection: "new" as RTCPeerConnectionState,
   endReason: null,
+  callNotice: null,
 };
 
 export const useCallStore = create<CallState>((set) => ({
@@ -109,6 +113,7 @@ export const useCallStore = create<CallState>((set) => ({
 
   setAudioRoute: (audioRoute, audioDeviceId) => set({ audioRoute, audioDeviceId }),
   setAvailableRoutes: (availableRoutes) => set({ availableRoutes }),
+  setCallNotice: (callNotice) => set({ callNotice }),
 
   minimize: () => set({ uiMode: "minimized" }),
   expand: () => set({ uiMode: "expanded" }),

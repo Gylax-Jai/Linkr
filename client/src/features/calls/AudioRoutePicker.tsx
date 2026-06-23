@@ -15,10 +15,8 @@ const ROUTE_ICON: Record<AudioRouteKind, LucideIcon> = {
 };
 
 /**
- * Audio-output route control (Sprint 3.1.3). The button shows the *current* route's icon (so it
- * reflects reality — e.g. Bluetooth when earbuds are connected); tapping opens a small dropdown to
- * switch between the available outputs (Bluetooth / Headset / Speaker / Earpiece). When only one
- * route exists (or the browser can't switch sinks, e.g. iOS), it renders as a static indicator.
+ * Audio-output route control. Always shows a dropdown on mobile (Earpiece + Speaker, + BT when
+ * connected). The trigger reflects the *current* route; tap to pick another.
  */
 export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" | "bar" }) {
   const audioRoute = useCallStore((s) => s.audioRoute);
@@ -46,7 +44,8 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
   }, [open]);
 
   const Icon = ROUTE_ICON[audioRoute];
-  const canSwitch = routes.length > 1;
+  // Mobile always has Earpiece + Speaker (≥2); desktop may have one — show menu whenever ≥2.
+  const showMenu = routes.length >= 2;
   const big = variant === "overlay";
 
   const triggerSize = big ? "h-14 w-14" : "h-8 w-8";
@@ -58,9 +57,8 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          if (canSwitch) setOpen((v) => !v);
+          if (showMenu) setOpen((v) => !v);
         }}
-        disabled={!canSwitch}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Audio output: ${routeLabel(audioRoute)}`}
@@ -71,11 +69,10 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
           big
             ? "bg-surface-2 text-text shadow-soft hover:scale-105"
             : "text-primary-foreground hover:bg-black/10",
-          !canSwitch && "opacity-60",
         )}
       >
         <Icon className={iconSize} />
-        {canSwitch ? (
+        {showMenu ? (
           <ChevronDown
             className={cn(
               "absolute rounded-full bg-text text-surface",
@@ -90,7 +87,7 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
         ) : null}
       </button>
 
-      {open && canSwitch ? (
+      {open && showMenu ? (
         <div
           role="menu"
           onClick={(e) => e.stopPropagation()}
@@ -101,7 +98,7 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
         >
           {routes.map((r) => {
             const RIcon = ROUTE_ICON[r.kind];
-            const active = r.deviceId === audioDeviceId || (!audioDeviceId && r.kind === audioRoute);
+            const active = r.deviceId === audioDeviceId || r.kind === audioRoute;
             return (
               <button
                 key={r.deviceId || r.kind}
