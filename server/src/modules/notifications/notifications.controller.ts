@@ -3,6 +3,8 @@ import type { NotificationIdParam } from "@linkr/shared";
 import { ApiError } from "../../utils/ApiError.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import {
+  deleteAllNotifications,
+  deleteOneNotification,
   getUnreadCount,
   listNotifications,
   markAllRead,
@@ -36,5 +38,18 @@ export const readAll = asyncHandler(async (req, res) => {
 export const readOne = asyncHandler(async (req, res) => {
   const { id } = req.params as NotificationIdParam;
   await markOneRead(requireUserId(req), id);
+  res.status(200).json({ ok: true });
+});
+
+/** DELETE /api/notifications — remove all of the user's notifications ("Clear all"). */
+export const clearAll = asyncHandler(async (req, res) => {
+  await deleteAllNotifications(requireUserId(req));
+  res.status(200).json({ ok: true });
+});
+
+/** DELETE /api/notifications/:id — remove a single notification (owner only). */
+export const removeOne = asyncHandler(async (req, res) => {
+  const { id } = req.params as NotificationIdParam;
+  await deleteOneNotification(requireUserId(req), id);
   res.status(200).json({ ok: true });
 });

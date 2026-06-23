@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Ban, Bell, Check, MessageSquare, UserCheck, UserPlus, X } from "lucide-react";
+import { Ban, Bell, Check, MessageSquare, Trash2, UserCheck, UserPlus, X } from "lucide-react";
 import type { NotificationDTO } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import {
@@ -14,6 +14,8 @@ import { formatChatListTime } from "@/lib/utils/formatTime";
 import { cn } from "@/lib/utils";
 import {
   notificationKeys,
+  useClearAllNotificationsMutation,
+  useDeleteNotificationMutation,
   useMarkNotificationsReadMutation,
   useNotifications,
   useUnreadCount,
@@ -56,6 +58,7 @@ export function NotificationCenter() {
   const { data: notifications = [], isLoading } = useNotifications();
   const { data: unreadCount = 0 } = useUnreadCount();
   const markRead = useMarkNotificationsReadMutation();
+  const clearAll = useClearAllNotificationsMutation();
 
   useEffect(() => {
     if (!open) return;
@@ -131,9 +134,21 @@ export function NotificationCenter() {
           )}
         >
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <p className="text-sm font-semibold">Notifications</p>
-            {unreadCount > 0 ? (
-              <span className="text-xs font-medium text-primary">{unreadCount} new</span>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold">Notifications</p>
+              {unreadCount > 0 ? (
+                <span className="text-xs font-medium text-primary">{unreadCount} new</span>
+              ) : null}
+            </div>
+            {notifications.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => !clearAll.isPending && clearAll.mutate()}
+                disabled={clearAll.isPending}
+                className="text-xs font-medium text-text-muted transition-colors hover:text-text disabled:opacity-50"
+              >
+                Clear all
+              </button>
             ) : null}
           </div>
 
@@ -172,6 +187,7 @@ function NotificationRow({
   const accept = useAcceptFriendRequestMutation();
   const reject = useRejectFriendRequestMutation();
   const block = useBlockUserMutation();
+  const deleteNotification = useDeleteNotificationMutation();
   const [resolution, setResolution] = useState<"accepted" | "rejected" | "blocked" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -204,11 +220,46 @@ function NotificationRow({
     void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
   };
 
-  const handleError = (err: unknown) => {
+  const handleError = (resolved: typeof resolution, err: unknown) => {
+    // Roll back the optimistic label so the buttons return, and surface why it failed.
+    if (resolution === resolved) setResolution(null);
     setError(actionErrorMessage(err));
-    // The most common failure is a request that's already handled — refetch so stale rows clear.
     void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
   };
+
+  /**
+   * "Click and done": flip the row to its resolved label *immediately* (optimistic) so it feels
+   * instant, then run the mutation in the background. On success, purge any duplicate rows; on
+   * error, roll the label back and show the reason.
+   */
+  const runAction = (
+    resolved: NonNullable<typeof resolution>,
+    mutate: () => Promise<unknown>,
+    match: (other: NotificationDTO) => boolean,
+  ) => {
+    if (pending || resolution) return;
+    setError(null);
+    setResolution(resolved);
+    mutate()
+      .then(() => purgeResolved(match))
+      .catch((err) => handleError(resolved, err));
+  };
+
+  const deleteButton = (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!deleteNotification.isPending) deleteNotification.mutate(n._id);
+      }}
+      disabled={deleteNotification.isPending}
+      aria-label="Delete notification"
+      title="Delete notification"
+      className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-red-500 disabled:opacity-50"
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+    </button>
+  );
 
   const inner = (
     <>
@@ -232,7 +283,10 @@ function NotificationRow({
   if (isFriendRequest) {
     return (
       <li className={cn("px-4 py-3", !n.read && "bg-primary/5")}>
-        <div className="flex items-start gap-3">{inner}</div>
+        <div className="flex items-start gap-3">
+          {inner}
+          {deleteButton}
+        </div>
         <div className="mt-2 flex items-center gap-2 pl-11">
           {resolution ? (
             <span className="text-xs font-medium capitalize text-text-muted">{resolution}</span>
@@ -241,16 +295,13 @@ function NotificationRow({
               <button
                 type="button"
                 disabled={pending}
-                onClick={() => {
-                  setError(null);
-                  accept.mutate(n.friendshipId!, {
-                    onSuccess: () => {
-                      setResolution("accepted");
-                      purgeResolved((o) => o.friendshipId === n.friendshipId);
-                    },
-                    onError: handleError,
-                  });
-                }}
+                onClick={() =>
+                  runAction(
+                    "accepted",
+                    () => accept.mutateAsync(n.friendshipId!),
+                    (o) => o.friendshipId === n.friendshipId,
+                  )
+                }
                 className="inline-flex items-center gap-1 rounded-full bg-gradient-primary px-3 py-1 text-xs font-semibold text-primary-foreground shadow-soft transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 <Check className="h-3 w-3" />
@@ -259,16 +310,13 @@ function NotificationRow({
               <button
                 type="button"
                 disabled={pending}
-                onClick={() => {
-                  setError(null);
-                  reject.mutate(n.friendshipId!, {
-                    onSuccess: () => {
-                      setResolution("rejected");
-                      purgeResolved((o) => o.friendshipId === n.friendshipId);
-                    },
-                    onError: handleError,
-                  });
-                }}
+                onClick={() =>
+                  runAction(
+                    "rejected",
+                    () => reject.mutateAsync(n.friendshipId!),
+                    (o) => o.friendshipId === n.friendshipId,
+                  )
+                }
                 className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50"
               >
                 <X className="h-3 w-3" />
@@ -277,16 +325,13 @@ function NotificationRow({
               <button
                 type="button"
                 disabled={pending}
-                onClick={() => {
-                  setError(null);
-                  block.mutate(n.actor!._id, {
-                    onSuccess: () => {
-                      setResolution("blocked");
-                      purgeResolved((o) => o.actor?._id === n.actor?._id);
-                    },
-                    onError: handleError,
-                  });
-                }}
+                onClick={() =>
+                  runAction(
+                    "blocked",
+                    () => block.mutateAsync(n.actor!._id),
+                    (o) => o.actor?._id === n.actor?._id,
+                  )
+                }
                 aria-label="Block user"
                 title="Block user"
                 className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50"
@@ -308,17 +353,15 @@ function NotificationRow({
   }
 
   return (
-    <li>
+    <li className={cn("flex items-stretch", !n.read && "bg-primary/5")}>
       <button
         type="button"
         onClick={() => onOpen(n)}
-        className={cn(
-          "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2",
-          !n.read && "bg-primary/5",
-        )}
+        className="flex min-w-0 flex-1 items-start gap-3 py-3 pl-4 text-left transition-colors hover:bg-surface-2"
       >
         {inner}
       </button>
+      <div className="flex items-center pr-2">{deleteButton}</div>
     </li>
   );
 }

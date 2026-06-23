@@ -58,3 +58,64 @@ export function useMarkNotificationsReadMutation() {
     },
   });
 }
+
+/** Clear all notifications (optimistically empties the list + badge). */
+export function useClearAllNotificationsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await api.delete("/notifications");
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: notificationKeys.all });
+      const prevList = queryClient.getQueryData<NotificationDTO[]>(notificationKeys.list());
+      const prevCount = queryClient.getQueryData<number>(notificationKeys.unread());
+      queryClient.setQueryData<NotificationDTO[]>(notificationKeys.list(), []);
+      queryClient.setQueryData<number>(notificationKeys.unread(), 0);
+      return { prevList, prevCount };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prevList) queryClient.setQueryData(notificationKeys.list(), context.prevList);
+      if (context?.prevCount !== undefined) {
+        queryClient.setQueryData(notificationKeys.unread(), context.prevCount);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+    },
+  });
+}
+
+/** Delete a single notification (optimistically removes the row + fixes the unread badge). */
+export function useDeleteNotificationMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/notifications/${id}`);
+    },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: notificationKeys.all });
+      const prevList = queryClient.getQueryData<NotificationDTO[]>(notificationKeys.list());
+      const prevCount = queryClient.getQueryData<number>(notificationKeys.unread());
+      const removed = prevList?.find((n) => n._id === id);
+      queryClient.setQueryData<NotificationDTO[]>(notificationKeys.list(), (old) =>
+        old?.filter((n) => n._id !== id),
+      );
+      if (removed && !removed.read) {
+        queryClient.setQueryData<number>(notificationKeys.unread(), (count) =>
+          Math.max(0, (count ?? 0) - 1),
+        );
+      }
+      return { prevList, prevCount };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.prevList) queryClient.setQueryData(notificationKeys.list(), context.prevList);
+      if (context?.prevCount !== undefined) {
+        queryClient.setQueryData(notificationKeys.unread(), context.prevCount);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+    },
+  });
+}

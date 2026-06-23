@@ -138,6 +138,16 @@ export async function markOneRead(userId: string, id: string): Promise<void> {
   await NotificationModel.updateOne({ _id: id, user: userId }, { $set: { read: true } });
 }
 
+/** Delete all of the user's notifications ("Clear all"). Scoped to the owner. */
+export async function deleteAllNotifications(userId: string): Promise<void> {
+  await NotificationModel.deleteMany({ user: userId });
+}
+
+/** Delete a single notification — scoped to the owner so users can't remove others' rows. */
+export async function deleteOneNotification(userId: string, id: string): Promise<void> {
+  await NotificationModel.deleteOne({ _id: id, user: userId });
+}
+
 /**
  * Once a friend request is accepted/rejected/cancelled, its `friend_request` notifications are no
  * longer actionable — delete them so the bell can't show stale Accept/Reject buttons (which would
