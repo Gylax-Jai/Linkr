@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { isAxiosError } from "axios";
 import { Ban, Bell, Check, MessageSquare, UserCheck, UserPlus, X } from "lucide-react";
 import type { NotificationDTO } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
@@ -22,6 +23,19 @@ function NotificationIcon({ type }: { type: NotificationDTO["type"] }) {
   if (type === "friend_request") return <UserPlus className="h-3.5 w-3.5" />;
   if (type === "friend_accepted") return <UserCheck className="h-3.5 w-3.5" />;
   return <MessageSquare className="h-3.5 w-3.5" />;
+}
+
+/** Friendly message for a failed Accept/Reject/Block — surfaces the server reason when present. */
+function actionErrorMessage(err: unknown): string {
+  if (isAxiosError(err)) {
+    const data = err.response?.data as { error?: string } | undefined;
+    if (typeof data?.error === "string" && data.error.trim()) return data.error;
+    const status = err.response?.status;
+    // The request was already handled elsewhere (duplicate row / other device).
+    if (status === 400 || status === 404) return "This request was already handled.";
+    if (!err.response) return "Network error — check your connection and try again.";
+  }
+  return "Something went wrong. Please try again.";
 }
 
 function notificationText(n: NotificationDTO): { title: string; sub?: string } {
@@ -159,13 +173,40 @@ function NotificationRow({
   const reject = useRejectFriendRequestMutation();
   const block = useBlockUserMutation();
   const [resolution, setResolution] = useState<"accepted" | "rejected" | "blocked" | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const { title, sub } = notificationText(n);
   const isFriendRequest = n.type === "friend_request";
   const canAct = isFriendRequest && Boolean(n.friendshipId) && Boolean(n.actor?._id);
   const pending = accept.isPending || reject.isPending || block.isPending;
 
-  const refreshNotifications = () => {
+  /**
+   * Remove every actionable friend_request row that this action just resolved — not only the row
+   * that was clicked. A single request can have duplicate rows (and the same person can appear in
+   * several), so we purge by `friendshipId` (accept/reject) or `actor` (block) from the cache and
+   * fix the unread count, then refetch for the server's truth.
+   */
+  const purgeResolved = (match: (other: NotificationDTO) => boolean) => {
+    let removedUnread = 0;
+    queryClient.setQueryData<NotificationDTO[]>(notificationKeys.list(), (old) => {
+      if (!old) return old;
+      return old.filter((row) => {
+        const remove = row.type === "friend_request" && match(row);
+        if (remove && !row.read) removedUnread += 1;
+        return !remove;
+      });
+    });
+    if (removedUnread > 0) {
+      queryClient.setQueryData<number>(notificationKeys.unread(), (count) =>
+        Math.max(0, (count ?? 0) - removedUnread),
+      );
+    }
+    void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+  };
+
+  const handleError = (err: unknown) => {
+    setError(actionErrorMessage(err));
+    // The most common failure is a request that's already handled — refetch so stale rows clear.
     void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
   };
 
@@ -200,14 +241,16 @@ function NotificationRow({
               <button
                 type="button"
                 disabled={pending}
-                onClick={() =>
+                onClick={() => {
+                  setError(null);
                   accept.mutate(n.friendshipId!, {
                     onSuccess: () => {
                       setResolution("accepted");
-                      refreshNotifications();
+                      purgeResolved((o) => o.friendshipId === n.friendshipId);
                     },
-                  })
-                }
+                    onError: handleError,
+                  });
+                }}
                 className="inline-flex items-center gap-1 rounded-full bg-gradient-primary px-3 py-1 text-xs font-semibold text-primary-foreground shadow-soft transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 <Check className="h-3 w-3" />
@@ -216,14 +259,16 @@ function NotificationRow({
               <button
                 type="button"
                 disabled={pending}
-                onClick={() =>
+                onClick={() => {
+                  setError(null);
                   reject.mutate(n.friendshipId!, {
                     onSuccess: () => {
                       setResolution("rejected");
-                      refreshNotifications();
+                      purgeResolved((o) => o.friendshipId === n.friendshipId);
                     },
-                  })
-                }
+                    onError: handleError,
+                  });
+                }}
                 className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50"
               >
                 <X className="h-3 w-3" />
@@ -232,14 +277,16 @@ function NotificationRow({
               <button
                 type="button"
                 disabled={pending}
-                onClick={() =>
+                onClick={() => {
+                  setError(null);
                   block.mutate(n.actor!._id, {
                     onSuccess: () => {
                       setResolution("blocked");
-                      refreshNotifications();
+                      purgeResolved((o) => o.actor?._id === n.actor?._id);
                     },
-                  })
-                }
+                    onError: handleError,
+                  });
+                }}
                 aria-label="Block user"
                 title="Block user"
                 className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50"
@@ -251,6 +298,11 @@ function NotificationRow({
             <span className="text-xs text-text-muted">Open the friends panel to respond.</span>
           )}
         </div>
+        {error ? (
+          <p className="mt-1.5 pl-11 text-xs text-red-500" role="alert">
+            {error}
+          </p>
+        ) : null}
       </li>
     );
   }

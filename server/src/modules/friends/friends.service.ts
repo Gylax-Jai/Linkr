@@ -16,7 +16,10 @@ import type { UserDocument } from "../auth/auth.service.js";
 import { getSocketServer } from "../../sockets/io.js";
 import { maybeAutoAcceptFriendRequest } from "../bot/bot.service.js";
 import { getOrCreateDirectChat } from "../chat/chat.service.js";
-import { createNotification } from "../notifications/notifications.service.js";
+import {
+  createNotification,
+  resolveFriendRequestNotifications,
+} from "../notifications/notifications.service.js";
 import { resolveAvatarUrl } from "../users/avatar.helpers.js";
 import { logger } from "../../utils/logger.js";
 import { findFriendshipBetween } from "./friendship.helpers.js";
@@ -224,6 +227,10 @@ export async function acceptFriendRequest(actorId: string, friendshipId: string)
     logger.warn("Failed to auto-create chat on friend accept", { err, actorId, otherUserId });
   }
 
+  // The request is handled — drop the recipient's actionable friend_request notification(s) so the
+  // bell can't keep showing stale Accept/Reject buttons (which would 400 on the next click).
+  void resolveFriendRequestNotifications(friendshipId);
+
   const friendship = toFriendship(doc);
   const actor = await UserModel.findById(actorId).select("_id username displayName avatar");
   emitToUser(otherUserId, SOCKET_EVENTS.FRIEND_ACCEPTED, {
@@ -244,6 +251,8 @@ export async function rejectFriendRequest(actorId: string, friendshipId: string)
   doc.actionBy = doc.recipient;
   await doc.save();
 
+  void resolveFriendRequestNotifications(friendshipId);
+
   const friendship = toFriendship(doc);
   emitToUser(otherUserId, SOCKET_EVENTS.FRIEND_REJECTED, { friendship });
   return { friendship };
@@ -255,6 +264,8 @@ export async function cancelFriendRequest(actorId: string, friendshipId: string)
     throw ApiError.forbidden("FORBIDDEN", "Only the requester can cancel a pending request");
   }
   await doc.deleteOne();
+  // The recipient's actionable notification now points at a request that no longer exists.
+  void resolveFriendRequestNotifications(friendshipId);
 }
 
 export async function blockUser(actorId: string, targetUserId: string): Promise<FriendRequestResponse> {

@@ -69,6 +69,30 @@ export async function createNotification(params: CreateNotificationParams): Prom
   if (actorId && actorId === userId) return; // never notify the actor about their own action
 
   try {
+    // Dedupe friend requests: a request can be (re)sent for the SAME friendship (double-tap, resend
+    // after reject, etc.). Without this, the bell stacks several actionable rows for one request, so
+    // accepting one leaves stale Accept/Reject buttons that 400 on the next click. Reuse the existing
+    // row (bump it to unread + re-emit) instead of inserting a duplicate.
+    if (type === "friend_request" && friendshipId) {
+      const existing = (await NotificationModel.findOne({
+        user: userId,
+        type: "friend_request",
+        friendshipId,
+      })) as NotificationDocument | null;
+      if (existing) {
+        if (existing.read) {
+          existing.read = false;
+          await existing.save();
+        }
+        await existing.populate(ACTOR_POPULATE);
+        const io = getSocketServer();
+        io?.to(`user:${userId}`).emit(SOCKET_EVENTS.NOTIFICATION_NEW, {
+          notification: toNotificationDTO(existing),
+        });
+        return;
+      }
+    }
+
     const doc = (await NotificationModel.create({
       user: userId,
       type,
@@ -112,4 +136,20 @@ export async function markAllRead(userId: string): Promise<void> {
 /** Mark a single notification read — scoped to the owner so users can't touch others' rows. */
 export async function markOneRead(userId: string, id: string): Promise<void> {
   await NotificationModel.updateOne({ _id: id, user: userId }, { $set: { read: true } });
+}
+
+/**
+ * Once a friend request is accepted/rejected/cancelled, its `friend_request` notifications are no
+ * longer actionable — delete them so the bell can't show stale Accept/Reject buttons (which would
+ * 400 with "Invalid friendship state"). Best-effort: never throws, no-ops without Mongo.
+ */
+export async function resolveFriendRequestNotifications(friendshipId: string): Promise<void> {
+  if (!isMongoConnected()) return;
+  try {
+    await NotificationModel.deleteMany({ type: "friend_request", friendshipId });
+  } catch (err) {
+    logger.warn("Failed to resolve friend_request notifications", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
