@@ -130,8 +130,12 @@ export function ConversationPane() {
 
   return (
     <section className="flex h-full flex-1 flex-col bg-bg">
-      <ConversationHeader chat={chat} onBack={() => setActiveChat(null)} />
-      {status ? <ConversationStatusBanner status={status} visible={statusVisible} /> : null}
+      <ConversationHeader
+        chat={chat}
+        onBack={() => setActiveChat(null)}
+        status={status}
+        statusVisible={statusVisible}
+      />
       <MessageList
         chatId={activeChatId}
         participant={chat.participant}
@@ -153,30 +157,48 @@ export function ConversationPane() {
 }
 
 /**
- * Mobile-only floating status bubble just under the chat header (Sprint G), WhatsApp-style: a small
- * left-aligned pill indented to sit under the avatar/name — NOT a full-width bar. Collapses (height +
- * opacity + slide) when scrolled away from the latest messages. On sm+ the compact `StatusChip` in
- * the header row covers this instead, so it's hidden there.
+ * Mobile-only WhatsApp-style status bubble (Sprint G.2): a small speech bubble that hangs directly
+ * under the contact's avatar with an upward tail pointing into the photo — NOT a full-width bar or a
+ * detached pill. Absolutely positioned under the avatar so it reads as "attached" to the picture.
+ * Collapses (opacity + slide) when scrolled away from the latest messages; the header reserves space
+ * for it via padding so messages never jump. On sm+ the compact header `StatusChip` covers this.
  */
-function ConversationStatusBanner({ status, visible }: { status: string; visible: boolean }) {
+function AvatarStatusBubble({ status, visible }: { status: string; visible: boolean }) {
   return (
     <div
       aria-hidden={!visible}
       className={cn(
-        "pointer-events-none flex overflow-hidden px-3 transition-all duration-300 ease-out sm:hidden",
-        visible ? "max-h-12 translate-y-0 py-1.5 opacity-100" : "max-h-0 -translate-y-1 py-0 opacity-0",
+        // Anchored to the avatar's left edge and extending right (avoids clipping at the screen edge);
+        // the tail sits under the avatar center.
+        "pointer-events-none absolute left-0 top-full z-10 mt-2 transition-all duration-300 ease-out",
+        visible ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0",
       )}
     >
-      {/* Indented past the back button so the bubble floats under the avatar, not the screen edge. */}
-      <div className="ml-11 inline-flex max-w-[calc(100vw-7rem)] items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 shadow-soft">
-        <Quote className="h-3 w-3 shrink-0 text-primary" />
-        <p className="truncate text-xs text-text-muted">{status}</p>
+      {/* Upward tail: a small rotated square tucked under the avatar center, sharing the surface. */}
+      <span
+        aria-hidden="true"
+        className="absolute -top-1 left-3.5 h-2.5 w-2.5 -translate-x-1/2 rotate-45 rounded-[2px] bg-surface-2"
+      />
+      <div className="relative max-w-[min(220px,calc(100vw-7rem))] rounded-xl bg-surface-2 px-3 py-1.5 shadow-elevated">
+        <p className="truncate text-xs font-medium text-text">{status}</p>
       </div>
     </div>
   );
 }
 
-function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () => void }) {
+function ConversationHeader({
+  chat,
+  onBack,
+  status,
+  statusVisible,
+}: {
+  chat: ChatListItem;
+  onBack: () => void;
+  /** Custom status to surface as the under-avatar bubble on mobile (empty = none). */
+  status: string;
+  /** Scroll-linked visibility for the mobile status bubble (Sprint F/G). */
+  statusVisible: boolean;
+}) {
   const typingByChat = useUIStore((s) => s.typingByChat);
   const onlineOverrides = useUIStore((s) => s.onlineOverrides);
   const detailsOpen = useUIStore((s) => s.detailsOpen);
@@ -211,8 +233,18 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
     }
   };
 
+  // Reserve space under the header on mobile for the status bubble so messages don't jump when it
+  // shows/hides (sm+ uses the inline StatusChip instead, so no reserved space there). Sprint G.2.
+  const showMobileBubble = Boolean(status);
+
   return (
-    <div className="relative z-30 flex h-16 shrink-0 items-center gap-2 border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm sm:gap-3 sm:px-4">
+    <div
+      className={cn(
+        // Mobile height grows to host the under-avatar bubble; desktop stays a fixed 64px bar.
+        "relative z-30 flex min-h-16 shrink-0 items-center gap-2 border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm transition-[padding] duration-300 ease-out sm:h-16 sm:min-h-0 sm:gap-3 sm:px-4 sm:pb-0",
+        showMobileBubble && statusVisible ? "pb-12" : "pb-0",
+      )}
+    >
       <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onBack} aria-label="Back to chat list">
         <ArrowLeft className="h-4 w-4" />
       </Button>
@@ -223,13 +255,21 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
         title="View contact info"
         className="-ml-1 flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1 py-1 text-left transition-colors hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:gap-3"
       >
-        <Avatar
-          name={title}
-          src={chat.participant.avatar}
-          size="sm"
-          online={isSelf ? false : online}
-          icon={isSelf ? <Bookmark className="h-4 w-4" /> : undefined}
-        />
+        <span className="relative shrink-0">
+          <Avatar
+            name={title}
+            src={chat.participant.avatar}
+            size="sm"
+            online={isSelf ? false : online}
+            icon={isSelf ? <Bookmark className="h-4 w-4" /> : undefined}
+          />
+          {/* WhatsApp-style status hanging under the avatar (mobile only). */}
+          {status ? (
+            <span className="sm:hidden">
+              <AvatarStatusBubble status={status} visible={statusVisible} />
+            </span>
+          ) : null}
+        </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{title}</p>
           {isSelf ? (
