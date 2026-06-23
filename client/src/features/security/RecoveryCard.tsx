@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Check, Copy, Download, Loader2, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useE2EEAccount } from "@/lib/crypto";
 import { Button } from "@/components/ui/button";
-import { RecoverySetupFields, useRecoverySetup } from "./E2EEKeyGuard";
+import { RecoverySetupFields, UnlockPanel, useRecoverySetup } from "./E2EEKeyGuard";
 
 /**
  * Profile → Security card (Sprint D / D.1). The canonical, opt-in place to turn on multi-device:
@@ -26,13 +26,16 @@ export function RecoveryCard() {
     );
   }
 
+  // Locked on this device: this is the canonical "decrypt my chats anytime" entry point. The user can
+  // restore here with their passphrase or a phone-OTP-gated backup code (D.2) — no app-wide block.
   if (status === "locked") {
     return (
-      <Card icon={<ShieldQuestion className="h-5 w-5" />} tone="muted" title="Locked on this device">
+      <Card icon={<ShieldQuestion className="h-5 w-5" />} tone="warn" title="Restore your chats">
         <p className="text-xs text-text-muted">
-          Enter your recovery passphrase — or use a backup code — in the unlock prompt to read your chats on this
-          device.
+          Your old messages are encrypted with a key this device doesn't have yet. Enter your recovery passphrase — or a
+          one-time backup code — to decrypt your history here.
         </p>
+        <UnlockPanel />
       </Card>
     );
   }

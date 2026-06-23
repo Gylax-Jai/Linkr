@@ -3,7 +3,7 @@
 > **Living document:** everything built so far, how to run it, and what's next.  
 > For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
 
-**Last updated:** June 23, 2026 (Sprint D.1 — **opt-in recovery + backup codes**: new users are no longer nagged; multi-device is opt-in from Profile → Security, and a forgotten passphrase can be recovered on a new device with a **single-use backup code** gated by a **phone OTP** — all still zero-knowledge. Builds on Sprint D account-level E2EE.)
+**Last updated:** June 23, 2026 (Sprint D.2 — **backup save fixed + friendlier recovery**: switched to the **sumo** libsodium build so Argon2id/SHA-256 exist at runtime — multi-device setup now actually saves; a locked new device shows a **dismissible "Restore old chats?" popup** instead of blocking the app; and Profile → Security can **decrypt/restore history anytime**. Builds on Sprint D.1 opt-in recovery + backup codes.)
 
 Earlier (Sprint C.2.2 — Contact info button now toggles the profile pane open/closed; self chat renamed "Self chat" everywhere and now shows your own custom-status chip)
 
@@ -163,6 +163,14 @@ Sprint D worked but had two rough edges: (1) **brand-new users were nagged** to 
 - **Honest limits (unchanged guarantees):** we still **cannot reset** your passphrase or codes (zero-knowledge). If you lose *both* and have no logged-in device, **Start fresh** is the only path (old history stays unreadable). Recovery codes are a convenience the user must save — phrased plainly in the UI.
 - **Verified green:** `tsc --noEmit` for shared + server + client.
 
+### Sprint D.2 — Backup actually saves + dismissible restore + decrypt-anytime 🐛🔓
+D.1 shipped with a silent show-stopper: **setup never saved** ("Enable" produced no `PUT /api/keys/backup`). Root cause: the app imported the **standard `libsodium-wrappers`** build, whose **TypeScript types declare `crypto_pwhash`/`crypto_hash_sha256` but the runtime omits them** (those live only in the **sumo** build). So `wrapKeypair` threw `… is not a function` *before* the network call — and the `catch` swallowed it into a generic message. (This also means Sprint D's passphrase backup never actually persisted.)
+
+- **Real fix (`client/package.json`, `sodium.ts`):** switched `libsodium-wrappers` → **`libsodium-wrappers-sumo@^0.8.4`** (same API, includes Argon2id + SHA-256). `OPSLIMIT/MEMLIMIT_INTERACTIVE` = `2` / `64 MiB`, both within the upload-schema bounds, so nothing else changed. **Run `pnpm install` after pulling.**
+- **Real error messages (`cryptoStore.setupBackup`):** no longer returns a bare `{ok:false}` — it surfaces the actual reason (crypto-not-ready vs. server error via a small axios-error helper), and the Profile card shows it instead of "Please try again."
+- **Dismissible restore (`E2EEKeyGuard` → `RestoreModal`):** a locked new device no longer **blocks the whole app**. It shows a **dismissible "Restore your old chats?" popup** (backdrop / ✕ / "Not now"); closing lets the user keep chatting (new messages still flow). Dismissal is **per-tab (sessionStorage)** so it won't nag within a session but gently reminds next visit.
+- **Decrypt anytime (Profile → Security):** the unlock UI is extracted into a reusable **`UnlockPanel`** (passphrase **or** phone-OTP-gated backup code, plus "start fresh"), used by both the popup and the **locked-state Profile card** — so a user can **restore/decrypt their history from Profile at any time**, not only via the login prompt.
+
 ### Phase 2 — End-to-end encryption (text) 🔐
 The big one from the roadmap. **Text messages between humans are now end-to-end encrypted** with libsodium; the server stores ciphertext only and can never read them. Scope is **text-only** (media stays encrypted-in-transit for now) and the **dev bot stays plaintext** by design (see below).
 
@@ -311,7 +319,8 @@ After deploying (Vercel client + Render server) and testing with a friend, a bat
 ### Post-MVP phases (named roadmap)
 - **Phase 2 — E2EE (text)** ✅ **Done** — libsodium sealed-box encryption for human↔human text; keys module live; bot stays plaintext by design.
 - **Sprint D — Account-level E2EE / multi-device** ✅ **Done** — recovery-passphrase-encrypted key backup (`/api/keys/backup`) + unlock/restore on new devices; converges every device on one account keypair.
-- **Sprint D.1 — Opt-in recovery + backup codes** ✅ **Done** — no new-user nag (multi-device opt-in from Profile → Security); **single-use backup codes** (`POST /api/keys/recover`, phone-OTP gated) recover a forgotten passphrase on a new device; masked phone hint + remaining-codes count. *Still open in this theme: E2EE media; QR device-linking (needs an app); optional key-fingerprint verification.*
+- **Sprint D.1 — Opt-in recovery + backup codes** ✅ **Done** — no new-user nag (multi-device opt-in from Profile → Security); **single-use backup codes** (`POST /api/keys/recover`, phone-OTP gated) recover a forgotten passphrase on a new device; masked phone hint + remaining-codes count.
+- **Sprint D.2 — Backup save fixed + dismissible restore + decrypt-anytime** ✅ **Done** — switched to **`libsodium-wrappers-sumo`** (standard build's runtime lacks `crypto_pwhash`/`crypto_hash_sha256`, so setup silently threw before the `PUT`); real error messages; **dismissible "Restore old chats?" popup** (no app-wide block); reusable `UnlockPanel` lets users **decrypt history anytime from Profile → Security**. *Still open in this theme: E2EE media; QR device-linking (needs an app); optional key-fingerprint verification.*
 - **Phase 3 — Realtime calling** — voice + video (WebRTC), screen share, TURN/coturn; wire the disabled header call buttons.
 - **Phase 4 — Chat UX & account controls** — mute, archive, share, message forward, report user, privacy-settings UI (API exists), account deletion.
 - **Phase 5 — Notifications++** — web push (Service Worker + VAPID) for background alerts (generic content to preserve E2EE).

@@ -52,6 +52,18 @@ export interface SetupBackupResult {
   ok: boolean;
   /** The plaintext recovery codes (present only on success) — display once, never stored. */
   codes?: string[];
+  /** Human-readable failure reason (present only on failure) so the UI can show what went wrong. */
+  error?: string;
+}
+
+/** Turn an unknown thrown value into a short, user-facing message (with the server detail if any). */
+function errorMessage(err: unknown, fallback: string): string {
+  const axiosDetail = (err as { response?: { data?: { error?: string; message?: string } } })?.response
+    ?.data;
+  if (axiosDetail?.error) return axiosDetail.error;
+  if (axiosDetail?.message) return axiosDetail.message;
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
 }
 
 /** Proof of phone ownership for redeeming a recovery code (MSG91 token, or dev phone + OTP). */
@@ -255,17 +267,27 @@ export const useCryptoStore = create<CryptoState>((set, get) => ({
 
   setupBackup: async (passphrase) => {
     const { sodium, keypair, status } = get();
-    if (status !== "ready" || !sodium || !keypair) return { ok: false };
+    if (!sodium || !keypair) {
+      return { ok: false, error: "Encryption isn't ready on this device yet. Reload and try again." };
+    }
+    if (status !== "ready") {
+      return {
+        ok: false,
+        error: "This device must be unlocked before you can set up recovery. Restore your chats first.",
+      };
+    }
 
     try {
+      // Heavy step: Argon2id over the passphrase + one per recovery code. If the sodium build lacks
+      // crypto_pwhash this throws synchronously here (before any network call) — surfaced below.
       const backup = wrapKeypair(sodium, keypair, passphrase);
       const codes = generateRecoveryCodes(sodium);
       const recoveryCodes = wrapKeypairForCodes(sodium, keypair, codes);
       await api.put("/keys/backup", { publicKey: keypair.publicKey, backup, recoveryCodes });
       set({ needsBackup: false, recoveryCodesRemaining: codes.length });
       return { ok: true, codes };
-    } catch {
-      return { ok: false };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err, "Couldn't save your recovery passphrase.") };
     }
   },
 

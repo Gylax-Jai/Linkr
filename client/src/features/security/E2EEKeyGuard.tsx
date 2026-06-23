@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { KeyRound, Loader2 } from "lucide-react";
+import { KeyRound, Loader2, X } from "lucide-react";
 import { isMsg91Enabled, sendMsg91Otp, verifyMsg91Otp } from "@/lib/msg91";
 import { api } from "@/lib/api";
 import { useCryptoStore, useE2EEAccount } from "@/lib/crypto";
@@ -7,13 +7,13 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
- * Account-level E2EE gatekeeper (Sprint D / D.1). Mounted once inside the authenticated shell.
+ * Account-level E2EE gatekeeper (Sprint D / D.1 / D.2). Mounted once inside the authenticated shell.
  *
- * It only blocks when this account has a server key backup but this device has no matching key (a new
- * device, or cleared storage) — the LOCKED state. The user restores by entering their recovery
- * passphrase, redeeming a single-use backup code (phone-OTP gated), or deliberately starting fresh
- * with a new key (losing old history). Blocking avoids silently downgrading new messages to
- * in-transit-only while we have no usable key.
+ * When this account has a server key backup but this device has no matching key (a new device, or
+ * cleared storage), the account is LOCKED for old history. Instead of blocking the whole app (D.1),
+ * we now show a DISMISSIBLE "Restore old chats?" popup (D.2): the user can restore with their recovery
+ * passphrase or a single-use backup code (phone-OTP gated), or dismiss it and keep using the app.
+ * They can restore later anytime from Profile → Security. New messages still flow while dismissed.
  *
  * New users are NOT nagged to set up multi-device — that's opt-in from Profile → Security (D.1).
  */
@@ -21,10 +21,36 @@ import { cn } from "@/lib/utils";
 /** Minimum recovery passphrase length. Kept modest but non-trivial; Argon2id does the heavy lifting. */
 export const RECOVERY_MIN_LENGTH = 8;
 
+/** Session-scoped key so a dismissed popup stays dismissed for this tab but reappears next visit. */
+function dismissKey(userId: string | null): string {
+  return `linkr.e2ee.restoreDismissed.${userId ?? "anon"}`;
+}
+
 export function E2EEKeyGuard() {
   const { locked } = useE2EEAccount();
-  if (locked) return <UnlockModal />;
-  return null;
+  const myUserId = useCryptoStore((s) => s.myUserId);
+  // Dismissal is per-tab (sessionStorage): we don't nag repeatedly within a session, but a fresh
+  // visit reminds the user their old chats are still locked (they can always restore from Profile).
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return sessionStorage.getItem(dismissKey(myUserId)) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  if (!locked || dismissed) return null;
+
+  const dismiss = () => {
+    try {
+      sessionStorage.setItem(dismissKey(myUserId), "1");
+    } catch {
+      /* private mode / storage disabled — fall back to in-memory dismissal */
+    }
+    setDismissed(true);
+  };
+
+  return <RestoreModal onDismiss={dismiss} />;
 }
 
 /** Shared overlay shell matching the app's modal styling (see FriendSearchModal). */
@@ -95,8 +121,52 @@ function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
-/** Blocking modal shown on a new device while the account is locked. */
-function UnlockModal() {
+/** Dismissible "Restore old chats?" popup shown on a locked device (D.2). Closing keeps the app usable. */
+function RestoreModal({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <ModalShell onBackdrop={onDismiss}>
+      <div className="mb-4 flex items-start gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+          <KeyRound className="h-5 w-5" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-text">Restore your old chats?</h2>
+          <p className="text-xs text-text-muted">
+            This account has encrypted history from another device. Restore it here with your passphrase or a backup
+            code — or keep chatting and do it later from Profile → Security.
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="Not now"
+          onClick={onDismiss}
+          className="ml-auto -mr-1 -mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <UnlockPanel onUnlocked={onDismiss} />
+
+      <div className="mt-4 text-center">
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="text-xs font-medium text-text-muted transition-colors hover:text-text"
+        >
+          Not now — keep using Linkr
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/**
+ * Reusable unlock UI (Sprint D.1/D.2): recovery passphrase OR a phone-OTP-gated backup code, plus the
+ * "start fresh" escape hatch. Used by the dismissible restore popup and Profile → Security so users can
+ * decrypt their chats at any time. `onUnlocked` fires after the account key is successfully restored.
+ */
+export function UnlockPanel({ onUnlocked }: { onUnlocked?: () => void }) {
   const recoveryCodesRemaining = useCryptoStore((s) => s.recoveryCodesRemaining);
   const [mode, setMode] = useState<"passphrase" | "code">("passphrase");
   const [passphrase, setPassphrase] = useState("");
@@ -115,6 +185,7 @@ function UnlockModal() {
       return;
     }
     setPassphrase("");
+    onUnlocked?.();
   };
 
   const reset = async () => {
@@ -122,24 +193,11 @@ function UnlockModal() {
     setBusy(true);
     await useCryptoStore.getState().resetKeys();
     setBusy(false);
+    onUnlocked?.();
   };
 
   return (
-    <ModalShell>
-      <div className="mb-4 flex items-center gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-full bg-primary/10 text-primary">
-          <KeyRound className="h-5 w-5" />
-        </span>
-        <div>
-          <h2 className="text-base font-semibold text-text">Unlock your messages</h2>
-          <p className="text-xs text-text-muted">
-            {mode === "passphrase"
-              ? "Enter your recovery passphrase to read your chats on this device."
-              : "Verify your phone and enter a backup code to restore your chats."}
-          </p>
-        </div>
-      </div>
-
+    <div>
       {mode === "passphrase" ? (
         <div className="space-y-3">
           <PassphraseField
@@ -147,7 +205,6 @@ function UnlockModal() {
             label="Recovery passphrase"
             value={passphrase}
             onChange={setPassphrase}
-            autoFocus
             onEnter={unlock}
           />
           {error ? (
@@ -156,11 +213,11 @@ function UnlockModal() {
             </p>
           ) : null}
           <Button type="button" variant="gradient" className="w-full" disabled={busy || !passphrase} onClick={unlock}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Unlock"}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Restore my chats"}
           </Button>
         </div>
       ) : (
-        <RecoveryCodePanel />
+        <RecoveryCodePanel onDone={onUnlocked} />
       )}
 
       {recoveryCodesRemaining > 0 ? (
@@ -207,7 +264,7 @@ function UnlockModal() {
           </button>
         )}
       </div>
-    </ModalShell>
+    </div>
   );
 }
 
@@ -215,7 +272,7 @@ function UnlockModal() {
  * Backup-code unlock (Sprint D.1): verify the account's phone (MSG91 SMS, or the dev OTP), then enter
  * a single-use recovery code. The raw code is opened locally; the server only burns its envelope.
  */
-function RecoveryCodePanel() {
+function RecoveryCodePanel({ onDone }: { onDone?: () => void }) {
   const phoneHint = useCryptoStore((s) => s.phoneHint);
   const usingMsg91 = isMsg91Enabled();
 
@@ -262,6 +319,7 @@ function RecoveryCodePanel() {
       }
       setOtp("");
       setCode("");
+      onDone?.();
     } catch (err) {
       setError(errorText(err, "Verification failed. Please try again."));
     } finally {
@@ -367,7 +425,7 @@ export function useRecoverySetup() {
     const result = await useCryptoStore.getState().setupBackup(passphrase);
     setBusy(false);
     if (!result.ok || !result.codes) {
-      setError("Couldn't save your recovery passphrase. Please try again.");
+      setError(result.error ?? "Couldn't save your recovery passphrase. Please try again.");
       return false;
     }
     setPassphrase("");
