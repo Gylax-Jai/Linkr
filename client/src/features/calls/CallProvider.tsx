@@ -15,6 +15,7 @@ import type { CallEndReason } from "@/lib/store";
 import { CallEngine } from "./CallEngine";
 import { fetchIceConfig } from "./useIceConfig";
 import { startCallTone, stopCallTone, playEndTone } from "./callSounds";
+import { audioConstraints } from "./callConfig";
 import { listAudioRoutes, nextRoute, pickPreferredRoute, type AudioRoute } from "./audioRoute";
 import { CallOverlay } from "./CallOverlay";
 import { CallBar } from "./CallBar";
@@ -57,6 +58,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   // Buffer signaling that can arrive before the engine exists (offer / early ICE candidates).
   const pendingOfferRef = useRef<WebRtcSdpPayload | null>(null);
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
+  // Caller's mic captured early (during "Calling…") to unlock device labels so the audio-route icon
+  // is correct before connect; adopted by the engine on accept, or stopped on teardown.
+  const earlyStreamRef = useRef<MediaStream | null>(null);
   // Audio-output routes available on this device (re-scanned on connect + device changes).
   const routesRef = useRef<AudioRoute[]>([]);
 
@@ -69,6 +73,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       pendingOfferRef.current = null;
       pendingIceRef.current = [];
       routesRef.current = [];
+      // Release the early mic stream if it was never adopted by an engine.
+      earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
+      earlyStreamRef.current = null;
       useCallStore.getState().endCall(reason);
       if (endTimerRef.current) window.clearTimeout(endTimerRef.current);
       // Briefly show the end state, then return to idle.
@@ -124,8 +131,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       const callId = crypto.randomUUID();
       useCallStore.getState().startOutgoing({ callId, chatId, media, peer });
 
-      // Scan audio routes early so the route button is meaningful while ringing.
-      void refreshRoutes();
+      // Grab the mic now (caller) so device labels unlock and the audio-route icon is correct while
+      // "Calling…" — then scan routes. The stream is adopted by the engine once the callee accepts.
+      void (async () => {
+        try {
+          earlyStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+        } catch {
+          /* Mic blocked/denied — routes still scan, just without unlocked labels. */
+        }
+        await refreshRoutes();
+      })();
 
       getSocket()?.emit(
         SOCKET_EVENTS.CALL_INITIATE,
@@ -265,7 +280,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             },
             onRemoteStream: () => useCallStore.getState().setActive(),
           });
-          await engine.startLocalMedia();
+          // Adopt the mic captured at call start (no second prompt); engine owns it now.
+          await engine.startLocalMedia(earlyStreamRef.current);
+          earlyStreamRef.current = null;
           engine.setMuted(useCallStore.getState().muted);
           engineRef.current = engine;
           // Scan + apply the audio route now that media is live.

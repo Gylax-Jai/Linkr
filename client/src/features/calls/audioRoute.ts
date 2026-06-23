@@ -24,8 +24,8 @@ export function canSwitchOutput(): boolean {
   return typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
 }
 
-const BLUETOOTH_RE = /bluetooth|airpod|buds|wireless|\bbt\b|headset/;
-const HEADSET_RE = /head(set|phone)|earphone|wired|earpods|usb audio|aux/;
+const BLUETOOTH_RE = /bluetooth|airpod|buds|wireless|\bbt\b|\btws\b|handsfree|jabra|jbl|boat|sony wf|galaxy buds/;
+const HEADSET_RE = /head(set|phone)|earphone|wired|earpods|usb audio|\baux\b/;
 const SPEAKER_RE = /speaker|loud/;
 const EARPIECE_RE = /earpiece|receiver/;
 
@@ -64,14 +64,24 @@ function detectPeripheral(devices: MediaDeviceInfo[]): AudioRouteKind | null {
  * of a meaningless "Default". De-dupes by kind, preferring a real device id over a pseudo one.
  */
 export async function listAudioRoutes(): Promise<AudioRoute[]> {
-  if (!canSwitchOutput() || !navigator.mediaDevices?.enumerateDevices) {
-    return [{ kind: "default", deviceId: "", label: "Default" }];
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return [{ kind: "speaker", deviceId: "", label: "Speaker" }];
   }
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const outputs = devices.filter((d) => d.kind === "audiooutput");
     const peripheral = detectPeripheral(devices);
+    const outputs = devices.filter((d) => d.kind === "audiooutput");
 
+    // Many mobile browsers (Android Chrome, iOS Safari) DON'T support `setSinkId` and expose no real
+    // output devices — the OS owns routing. We can't offer switching there, but we MUST still show the
+    // correct icon, so infer it from the connected peripheral (Bluetooth/headset) detected via the
+    // input/device labels. Returns a single, non-switchable route.
+    if (!canSwitchOutput() || outputs.length === 0) {
+      const kind = peripheral ?? "speaker";
+      return [{ kind, deviceId: "", label: routeLabel(kind) }];
+    }
+
+    // Desktop Chromium path: real output devices we can switch between.
     const byKind = new Map<AudioRouteKind, AudioRoute>();
     const add = (route: AudioRoute) => {
       const existing = byKind.get(route.kind);
@@ -91,11 +101,12 @@ export async function listAudioRoutes(): Promise<AudioRoute[]> {
 
     const routes = [...byKind.values()];
     if (routes.length === 0) {
-      routes.push({ kind: peripheral ?? "speaker", deviceId: "", label: routeLabel(peripheral ?? "speaker") });
+      const kind = peripheral ?? "speaker";
+      routes.push({ kind, deviceId: "", label: routeLabel(kind) });
     }
     return routes;
   } catch {
-    return [{ kind: "default", deviceId: "", label: "Default" }];
+    return [{ kind: "speaker", deviceId: "", label: "Speaker" }];
   }
 }
 

@@ -48,9 +48,17 @@ export class CallEngine {
     };
   }
 
-  /** Capture the local mic (and camera for video) and attach tracks to the connection. */
-  async startLocalMedia(): Promise<void> {
-    this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints(this.media));
+  /**
+   * Capture the local mic (and camera for video) and attach tracks to the connection. An already-
+   * captured `preloaded` audio stream (e.g. the caller's early mic grab, which unlocks device labels
+   * while "Calling…") is reused for audio calls to avoid a second permission prompt; video always
+   * (re)captures so the camera is included.
+   */
+  async startLocalMedia(preloaded?: MediaStream | null): Promise<void> {
+    this.localStream =
+      preloaded && this.media === "audio" && preloaded.getAudioTracks().length > 0
+        ? preloaded
+        : await navigator.mediaDevices.getUserMedia(mediaConstraints(this.media));
     for (const track of this.localStream.getTracks()) {
       const sender = this.pc.addTrack(track, this.localStream);
       if (track.kind === "audio") void applyAudioBitrate(sender);
