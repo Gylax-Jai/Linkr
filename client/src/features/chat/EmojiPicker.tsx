@@ -39,7 +39,7 @@ export function EmojiPickerPopover({
   }, []);
 
   const wrapperClass = docked
-    ? "w-full overflow-hidden rounded-xl border border-border shadow-elevated"
+    ? "emoji-picker-docked w-full overflow-hidden rounded-xl border border-border shadow-elevated"
     : "absolute bottom-full left-0 z-40 mb-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl shadow-elevated";
 
   return (

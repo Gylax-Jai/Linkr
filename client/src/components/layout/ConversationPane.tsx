@@ -257,7 +257,6 @@ function StatusChip({ status }: { status: string }) {
         type="button"
         onClick={() => setOpen((p) => !p)}
         aria-label={`Status: ${status}`}
-        title="Status"
         className="flex max-w-[10rem] items-center gap-1.5 rounded-full border border-border bg-surface-2/70 px-2.5 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text"
       >
         <Quote className="h-3 w-3 shrink-0 text-primary" />

@@ -221,3 +221,9 @@ em-emoji-picker {
   min-height: 0;
   --shadow: none;
 }
+
+/* Docked (mobile) picker: stretch edge-to-edge so it fills the panel below the composer instead of
+   leaving empty space on the right. dynamicWidth reflows the emoji grid to the full width. */
+.emoji-picker-docked em-emoji-picker {
+  width: 100%;
+}
