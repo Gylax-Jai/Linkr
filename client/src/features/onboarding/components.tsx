@@ -7,10 +7,11 @@ export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
     <input
       ref={ref}
       className={cn(
-        // Fully opaque surface + medium weight + explicit bright text so the typed value stays
-        // high-contrast in dark mode (a translucent bg over the page made it look faint on mobile).
-        "w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-sm font-medium text-text outline-none transition-colors",
-        "placeholder:font-normal placeholder:text-text-muted focus:border-primary/60 focus:ring-2 focus:ring-ring/40",
+        // Onboarding/login always render on the dark branded gradient, but theme color tokens can
+        // resolve to a light palette on some devices (mobile showed a white box with faint grey
+        // text). Hardcode a dark-grey field with white text so the typed value is always legible.
+        "w-full rounded-2xl border border-white/10 bg-[#1c1d22] px-4 py-2.5 text-sm font-medium text-white caret-white outline-none transition-colors",
+        "placeholder:font-normal placeholder:text-neutral-500 focus:border-primary/60 focus:ring-2 focus:ring-ring/40",
         className,
       )}
       {...props}

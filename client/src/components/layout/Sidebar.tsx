@@ -5,7 +5,6 @@ import {
   ChevronDown,
   Clock,
   MoreHorizontal,
-  PenSquare,
   Pin,
   PinOff,
   Search,
@@ -17,6 +16,7 @@ import {
 import type { ChatListItem } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import { FriendSearchModal } from "@/features/friends/FriendSearchModal";
+import { FriendsPanel } from "@/features/friends";
 import { useChatList, useDeleteChatMutation, usePinChatMutation } from "@/features/chat";
 import {
   useAcceptFriendRequestMutation,
@@ -63,6 +63,25 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
   const cancelRequest = useCancelFriendRequestMutation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Mobile long-press → open the actions menu. `longPressedRef` lets us swallow the click that
+  // fires right after the press so a long-press doesn't ALSO open the chat.
+  const longPressTimer = useRef<number | null>(null);
+  const longPressedRef = useRef(false);
+
+  const startLongPress = () => {
+    longPressedRef.current = false;
+    longPressTimer.current = window.setTimeout(() => {
+      longPressedRef.current = true;
+      setMenuOpen(true);
+    }, 500);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+  useEffect(() => cancelLongPress, []);
 
   const participantId = chat.participant._id;
   const friendship = chat.participant.friendship;
@@ -96,17 +115,34 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
     <div
       role="button"
       tabIndex={0}
-      onClick={() => setActiveChat(chat._id)}
+      onClick={() => {
+        // Swallow the click synthesized right after a long-press (it would re-open the chat).
+        if (longPressedRef.current) {
+          longPressedRef.current = false;
+          return;
+        }
+        setActiveChat(chat._id);
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           setActiveChat(chat._id);
         }
       }}
+      onTouchStart={startLongPress}
+      onTouchEnd={cancelLongPress}
+      onTouchMove={cancelLongPress}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenuOpen(true);
+      }}
       aria-current={active ? "true" : undefined}
       className={cn(
         "group relative flex w-full cursor-pointer items-center gap-3 rounded-2xl px-3 py-3 text-left transition-all duration-200",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
+        // Lift the row above its siblings while its menu is open so the dropdown isn't painted
+        // under the next (later-in-DOM) relatively-positioned row.
+        menuOpen && "z-20",
         active ? "bg-primary/10 shadow-soft" : "hover:bg-surface-2",
       )}
     >
@@ -345,6 +381,7 @@ export function Sidebar() {
   const openFriendSearch = useUIStore((s) => s.openFriendSearch);
   const closeFriendSearch = useUIStore((s) => s.closeFriendSearch);
   const [search, setSearch] = useState("");
+  const [view, setView] = useState<"chats" | "friends">("chats");
 
   const { data: chats = [], isLoading } = useChatList();
 
@@ -378,53 +415,69 @@ export function Sidebar() {
           <button
             type="button"
             onClick={openFriendSearch}
-            aria-label="Find friends"
-            title="Find friends"
+            aria-label="Find people"
+            title="Find people"
             className="grid h-8 w-8 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-primary"
           >
             <UserPlus className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={openFriendSearch}
-            aria-label="New chat"
-            title="Start a new chat"
-            className="grid h-8 w-8 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-primary"
-          >
-            <PenSquare className="h-4 w-4" />
-          </button>
+        </div>
+
+        {/* Chats | Friends switch: chats are conversations, Friends is your contact directory. */}
+        <div className="mt-3 flex gap-1 rounded-xl bg-surface-2 p-1">
+          {(["chats", "friends"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setView(id)}
+              className={cn(
+                "flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition-colors",
+                view === id ? "bg-surface text-text shadow-soft" : "text-text-muted hover:text-text",
+              )}
+            >
+              {id}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Conversation search (local filter) */}
-      <div className="px-3 py-3">
-        <div className="group flex items-center gap-2 rounded-2xl border border-transparent bg-surface-2 px-3 py-2.5 text-text-muted transition-colors focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-soft">
-          <Search className="h-4 w-4 transition-colors group-focus-within:text-primary" />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search conversations..."
-            className="w-full bg-transparent text-sm text-text placeholder:text-text-muted focus:outline-none"
-            aria-label="Search conversations"
-          />
-        </div>
-      </div>
+      {view === "chats" ? (
+        <>
+          {/* Conversation search (local filter) */}
+          <div className="px-3 py-3">
+            <div className="group flex items-center gap-2 rounded-2xl border border-transparent bg-surface-2 px-3 py-2.5 text-text-muted transition-colors focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-soft">
+              <Search className="h-4 w-4 transition-colors group-focus-within:text-primary" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search conversations..."
+                className="w-full bg-transparent text-sm text-text placeholder:text-text-muted focus:outline-none"
+                aria-label="Search conversations"
+              />
+            </div>
+          </div>
 
-      <nav className="flex-1 space-y-3 overflow-y-auto pb-3">
-        {isLoading ? (
-          <p className="px-4 text-sm text-text-muted">Loading chats…</p>
-        ) : filtered.length === 0 ? (
-          <p className="px-4 text-sm text-text-muted">
-            {search ? "No matching conversations." : "No chats yet — find a friend to start one."}
-          </p>
-        ) : (
-          <>
-            <ChatSection title="Pinned" chats={pinned} activeChatId={activeChatId} userId={user._id} />
-            <ChatSection title="Recent" chats={recent} activeChatId={activeChatId} userId={user._id} />
-          </>
-        )}
-      </nav>
+          <nav className="flex-1 space-y-3 overflow-y-auto pb-3">
+            {isLoading ? (
+              <p className="px-4 text-sm text-text-muted">Loading chats…</p>
+            ) : filtered.length === 0 ? (
+              <p className="px-4 text-sm text-text-muted">
+                {search ? "No matching conversations." : "No chats yet — find a friend to start one."}
+              </p>
+            ) : (
+              <>
+                <ChatSection title="Pinned" chats={pinned} activeChatId={activeChatId} userId={user._id} />
+                <ChatSection title="Recent" chats={recent} activeChatId={activeChatId} userId={user._id} />
+              </>
+            )}
+          </nav>
+        </>
+      ) : (
+        <div className="flex-1 overflow-y-auto px-3 py-3">
+          <FriendsPanel />
+        </div>
+      )}
 
       <FriendSearchModal open={friendSearchOpen} onClose={closeFriendSearch} />
     </aside>

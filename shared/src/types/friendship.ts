@@ -24,6 +24,8 @@ export interface FriendshipListItem {
   status: FriendshipStatus;
   direction: FriendshipDirection;
   user: PublicUser;
+  /** Live presence of the other party (best-effort snapshot at fetch time; socket events update it). */
+  online?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

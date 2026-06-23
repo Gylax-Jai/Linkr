@@ -5,7 +5,6 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
 import { EncryptedBadge } from "@/components/ui/EncryptedBadge";
 import {
-  FriendsPanel,
   useAcceptFriendRequestMutation,
   useBlockUserMutation,
   useCancelFriendRequestMutation,
@@ -147,18 +146,6 @@ function DetailsContent() {
                 <span className="mt-1 block font-mono text-xs text-text-muted">You are @{sessionUser.username}</span>
               ) : null}
             </DetailSection>
-
-            <div className="rounded-2xl border border-border bg-surface-2/50 p-4 shadow-soft">
-              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
-                <span className="text-primary">
-                  <UserPlus className="h-4 w-4" />
-                </span>
-                Friends
-              </p>
-              <div className="mt-2">
-                <FriendsPanel />
-              </div>
-            </div>
           </div>
         ) : null}
 

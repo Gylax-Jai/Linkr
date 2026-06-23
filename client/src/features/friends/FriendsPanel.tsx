@@ -1,8 +1,10 @@
 import type { FriendshipListItem } from "@linkr/shared";
-import { Ban } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
-import { MessageFriendButton, UnfriendButton } from "./FriendActions";
+import { useCreateChatMutation } from "@/features/chat";
+import { useUIStore } from "@/lib/store";
+import { UnfriendButton } from "./FriendActions";
 import {
   useAcceptFriendRequestMutation,
   useBlockUserMutation,
@@ -55,28 +57,55 @@ function PendingRow({ item }: { item: FriendshipListItem }) {
 }
 
 function FriendRow({ item }: { item: FriendshipListItem }) {
-  const block = useBlockUserMutation();
+  const onlineOverrides = useUIStore((s) => s.onlineOverrides);
+  const setDetailsOpen = useUIStore((s) => s.setDetailsOpen);
+  const openMobileDetails = useUIStore((s) => s.openMobileDetails);
+  const createChat = useCreateChatMutation();
+  // Live presence: a socket override (this session) wins over the snapshot the API returned.
+  const online = onlineOverrides[item.user._id] ?? item.online ?? false;
+
+  // Both actions resolve the 1:1 chat (get-or-create is idempotent). "View profile" also opens the
+  // details pane so the row doubles as a contact-card entry; "Message" just focuses the conversation.
+  const openChat = (withProfile: boolean) => {
+    createChat.mutate(item.user._id, {
+      onSuccess: () => {
+        if (withProfile) {
+          setDetailsOpen(true);
+          openMobileDetails();
+        }
+      },
+    });
+  };
 
   return (
     <div className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-surface-2/80">
-      <Avatar name={item.user.displayName} src={item.user.avatar} size="sm" online />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-text">{item.user.displayName}</p>
-        <p className="truncate font-mono text-[11px] text-text-muted">{label(item.user)}</p>
-      </div>
+      <button
+        type="button"
+        onClick={() => openChat(true)}
+        disabled={createChat.isPending}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        title="View profile"
+      >
+        <Avatar name={item.user.displayName} src={item.user.avatar} size="sm" online={online} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-text">{item.user.displayName}</span>
+          <span className="block truncate font-mono text-[11px] text-text-muted">
+            {online ? "Online" : label(item.user)}
+          </span>
+        </span>
+      </button>
       <div className="flex shrink-0 items-center gap-1">
-        <MessageFriendButton userId={item.user._id} />
-        <UnfriendButton userId={item.user._id} name={item.user.displayName} />
         <Button
           variant="ghost"
           size="icon"
-          disabled={block.isPending}
-          onClick={() => block.mutate(item.user._id)}
-          aria-label={`Block ${item.user.displayName}`}
-          title="Block"
+          disabled={createChat.isPending}
+          onClick={() => openChat(false)}
+          aria-label={`Message ${item.user.displayName}`}
+          title="Message"
         >
-          <Ban className="h-3.5 w-3.5" />
+          <MessageCircle className="h-3.5 w-3.5" />
         </Button>
+        <UnfriendButton userId={item.user._id} name={item.user.displayName} />
       </div>
     </div>
   );

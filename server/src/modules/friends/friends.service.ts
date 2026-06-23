@@ -15,8 +15,10 @@ import { ApiError } from "../../utils/ApiError.js";
 import type { UserDocument } from "../auth/auth.service.js";
 import { getSocketServer } from "../../sockets/io.js";
 import { maybeAutoAcceptFriendRequest } from "../bot/bot.service.js";
+import { getOrCreateDirectChat } from "../chat/chat.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import { resolveAvatarUrl } from "../users/avatar.helpers.js";
+import { logger } from "../../utils/logger.js";
 import { findFriendshipBetween } from "./friendship.helpers.js";
 
 /** Friends service: requests, accept/reject/cancel, block, and list operations (blueprint §5). */
@@ -61,24 +63,25 @@ async function loadOtherUser(
   viewerId: string,
   requesterId: string,
   recipientId: string,
-): Promise<PublicUser | null> {
+): Promise<{ user: PublicUser; online: boolean } | null> {
   const otherId = requesterId === viewerId ? recipientId : requesterId;
-  const user = await UserModel.findById(otherId).select("_id username displayName avatar");
+  const user = await UserModel.findById(otherId).select("_id username displayName avatar online");
   if (!user) return null;
-  return toPublicUser(user);
+  return { user: toPublicUser(user), online: Boolean(user.online) };
 }
 
 async function toListItem(viewerId: string, doc: FriendshipDocument): Promise<FriendshipListItem | null> {
   const requesterId = doc.requester.toString();
   const recipientId = doc.recipient.toString();
-  const user = await loadOtherUser(viewerId, requesterId, recipientId);
-  if (!user) return null;
+  const loaded = await loadOtherUser(viewerId, requesterId, recipientId);
+  if (!loaded) return null;
 
   return {
     friendshipId: doc._id.toString(),
     status: doc.status,
     direction: directionFor(viewerId, requesterId),
-    user,
+    user: loaded.user,
+    online: loaded.online,
     createdAt: (doc.createdAt ?? new Date()).toISOString(),
     updatedAt: (doc.updatedAt ?? new Date()).toISOString(),
   };
@@ -211,6 +214,15 @@ export async function acceptFriendRequest(actorId: string, friendshipId: string)
   doc.status = "accepted";
   doc.actionBy = doc.recipient;
   await doc.save();
+
+  // Materialize the 1:1 chat immediately so it appears in BOTH users' sidebars right after the
+  // request is accepted (previously a chat only existed once someone hit "Message"). Best-effort:
+  // the friendship is the source of truth, so a chat-creation hiccup must not fail the accept.
+  try {
+    await getOrCreateDirectChat(actorId, otherUserId);
+  } catch (err) {
+    logger.warn("Failed to auto-create chat on friend accept", { err, actorId, otherUserId });
+  }
 
   const friendship = toFriendship(doc);
   const actor = await UserModel.findById(actorId).select("_id username displayName avatar");
