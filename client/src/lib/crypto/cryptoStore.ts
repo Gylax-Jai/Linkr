@@ -1,9 +1,20 @@
 import { create } from "zustand";
-import type { KeyBackup, KeyBackupResponse, PublicKeyResponse } from "@linkr/shared";
+import type {
+  KeyBackup,
+  KeyBackupResponse,
+  PublicKeyResponse,
+  RecoverResponse,
+} from "@linkr/shared";
 import { api } from "@/lib/api";
 import { getSodium, type Sodium } from "./sodium";
 import { loadKeypair, saveKeypair, type StoredKeypair } from "./storage";
-import { wrapKeypair, unwrapKeypair } from "./keyBackup";
+import {
+  generateRecoveryCodes,
+  recoveryCodeIdHash,
+  unwrapKeypair,
+  wrapKeypair,
+  wrapKeypairForCodes,
+} from "./keyBackup";
 import { decryptEnvelope, encryptEnvelope, type Recipient } from "./messageCrypto";
 
 /**
@@ -36,6 +47,16 @@ export interface Decryptable {
   encrypted?: boolean;
 }
 
+/** Result of setting up recovery: the freshly minted backup codes to show the user exactly once. */
+export interface SetupBackupResult {
+  ok: boolean;
+  /** The plaintext recovery codes (present only on success) — display once, never stored. */
+  codes?: string[];
+}
+
+/** Proof of phone ownership for redeeming a recovery code (MSG91 token, or dev phone + OTP). */
+export type RecoveryProof = { accessToken: string } | { phone: string; otp: string };
+
 interface CryptoState {
   status: E2EEStatus;
   myUserId: string | null;
@@ -45,6 +66,10 @@ interface CryptoState {
   needsBackup: boolean;
   /** The server backup awaiting a passphrase while `status === "locked"`. */
   pendingBackup: KeyBackup | null;
+  /** Unused single-use recovery codes left on the account (drives the "use a backup code" option). */
+  recoveryCodesRemaining: number;
+  /** Masked verified phone (e.g. "•••• 3210") for the recovery-code unlock flow; null if unknown. */
+  phoneHint: string | null;
   /** userId -> base64 public key, or null when the peer has no key (e.g. the dev bot). */
   peerKeys: Record<string, string | null>;
   /** messageId -> decrypted plaintext, or null when it cannot be decrypted. */
@@ -57,8 +82,13 @@ interface CryptoState {
   decryptInto: (id: string, content: string) => void;
   /** Restore the account keypair from the pending server backup using the recovery passphrase. */
   unlockWithPassphrase: (passphrase: string) => Promise<boolean>;
-  /** Encrypt the current device keypair under `passphrase` and upload it as the account backup. */
-  setupBackup: (passphrase: string) => Promise<boolean>;
+  /** Restore the account keypair on a new device by redeeming a single-use recovery code. */
+  unlockWithRecoveryCode: (code: string, proof: RecoveryProof) => Promise<boolean>;
+  /**
+   * Encrypt the current device keypair under `passphrase`, mint single-use recovery codes, and upload
+   * the backup + code envelopes as the account backup. Returns the plaintext codes to show once.
+   */
+  setupBackup: (passphrase: string) => Promise<SetupBackupResult>;
   /** Abandon a forgotten passphrase: mint a fresh keypair (old history becomes unreadable). */
   resetKeys: () => Promise<void>;
 }
@@ -87,6 +117,8 @@ export const useCryptoStore = create<CryptoState>((set, get) => ({
   sodium: null,
   needsBackup: false,
   pendingBackup: null,
+  recoveryCodesRemaining: 0,
+  phoneHint: null,
   peerKeys: {},
   plaintext: {},
 
@@ -109,7 +141,13 @@ export const useCryptoStore = create<CryptoState>((set, get) => ({
       const localKp = await loadKeypair(userId);
 
       // Does this account already have an encrypted key backup on the server? (Sprint D)
-      let server: KeyBackupResponse = { hasBackup: false, backup: null, publicKey: null };
+      let server: KeyBackupResponse = {
+        hasBackup: false,
+        backup: null,
+        publicKey: null,
+        recoveryCodesRemaining: 0,
+        phoneHint: null,
+      };
       try {
         const res = await api.get<KeyBackupResponse>("/keys/backup");
         server = res.data;
@@ -117,29 +155,36 @@ export const useCryptoStore = create<CryptoState>((set, get) => ({
         /* offline/transient — treat as "no backup info"; a local key still works locally */
       }
 
+      // Carried into every resolution so the unlock/recovery UI knows what's available.
+      const meta = {
+        recoveryCodesRemaining: server.recoveryCodesRemaining ?? 0,
+        phoneHint: server.phoneHint ?? null,
+      };
+
       if (localKp) {
         // A server backup for a DIFFERENT key means this local key is stale (created before the
         // account backup existed). The backup is the source of truth → lock to adopt the real key.
         if (server.hasBackup && server.backup && server.publicKey && server.publicKey !== localKp.publicKey) {
-          set({ sodium, keypair: null, pendingBackup: server.backup, status: "locked", needsBackup: false });
+          set({ sodium, keypair: null, pendingBackup: server.backup, status: "locked", needsBackup: false, ...meta });
           return;
         }
-        set({ sodium, keypair: localKp, status: "ready", needsBackup: !server.hasBackup, pendingBackup: null });
+        set({ sodium, keypair: localKp, status: "ready", needsBackup: !server.hasBackup, pendingBackup: null, ...meta });
         await publishPublicKey(localKp.publicKey);
         return;
       }
 
       // No local key on this device.
       if (server.hasBackup && server.backup) {
-        // New device for an account that has a backup — need the passphrase to restore.
-        set({ sodium, keypair: null, pendingBackup: server.backup, status: "locked", needsBackup: false });
+        // New device for an account that has a backup — need the passphrase (or a recovery code).
+        set({ sodium, keypair: null, pendingBackup: server.backup, status: "locked", needsBackup: false, ...meta });
         return;
       }
 
-      // Brand-new account with no backup anywhere — mint a keypair, publish it, prompt for setup.
+      // Brand-new account with no backup anywhere — mint a keypair and publish it. `needsBackup` is
+      // factual (no backup yet) but we DON'T nag: setup is opt-in from Profile → Security (D.1).
       const keypair = freshKeypair(sodium);
       await saveKeypair(userId, keypair);
-      set({ sodium, keypair, status: "ready", needsBackup: true, pendingBackup: null });
+      set({ sodium, keypair, status: "ready", needsBackup: true, pendingBackup: null, ...meta });
       await publishPublicKey(keypair.publicKey);
     } catch {
       // No libsodium / IndexedDB — fall back to plaintext (encrypted in transit only).
@@ -155,6 +200,8 @@ export const useCryptoStore = create<CryptoState>((set, get) => ({
       sodium: null,
       needsBackup: false,
       pendingBackup: null,
+      recoveryCodesRemaining: 0,
+      phoneHint: null,
       peerKeys: {},
       plaintext: {},
     }),
@@ -173,17 +220,52 @@ export const useCryptoStore = create<CryptoState>((set, get) => ({
     return true;
   },
 
+  unlockWithRecoveryCode: async (code, proof) => {
+    const { sodium, myUserId } = get();
+    if (!sodium || !myUserId) return false;
+
+    // Send only the code's SHA-256 id to the server (gated by the phone-OTP proof); it returns the
+    // sealed envelope, which we then open locally with the RAW code — the server never sees it.
+    let envelope: RecoverResponse["envelope"];
+    try {
+      const res = await api.post<RecoverResponse>("/keys/recover", {
+        codeHash: recoveryCodeIdHash(sodium, code),
+        ...proof,
+      });
+      envelope = res.data.envelope;
+    } catch {
+      return false;
+    }
+
+    const keypair = unwrapKeypair(sodium, envelope, code.replace(/[^0-9a-zA-Z]/g, "").toUpperCase());
+    if (!keypair) return false;
+
+    await saveKeypair(myUserId, keypair);
+    set((s) => ({
+      keypair,
+      status: "ready",
+      needsBackup: false,
+      pendingBackup: null,
+      plaintext: {},
+      recoveryCodesRemaining: Math.max(0, s.recoveryCodesRemaining - 1),
+    }));
+    await publishPublicKey(keypair.publicKey);
+    return true;
+  },
+
   setupBackup: async (passphrase) => {
     const { sodium, keypair, status } = get();
-    if (status !== "ready" || !sodium || !keypair) return false;
+    if (status !== "ready" || !sodium || !keypair) return { ok: false };
 
     try {
       const backup = wrapKeypair(sodium, keypair, passphrase);
-      await api.put("/keys/backup", { publicKey: keypair.publicKey, backup });
-      set({ needsBackup: false });
-      return true;
+      const codes = generateRecoveryCodes(sodium);
+      const recoveryCodes = wrapKeypairForCodes(sodium, keypair, codes);
+      await api.put("/keys/backup", { publicKey: keypair.publicKey, backup, recoveryCodes });
+      set({ needsBackup: false, recoveryCodesRemaining: codes.length });
+      return { ok: true, codes };
     } catch {
-      return false;
+      return { ok: false };
     }
   },
 
@@ -193,8 +275,15 @@ export const useCryptoStore = create<CryptoState>((set, get) => ({
 
     const keypair = freshKeypair(sodium);
     await saveKeypair(myUserId, keypair);
-    // Publishing a NEW key clears the stale server backup, so we immediately need a fresh one.
-    set({ keypair, status: "ready", needsBackup: true, pendingBackup: null, plaintext: {} });
+    // Publishing a NEW key clears the stale server backup + recovery codes, so we need fresh ones.
+    set({
+      keypair,
+      status: "ready",
+      needsBackup: true,
+      pendingBackup: null,
+      plaintext: {},
+      recoveryCodesRemaining: 0,
+    });
     await publishPublicKey(keypair.publicKey);
   },
 

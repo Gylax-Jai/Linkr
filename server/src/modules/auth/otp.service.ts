@@ -92,9 +92,13 @@ export async function sendOtp(user: UserDocument, phone: string): Promise<SendOt
   };
 }
 
-/** Verify a code and, on success, store the encrypted phone + HMAC on the user. */
-export async function verifyOtp(user: UserDocument, phone: string, code: string): Promise<void> {
-  const phoneHash = hashPhone(phone);
+/**
+ * Validate a code against the stored OTP record (by phone HMAC) and consume it on success — without
+ * binding the phone to any user. Shared by onboarding's {@link verifyOtp} (which then binds) and the
+ * recovery-code redemption flow (which only needs proof the caller controls the number). Throws on a
+ * missing/expired/locked/incorrect code; deletes the record once a correct code is accepted.
+ */
+export async function consumeOtp(phoneHash: string, code: string): Promise<void> {
   const record = await OtpModel.findOne({ phone: phoneHash });
   if (!record) {
     throw new ApiError(400, "OTP_NOT_FOUND", "Request a code first");
@@ -114,6 +118,11 @@ export async function verifyOtp(user: UserDocument, phone: string, code: string)
     throw new ApiError(400, "OTP_INVALID", "Incorrect code");
   }
 
-  await bindVerifiedPhone(user, phone);
   await record.deleteOne();
+}
+
+/** Verify a code and, on success, store the encrypted phone + HMAC on the user. */
+export async function verifyOtp(user: UserDocument, phone: string, code: string): Promise<void> {
+  await consumeOtp(hashPhone(phone), code);
+  await bindVerifiedPhone(user, phone);
 }

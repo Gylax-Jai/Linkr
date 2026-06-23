@@ -25,17 +25,23 @@ export function useE2EEInit(): void {
 export interface E2EEAccount {
   /** Crypto lifecycle: idle | initializing | ready | locked | unsupported. */
   status: import("./cryptoStore").E2EEStatus;
-  /** Ready, but the account has no server key backup yet → prompt to set a recovery passphrase. */
+  /** Ready, but the account has no server key backup yet → multi-device not set up. */
   needsBackup: boolean;
-  /** A server backup exists but this device can't read history until the passphrase is provided. */
+  /** A server backup exists but this device can't read history until it's unlocked. */
   locked: boolean;
+  /** Unused single-use recovery codes left on the account (drives the "use a backup code" option). */
+  recoveryCodesRemaining: number;
+  /** Masked verified phone (e.g. "•••• 3210") for the recovery-code unlock flow; null if unknown. */
+  phoneHint: string | null;
 }
 
-/** Account-level E2EE state (Sprint D) for the unlock/setup UI and recovery settings. */
+/** Account-level E2EE state (Sprint D / D.1) for the unlock/setup UI and recovery settings. */
 export function useE2EEAccount(): E2EEAccount {
   const status = useCryptoStore((s) => s.status);
   const needsBackup = useCryptoStore((s) => s.needsBackup);
-  return { status, needsBackup, locked: status === "locked" };
+  const recoveryCodesRemaining = useCryptoStore((s) => s.recoveryCodesRemaining);
+  const phoneHint = useCryptoStore((s) => s.phoneHint);
+  return { status, needsBackup, locked: status === "locked", recoveryCodesRemaining, phoneHint };
 }
 
 export type DecryptedState = "empty" | "plain" | "decrypted" | "pending" | "failed";

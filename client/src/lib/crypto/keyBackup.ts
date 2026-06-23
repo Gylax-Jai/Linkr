@@ -1,4 +1,4 @@
-import type { KeyBackup } from "@linkr/shared";
+import type { KeyBackup, RecoveryCodeEnvelope } from "@linkr/shared";
 import type { Sodium } from "./sodium";
 import type { StoredKeypair } from "./storage";
 
@@ -83,4 +83,57 @@ export function unwrapKeypair(sodium: Sodium, backup: KeyBackup, passphrase: str
   } catch {
     return null;
   }
+}
+
+/* ── Single-use recovery codes (Sprint D.1) ──────────────────────────────────────────────────────
+ * A "forgot passphrase" fallback. At setup we mint N high-entropy codes and seal the keypair under
+ * EACH (same Argon2id + secretbox scheme as the passphrase). The user saves the codes; the server
+ * stores only the opaque envelopes keyed by a SHA-256 id. Redeeming one code on a new device returns
+ * its envelope, which the raw code then opens locally. */
+
+/** Number of single-use recovery codes generated at setup. */
+export const RECOVERY_CODE_COUNT = 8;
+
+/** Crockford base32 alphabet (no I/L/O/U → fewer transcription errors). 32 chars ⇒ no modulo bias. */
+const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/** Characters per code (20 × 5 bits = 100 bits of entropy), shown grouped in 4s for readability. */
+const CODE_LENGTH = 20;
+const CODE_GROUP = 4;
+
+/** Strip formatting and upper-case so a typed code matches the one we sealed/hashed at setup. */
+export function normalizeRecoveryCode(code: string): string {
+  return code.replace(/[^0-9a-zA-Z]/g, "").toUpperCase();
+}
+
+/** SHA-256 hex of a normalized code — the server's opaque lookup id (never the code itself). */
+export function recoveryCodeIdHash(sodium: Sodium, code: string): string {
+  return sodium.to_hex(sodium.crypto_hash_sha256(sodium.from_string(normalizeRecoveryCode(code))));
+}
+
+/** Generate one random, dash-grouped recovery code (e.g. "AB3D-EFGH-JKMN-PQRS-TVWX"). */
+function generateRecoveryCode(sodium: Sodium): string {
+  const bytes = sodium.randombytes_buf(CODE_LENGTH);
+  let out = "";
+  for (let i = 0; i < CODE_LENGTH; i += 1) {
+    if (i > 0 && i % CODE_GROUP === 0) out += "-";
+    out += CODE_ALPHABET[bytes[i]! % CODE_ALPHABET.length];
+  }
+  return out;
+}
+
+/** Mint `count` recovery codes for display. The raw codes are returned ONCE and never stored. */
+export function generateRecoveryCodes(sodium: Sodium, count: number = RECOVERY_CODE_COUNT): string[] {
+  return Array.from({ length: count }, () => generateRecoveryCode(sodium));
+}
+
+/** Seal `keypair` under each recovery code, producing the opaque envelopes the server will store. */
+export function wrapKeypairForCodes(
+  sodium: Sodium,
+  keypair: StoredKeypair,
+  codes: string[],
+): RecoveryCodeEnvelope[] {
+  return codes.map((code) => {
+    const normalized = normalizeRecoveryCode(code);
+    return { ...wrapKeypair(sodium, keypair, normalized), idHash: recoveryCodeIdHash(sodium, normalized) };
+  });
 }

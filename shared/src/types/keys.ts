@@ -35,10 +35,33 @@ export interface KeyBackup {
   memlimit: number;
 }
 
+/**
+ * One single-use recovery-code envelope (Sprint D.1). Same sealed-keypair shape as {@link KeyBackup},
+ * but unlocked by a high-entropy backup CODE instead of the passphrase. `idHash` is the SHA-256 hex
+ * of the raw code — a server-side lookup id that lets us return + burn the right envelope WITHOUT
+ * ever seeing the code (the code, like the passphrase, never leaves the browser in usable form).
+ */
+export interface RecoveryCodeEnvelope extends KeyBackup {
+  /** SHA-256 hex of the raw recovery code; the server's opaque lookup id (never the code itself). */
+  idHash: string;
+}
+
 /** Response for GET /api/keys/backup — the caller's own encrypted key backup, if any. */
 export interface KeyBackupResponse {
   hasBackup: boolean;
   backup: KeyBackup | null;
   /** The account public key the backup unlocks to (lets a device detect a stale local key). */
+  publicKey: string | null;
+  /** How many unused single-use recovery codes remain (drives the "use a backup code" option). */
+  recoveryCodesRemaining: number;
+  /** Masked verified phone (e.g. "•••• 3210") so the user recognizes which number unlocks codes. */
+  phoneHint: string | null;
+}
+
+/** Response for POST /api/keys/recover — the sealed keypair envelope a redeemed code decrypts. */
+export interface RecoverResponse {
+  /** The sealed keypair to open with the raw recovery code (client-side only). */
+  envelope: KeyBackup;
+  /** The account public key the envelope unlocks to. */
   publicKey: string | null;
 }

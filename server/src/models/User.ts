@@ -62,6 +62,32 @@ const userSchema = new Schema(
       _id: false,
       default: undefined,
     },
+
+    /**
+     * Single-use recovery-code envelopes (Sprint D.1). Each is the account keypair sealed under a
+     * high-entropy backup CODE (Argon2id + secretbox), so a user who lost their passphrase can still
+     * restore on a new device by redeeming one code (gated by a phone OTP). `idHash` is the SHA-256
+     * of the code — the server's lookup id; it never sees the code itself and can't open the blob.
+     * `used` burns a code after redemption. Cleared (like `keyBackup`) when the public key changes.
+     */
+    recoveryCodes: {
+      type: [
+        {
+          idHash: { type: String, required: true },
+          v: { type: Number },
+          salt: { type: String },
+          nonce: { type: String },
+          ciphertext: { type: String },
+          opslimit: { type: Number },
+          memlimit: { type: Number },
+          used: { type: Boolean, default: false },
+          usedAt: { type: Date },
+        },
+      ],
+      select: false,
+      _id: false,
+      default: undefined,
+    },
     privacy: {
       lastSeen: { type: String, enum: VISIBILITY_VALUES, default: "friends" },
       profile: { type: String, enum: ["everyone", "friends"], default: "everyone" },

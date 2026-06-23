@@ -3,7 +3,7 @@
 > **Living document:** everything built so far, how to run it, and what's next.  
 > For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
 
-**Last updated:** June 23, 2026 (Sprint D — **account-level E2EE / multi-device**: your encryption key can be backed up to the server encrypted with a recovery passphrase, so logging in on another device restores your key and decrypts your whole chat history)
+**Last updated:** June 23, 2026 (Sprint D.1 — **opt-in recovery + backup codes**: new users are no longer nagged; multi-device is opt-in from Profile → Security, and a forgotten passphrase can be recovered on a new device with a **single-use backup code** gated by a **phone OTP** — all still zero-knowledge. Builds on Sprint D account-level E2EE.)
 
 Earlier (Sprint C.2.2 — Contact info button now toggles the profile pane open/closed; self chat renamed "Self chat" everywhere and now shows your own custom-status chip)
 
@@ -150,6 +150,18 @@ Phase 2 made encryption **device-bound**: the private key lived only in one brow
 - **Media note:** media was already **in-transit only** (not device-encrypted), so it has **always** been viewable on any logged-in device — Sprint D was about restoring **encrypted text** history. (E2EE media remains future work.)
 - **Crypto choices (per security guidance):** Argon2id KDF + authenticated `secretbox`; no banned/deprecated algorithms; passphrase never transmitted; backup is integrity-protected (a tampered/wrong blob fails the AEAD tag and returns "wrong passphrase").
 - **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (only the pre-existing chunk-size warning).
+
+### Sprint D.1 — Opt-in recovery + backup codes (no more new-user nag) 🔑🆘
+Sprint D worked but had two rough edges: (1) **brand-new users were nagged** to set a recovery passphrase before they'd even sent a message, and (2) **forgetting the passphrase meant losing old history** on a new device (the only fallback was "start fresh"). D.1 makes multi-device **opt-in** and adds a **single-use backup code** fallback gated by a **phone OTP** — closer to the "log in on a new device with my number" feel, without breaking zero-knowledge (we still can't read your key, and we still can't *reset* your secret for you).
+
+- **No new-user nag:** `E2EEKeyGuard` no longer shows the "turn on multi-device" prompt; the dismissible `SetupModal` is gone. A fresh account silently mints a key and chats immediately. `needsBackup` stays *factual* (no server backup yet) but only surfaces as a calm, **opt-in card in Profile → Security** ("Use Linkr on another device"). The **blocking unlock modal still appears only when LOCKED** (an existing backup on a new device).
+- **Backup codes (`client/src/lib/crypto/keyBackup.ts`):** setup now also mints **8 high-entropy single-use codes** (20 Crockford-base32 chars ≈ 100 bits, shown grouped `ABCD-EFGH-…`). The keypair is sealed under **each** code with the same Argon2id + `secretbox` scheme, producing opaque **envelopes**. Each envelope is keyed by **SHA-256(code)** — the server's lookup id; the **raw code never reaches the server**, so it still can't open the blob.
+- **Storage + clear-on-rotate (`User.recoveryCodes`, `select:false`):** envelopes carry `{ idHash, …sealed…, used }`. `PUT /api/keys/backup` now stores `{ publicKey, backup, recoveryCodes? }` atomically; **`POST /api/keys` clears `keyBackup` *and* `recoveryCodes` when the key changes** (they encrypt the old key).
+- **Redeem (`POST /api/keys/recover`, phone-OTP gated):** the new device (a) proves it controls the account's number — re-verifying the **MSG91 access token** in prod, or a **dev OTP** locally (new `consumeOtp` helper validates without re-binding) — (b) the server confirms the verified number matches the account's `phoneHash`, then (c) looks up the envelope by `codeHash`, **burns it** (`used=true`), and returns it. The client opens it locally with the raw code. Codes are tied to the user's **own phone number** as a second factor, but are **not derived from it** (that would be guessable).
+- **Masked phone hint:** `GET /api/keys/backup` now also returns `recoveryCodesRemaining` + a **masked** `phoneHint` (e.g. `•••• 3210`, decrypted server-side just to mask) so the unlock + recovery screens show *which* number unlocks the codes — without ever exposing the full number.
+- **UI:** the unlock modal gains **"Forgot your passphrase? Use a backup code"** → verify phone (Send code → SMS/dev OTP) + enter a backup code → **Restore my chats**. Profile → Security shows the **codes exactly once** after setup (copy / download / "I've saved them") and a **remaining-codes** count with **change-passphrase-&-regenerate**.
+- **Honest limits (unchanged guarantees):** we still **cannot reset** your passphrase or codes (zero-knowledge). If you lose *both* and have no logged-in device, **Start fresh** is the only path (old history stays unreadable). Recovery codes are a convenience the user must save — phrased plainly in the UI.
+- **Verified green:** `tsc --noEmit` for shared + server + client.
 
 ### Phase 2 — End-to-end encryption (text) 🔐
 The big one from the roadmap. **Text messages between humans are now end-to-end encrypted** with libsodium; the server stores ciphertext only and can never read them. Scope is **text-only** (media stays encrypted-in-transit for now) and the **dev bot stays plaintext** by design (see below).
@@ -298,7 +310,8 @@ After deploying (Vercel client + Render server) and testing with a friend, a bat
 
 ### Post-MVP phases (named roadmap)
 - **Phase 2 — E2EE (text)** ✅ **Done** — libsodium sealed-box encryption for human↔human text; keys module live; bot stays plaintext by design.
-- **Sprint D — Account-level E2EE / multi-device** ✅ **Done** — recovery-passphrase-encrypted key backup (`/api/keys/backup`) + unlock/restore on new devices; converges every device on one account keypair. *Still open in this theme: E2EE media; optional key-fingerprint verification.*
+- **Sprint D — Account-level E2EE / multi-device** ✅ **Done** — recovery-passphrase-encrypted key backup (`/api/keys/backup`) + unlock/restore on new devices; converges every device on one account keypair.
+- **Sprint D.1 — Opt-in recovery + backup codes** ✅ **Done** — no new-user nag (multi-device opt-in from Profile → Security); **single-use backup codes** (`POST /api/keys/recover`, phone-OTP gated) recover a forgotten passphrase on a new device; masked phone hint + remaining-codes count. *Still open in this theme: E2EE media; QR device-linking (needs an app); optional key-fingerprint verification.*
 - **Phase 3 — Realtime calling** — voice + video (WebRTC), screen share, TURN/coturn; wire the disabled header call buttons.
 - **Phase 4 — Chat UX & account controls** — mute, archive, share, message forward, report user, privacy-settings UI (API exists), account deletion.
 - **Phase 5 — Notifications++** — web push (Service Worker + VAPID) for background alerts (generic content to preserve E2EE).
@@ -612,7 +625,7 @@ pnpm build        # production build
 | **Click profile → details** | ✅ **Closed** (Sprint 5.8) — the header avatar + name is a button that opens the details aside (desktop) / sheet (mobile) |
 | **Redis** | Optional; single-instance sockets work without it |
 | **Account deletion** | Blueprint §4 — not implemented yet |
-| **keys module** | ✅ **Live** (Phase 2 + Sprint D) — `POST /api/keys` publishes a public key, `GET /api/keys/:userId` returns it (self/friends only), and `GET`/`PUT /api/keys/backup` store the caller's recovery-passphrase-encrypted account-key backup |
+| **keys module** | ✅ **Live** (Phase 2 + Sprint D / D.1) — `POST /api/keys` publishes a public key, `GET /api/keys/:userId` returns it (self/friends only), `GET`/`PUT /api/keys/backup` store the caller's recovery-passphrase-encrypted account-key backup (+ single-use backup-code envelopes), and `POST /api/keys/recover` redeems one backup code (phone-OTP gated) to restore on a new device |
 | **Multi-device / account-level E2EE** | ✅ **Closed** (Sprint D) — recovery-passphrase key backup + restore; new devices unlock history; key reset clears the stale backup. Recovery lives in **Profile → Security** |
 
 ---

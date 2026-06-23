@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OTP_CODE_LENGTH, PHONE_E164_REGEX } from "../constants/limits.js";
 
 /**
  * E2EE public-key schemas (Phase 2, blueprint §9). A user publishes their X25519 public key so
@@ -51,10 +52,52 @@ export const keyBackupSchema = z.object({
     .max(1024 * 1024 * 1024),
 });
 
-/** PUT /api/keys/backup — store/replace the caller's account public key + encrypted backup. */
+/** SHA-256 hex digest (recovery-code lookup id). 64 lowercase hex chars. */
+const sha256Hex = z
+  .string()
+  .trim()
+  .length(64)
+  .regex(/^[a-f0-9]+$/, "Must be a hex digest");
+
+/**
+ * A single-use recovery-code envelope (Sprint D.1): a sealed keypair like {@link keyBackupSchema}
+ * plus the SHA-256 lookup id of its code. The server stores these opaquely and can never open them.
+ */
+export const recoveryCodeEnvelopeSchema = keyBackupSchema.extend({
+  idHash: sha256Hex,
+});
+
+/**
+ * PUT /api/keys/backup — store/replace the caller's account public key + encrypted backup, plus an
+ * optional fresh set of single-use recovery-code envelopes (replaces any previous set atomically).
+ */
 export const uploadKeyBackupSchema = z.object({
   publicKey: base64Key,
   backup: keyBackupSchema,
+  recoveryCodes: z.array(recoveryCodeEnvelopeSchema).max(20).optional(),
 });
 
 export type UploadKeyBackupInput = z.infer<typeof uploadKeyBackupSchema>;
+
+/**
+ * POST /api/keys/recover — redeem ONE single-use recovery code on a new device. The caller proves
+ * phone ownership (the MSG91 access token, or a phone + dev OTP), and supplies the SHA-256 lookup id
+ * of the code (never the raw code). The server returns the matching sealed envelope and burns it.
+ */
+export const redeemRecoveryCodeSchema = z
+  .object({
+    codeHash: sha256Hex,
+    accessToken: z.string().trim().min(1).max(4000).optional(),
+    phone: z.string().trim().regex(PHONE_E164_REGEX, "Enter a valid phone number").optional(),
+    otp: z
+      .string()
+      .trim()
+      .length(OTP_CODE_LENGTH, `Code must be ${OTP_CODE_LENGTH} digits`)
+      .regex(/^\d+$/, "Code must be numeric")
+      .optional(),
+  })
+  .refine((d) => Boolean(d.accessToken) || Boolean(d.phone && d.otp), {
+    message: "Phone verification is required",
+  });
+
+export type RedeemRecoveryCodeInput = z.infer<typeof redeemRecoveryCodeSchema>;

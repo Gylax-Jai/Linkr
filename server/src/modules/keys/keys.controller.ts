@@ -3,11 +3,19 @@ import type {
   KeyBackupResponse,
   PublishKeyInput,
   PublicKeyResponse,
+  RecoverResponse,
+  RedeemRecoveryCodeInput,
   UploadKeyBackupInput,
 } from "@linkr/shared";
 import { ApiError } from "../../utils/ApiError.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
-import { getKeyBackup, getPublicKey, publishPublicKey, saveKeyBackup } from "./keys.service.js";
+import {
+  getKeyBackup,
+  getPublicKey,
+  publishPublicKey,
+  redeemRecoveryCode,
+  saveKeyBackup,
+} from "./keys.service.js";
 
 function requireUserId(req: Request): string {
   if (!req.user) throw ApiError.unauthorized();
@@ -29,9 +37,18 @@ export const getMyBackup = asyncHandler(async (req, res) => {
 
 /** PUT /api/keys/backup — store/replace the caller's account public key + encrypted backup. */
 export const putMyBackup = asyncHandler(async (req, res) => {
-  const { publicKey, backup } = req.body as UploadKeyBackupInput;
-  await saveKeyBackup(requireUserId(req), publicKey, backup);
+  const { publicKey, backup, recoveryCodes } = req.body as UploadKeyBackupInput;
+  await saveKeyBackup(requireUserId(req), publicKey, backup, recoveryCodes);
   res.status(204).end();
+});
+
+/** POST /api/keys/recover — redeem a single-use recovery code (phone-OTP gated) on a new device. */
+export const recoverWithCode = asyncHandler(async (req, res) => {
+  const body: RecoverResponse = await redeemRecoveryCode(
+    requireUserId(req),
+    req.body as RedeemRecoveryCodeInput,
+  );
+  res.status(200).json(body);
 });
 
 /** GET /api/keys/:userId — fetch a user's public key (self or friends only). */
