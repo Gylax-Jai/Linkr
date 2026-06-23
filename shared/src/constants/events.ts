@@ -28,16 +28,23 @@ export const SOCKET_EVENTS = {
   MESSAGE_REACT: "message:react",
   MESSAGE_EDIT: "message:edit",
 
-  // Calls (Phase 2)
+  // Calls (Phase 3). Signaling only — media is peer-to-peer (WebRTC). Every event is
+  // re-checked server-side for an accepted friendship before relaying to the peer.
   CALL_INITIATE: "call:initiate",
+  /** Server → callee: an incoming call is ringing (carries the caller's public profile). */
+  CALL_INCOMING: "call:incoming",
   CALL_ACCEPT: "call:accept",
   CALL_REJECT: "call:reject",
   CALL_END: "call:end",
+  /** Server → caller: the callee is offline / has no active device. */
+  CALL_UNAVAILABLE: "call:unavailable",
+  /** Server → caller: the callee is already on another call. */
+  CALL_BUSY: "call:busy",
   WEBRTC_OFFER: "webrtc:offer",
   WEBRTC_ANSWER: "webrtc:answer",
   WEBRTC_ICE_CANDIDATE: "webrtc:ice-candidate",
 
-  // Screen share (Phase 2)
+  // Screen share (Phase 3)
   SCREEN_START: "screen:start",
   SCREEN_STOP: "screen:stop",
 } as const;

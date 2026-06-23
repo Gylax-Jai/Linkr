@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 import { AppShell } from "@/components/layout";
 import { LoginPage } from "@/features/auth";
 import { SocketProvider } from "@/features/chat";
+import { CallProvider } from "@/features/calls";
 import { OnboardingWizard } from "@/features/onboarding";
 import { ProfilePage } from "@/features/profile";
 import { SettingsPage } from "@/features/settings";
@@ -22,9 +23,11 @@ function AuthedShell({ children }: { children: React.ReactNode }) {
   useE2EEInit();
   return (
     <SocketProvider>
-      {children}
-      {/* Account-key unlock (new device) + multi-device setup prompt, overlaid above the shell. */}
-      <E2EEKeyGuard />
+      <CallProvider>
+        {children}
+        {/* Account-key unlock (new device) + multi-device setup prompt, overlaid above the shell. */}
+        <E2EEKeyGuard />
+      </CallProvider>
     </SocketProvider>
   );
 }

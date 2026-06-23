@@ -4,6 +4,7 @@ import { socketAuthMiddleware } from "./auth.socket.js";
 import { registerPresenceHandlers } from "./presence.socket.js";
 import { registerChatHandlers } from "./chat.socket.js";
 import { registerFriendHandlers } from "./friends.socket.js";
+import { registerCallHandlers } from "./calls.socket.js";
 
 /**
  * Central Socket.IO wiring. Feature handlers are split per concern (presence/chat/friends)
@@ -19,6 +20,7 @@ export function registerSocketHandlers(io: Server): void {
     registerPresenceHandlers(io, socket);
     registerChatHandlers(io, socket);
     registerFriendHandlers(io, socket);
+    registerCallHandlers(io, socket);
 
     socket.on("disconnect", (reason) => {
       logger.info("Socket disconnected", { id: socket.id, reason });

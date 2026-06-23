@@ -49,6 +49,21 @@ const envSchema = z.object({
    * app works without extra setup. NEVER hardcode this — supply via the environment.
    */
   PHONE_ENC_KEY: z.string().optional(),
+
+  /**
+   * Phase 3 calls — WebRTC ICE servers. STUN is enough on most networks; TURN relays media when
+   * peers are behind strict NAT/firewalls. TURN credentials are NEVER hardcoded or shipped to the
+   * client: the server mints short-lived, per-user credentials from the shared secret below
+   * (coturn `use-auth-secret` / TURN REST API) and serves them via GET /api/calls/ice-config.
+   */
+  /** Comma-separated STUN urls. Defaults to Google's public STUN when unset. */
+  STUN_URLS: z.string().optional(),
+  /** Comma-separated TURN urls, e.g. "turn:turn.example.com:3478,turns:turn.example.com:5349". */
+  TURN_URLS: z.string().optional(),
+  /** coturn static-auth-secret used to derive time-limited TURN credentials. Server-only. */
+  TURN_SECRET: z.string().optional(),
+  /** Lifetime (seconds) of minted TURN credentials. Default 1 hour. */
+  TURN_TTL: z.coerce.number().int().positive().default(3600),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -78,4 +93,6 @@ export const features = {
   testBot: env.NODE_ENV !== "production" && env.ENABLE_TEST_BOT !== "false",
   /** MSG91 OTP widget verification — server re-verifies the widget's access token when set. */
   msg91: has(env.MSG91_AUTH_KEY),
+  /** TURN relay available only when both a URL list and the shared secret are configured. */
+  turn: has(env.TURN_URLS) && has(env.TURN_SECRET),
 };

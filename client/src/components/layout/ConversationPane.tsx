@@ -54,6 +54,7 @@ import {
   useUnblockUserMutation,
 } from "@/features/friends";
 import { useAuthStore, useUIStore } from "@/lib/store";
+import { useCallActions } from "@/features/calls";
 import { useTheme } from "@/lib/theme";
 import { useDecryptedText, usePeerHasKey } from "@/lib/crypto";
 import { EmojiPickerPopover } from "@/features/chat/EmojiPicker";
@@ -214,6 +215,21 @@ function ConversationHeader({
   const isSelf = chat.type === "self";
   const title = isSelf ? "Self chat" : chat.participant.displayName;
 
+  // Calling (Sprint 3.1): only between accepted friends in a 1:1 chat (never self / strangers).
+  const { startCall } = useCallActions();
+  const canCall = !isSelf && chat.participant.friendship?.status === "accepted";
+  const startVoiceCall = () =>
+    startCall({
+      chatId: chat._id,
+      peer: {
+        _id: chat.participant._id,
+        username: chat.participant.username,
+        displayName: chat.participant.displayName,
+        avatar: chat.participant.avatar,
+      },
+      media: "audio",
+    });
+
   // Clicking the name/avatar always reveals the profile (desktop aside + mobile/tablet sheet).
   const openDetails = () => {
     setDetailsOpen(true);
@@ -292,10 +308,15 @@ function ConversationHeader({
       {chat.participant.status?.trim() ? <StatusChip status={chat.participant.status.trim()} /> : null}
       <EncryptedBadge iconOnly e2ee={e2ee} />
       <div className="flex shrink-0 items-center gap-0.5">
-        {/* Voice/video are placeholders but kept visible everywhere (Sprint G); they're compact on
+        {/* Voice call is live (Sprint 3.1) for accepted friends; video lands in 3.2. Compact on
             phones (see CallButton) so the name + last seen stay readable. */}
-        <CallButton label="Voice call" icon={<Phone className="h-4 w-4" />} />
-        <CallButton label="Video call" icon={<Video className="h-4 w-4" />} />
+        <CallButton
+          label="Voice call"
+          icon={<Phone className="h-4 w-4" />}
+          disabled={!canCall}
+          onClick={canCall ? startVoiceCall : undefined}
+        />
+        <CallButton label="Video call" icon={<Video className="h-4 w-4" />} comingSoon />
         <HeaderMenu chat={chat} onViewInfo={toggleDetails} />
         <button
           type="button"
@@ -495,16 +516,34 @@ function HeaderMenuItem({
   );
 }
 
-function CallButton({ label, icon, className }: { label: string; icon: ReactNode; className?: string }) {
+function CallButton({
+  label,
+  icon,
+  className,
+  onClick,
+  disabled = false,
+  comingSoon = false,
+}: {
+  label: string;
+  icon: ReactNode;
+  className?: string;
+  onClick?: () => void;
+  /** Disabled because the action isn't possible right now (e.g. not friends / self chat). */
+  disabled?: boolean;
+  /** Disabled because the feature isn't built yet (e.g. video in 3.1). */
+  comingSoon?: boolean;
+}) {
+  const isDisabled = disabled || comingSoon || !onClick;
   return (
     <button
       type="button"
-      disabled
-      aria-label={`${label} (coming soon)`}
-      title={`${label} — coming soon`}
+      onClick={onClick}
+      disabled={isDisabled}
+      aria-label={comingSoon ? `${label} (coming soon)` : label}
+      title={comingSoon ? `${label} — coming soon` : label}
       className={cn(
         // Compact on phones so name + last seen keep room; full size from sm up (Sprint G).
-        "grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50 sm:h-9 sm:w-9",
+        "grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-text-muted sm:h-9 sm:w-9",
         className,
       )}
     >
