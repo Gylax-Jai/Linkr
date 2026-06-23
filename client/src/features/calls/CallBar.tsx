@@ -1,18 +1,9 @@
-import { Bluetooth, Headphones, Mic, MicOff, Phone, PhoneOff, Speaker, Volume2 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Mic, MicOff, Phone, PhoneOff } from "lucide-react";
 import { useCallStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { routeLabel, type AudioRouteKind } from "./audioRoute";
+import { AudioRoutePicker } from "./AudioRoutePicker";
 import { useCallActions } from "./CallProvider";
 import { CallTimer, useCallStatusText } from "./CallOverlay";
-
-const ROUTE_ICON: Record<AudioRouteKind, LucideIcon> = {
-  bluetooth: Bluetooth,
-  headset: Headphones,
-  speaker: Speaker,
-  earpiece: Phone,
-  default: Volume2,
-};
 
 /**
  * WhatsApp-style call bar (Sprint 3.1.2): a thin, full-width strip glued to the very top of the app
@@ -24,18 +15,14 @@ export function CallBar() {
   const uiMode = useCallStore((s) => s.uiMode);
   const peer = useCallStore((s) => s.peer);
   const muted = useCallStore((s) => s.muted);
-  const audioRoute = useCallStore((s) => s.audioRoute);
-  const availableRoutes = useCallStore((s) => s.availableRoutes);
   const connectedAt = useCallStore((s) => s.connectedAt);
-  const { hangUp, toggleMute, cycleAudioRoute, expand } = useCallActions();
+  const { hangUp, toggleMute, expand } = useCallActions();
   const statusText = useCallStatusText();
 
   if (phase === "idle" || phase === "incoming" || !peer) return null;
   if (uiMode !== "minimized") return null;
 
   const name = peer.displayName || peer.username || "Unknown";
-  const RouteIcon = ROUTE_ICON[audioRoute];
-  const canSwitchRoute = availableRoutes.length > 1;
   const live = phase !== "ended";
 
   return (
@@ -80,22 +67,7 @@ export function CallBar() {
             >
               {muted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                cycleAudioRoute();
-              }}
-              disabled={!canSwitchRoute}
-              aria-label={`Audio output: ${routeLabel(audioRoute)}`}
-              title={routeLabel(audioRoute)}
-              className={cn(
-                "grid h-8 w-8 place-items-center rounded-full transition-colors hover:bg-black/10",
-                !canSwitchRoute && "opacity-50",
-              )}
-            >
-              <RouteIcon className="h-4 w-4" />
-            </button>
+            <AudioRoutePicker variant="bar" />
           </div>
         ) : null}
 

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { CallMedia, PublicUser } from "@linkr/shared";
-import type { AudioRouteKind } from "@/features/calls/audioRoute";
+import type { AudioRoute, AudioRouteKind } from "@/features/calls/audioRoute";
 
 /**
  * Call state machine (Phase 3). One active call at a time. The CallProvider drives transitions
@@ -33,10 +33,12 @@ interface CallState {
   /** The other party's public profile (for the call UI). */
   peer: PublicUser | null;
   muted: boolean;
-  /** The current call-audio output route (bluetooth/headset/speaker/earpiece/default). */
+  /** The current call-audio output route kind (drives the audio button icon/label). */
   audioRoute: AudioRouteKind;
-  /** Routes available to cycle through on this device (drives the audio button + label). */
-  availableRoutes: AudioRouteKind[];
+  /** Output device id currently in use ("" = OS default) — lets the picker mark the active row. */
+  audioDeviceId: string;
+  /** All output routes available on this device (drives the audio-route dropdown). */
+  availableRoutes: AudioRoute[];
   /** Full-screen vs minimized bar. Minimizing keeps the call alive in the background. */
   uiMode: CallUiMode;
   /**
@@ -58,8 +60,8 @@ interface CallState {
   setRinging: (ringing: boolean) => void;
   toggleMute: () => void;
   setMuted: (muted: boolean) => void;
-  setAudioRoute: (route: AudioRouteKind) => void;
-  setAvailableRoutes: (routes: AudioRouteKind[]) => void;
+  setAudioRoute: (route: AudioRouteKind, deviceId: string) => void;
+  setAvailableRoutes: (routes: AudioRoute[]) => void;
   minimize: () => void;
   expand: () => void;
   endCall: (reason: CallEndReason) => void;
@@ -75,10 +77,11 @@ const initial = {
   peer: null,
   muted: false,
   audioRoute: "default" as AudioRouteKind,
-  availableRoutes: ["default"] as AudioRouteKind[],
-  // Default to the minimized WhatsApp-style bar so the call lives in the background; the user can
-  // expand to the full-screen surface anytime.
-  uiMode: "minimized" as CallUiMode,
+  audioDeviceId: "",
+  availableRoutes: [] as AudioRoute[],
+  // Calls open full-screen; the user minimizes (down-arrow / tap outside) to a top bar to keep it
+  // running in the background.
+  uiMode: "expanded" as CallUiMode,
   ringing: false,
   connectedAt: null,
   connection: "new" as RTCPeerConnectionState,
@@ -104,7 +107,7 @@ export const useCallStore = create<CallState>((set) => ({
   toggleMute: () => set((s) => ({ muted: !s.muted })),
   setMuted: (muted) => set({ muted }),
 
-  setAudioRoute: (audioRoute) => set({ audioRoute }),
+  setAudioRoute: (audioRoute, audioDeviceId) => set({ audioRoute, audioDeviceId }),
   setAvailableRoutes: (availableRoutes) => set({ availableRoutes }),
 
   minimize: () => set({ uiMode: "minimized" }),

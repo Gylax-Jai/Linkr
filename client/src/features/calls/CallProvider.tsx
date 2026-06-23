@@ -28,6 +28,8 @@ interface CallActions {
   toggleMute: () => void;
   /** Cycle call audio through the available outputs (bluetooth → headset → speaker → …). */
   cycleAudioRoute: () => void;
+  /** Switch call audio to a specific output device (from the route dropdown). */
+  selectAudioRoute: (deviceId: string) => void;
   minimize: () => void;
   expand: () => void;
 }
@@ -75,7 +77,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     /** Apply a route to the engine + reflect it in the store. */
     const applyRoute = (route: AudioRoute) => {
-      useCallStore.getState().setAudioRoute(route.kind);
+      useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
       void engineRef.current?.setSinkId(route.deviceId);
     };
 
@@ -87,9 +89,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const refreshRoutes = async () => {
       const routes = await listAudioRoutes();
       routesRef.current = routes;
-      useCallStore.getState().setAvailableRoutes(routes.map((r) => r.kind));
-      const current = useCallStore.getState().audioRoute;
-      const stillThere = routes.find((r) => r.kind === current);
+      useCallStore.getState().setAvailableRoutes(routes);
+      const { audioDeviceId, audioRoute } = useCallStore.getState();
+      const stillThere = routes.find((r) => r.deviceId === audioDeviceId) ?? routes.find((r) => r.kind === audioRoute);
       applyRoute(stillThere ?? pickPreferredRoute(routes));
     };
 
@@ -197,10 +199,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       applyRoute(nextRoute(routes, useCallStore.getState().audioRoute));
     };
 
+    const selectAudioRoute: CallActions["selectAudioRoute"] = (deviceId) => {
+      const route = routesRef.current.find((r) => r.deviceId === deviceId);
+      if (route) applyRoute(route);
+    };
+
     const minimize: CallActions["minimize"] = () => useCallStore.getState().minimize();
     const expand: CallActions["expand"] = () => useCallStore.getState().expand();
 
-    return { startCall, acceptCall, rejectCall, hangUp, toggleMute, cycleAudioRoute, minimize, expand };
+    return {
+      startCall,
+      acceptCall,
+      rejectCall,
+      hangUp,
+      toggleMute,
+      cycleAudioRoute,
+      selectAudioRoute,
+      minimize,
+      expand,
+    };
   }, []);
 
   // Subscribe to call signaling once authenticated. Handlers read fresh state via getState().
@@ -255,10 +272,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           void (async () => {
             const routes = await listAudioRoutes();
             routesRef.current = routes;
-            useCallStore.getState().setAvailableRoutes(routes.map((r) => r.kind));
-            const cur = useCallStore.getState().audioRoute;
-            const route = routes.find((r) => r.kind === cur) ?? pickPreferredRoute(routes);
-            useCallStore.getState().setAudioRoute(route.kind);
+            useCallStore.getState().setAvailableRoutes(routes);
+            const { audioDeviceId, audioRoute } = useCallStore.getState();
+            const route =
+              routes.find((r) => r.deviceId === audioDeviceId) ??
+              routes.find((r) => r.kind === audioRoute) ??
+              pickPreferredRoute(routes);
+            useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
             void engine.setSinkId(route.deviceId);
           })();
           for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
@@ -354,10 +374,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         const routes = await listAudioRoutes();
         routesRef.current = routes;
-        useCallStore.getState().setAvailableRoutes(routes.map((r) => r.kind));
-        const cur = useCallStore.getState().audioRoute;
-        const route = routes.find((r) => r.kind === cur) ?? pickPreferredRoute(routes);
-        useCallStore.getState().setAudioRoute(route.kind);
+        useCallStore.getState().setAvailableRoutes(routes);
+        // A new peripheral (e.g. Bluetooth) auto-wins; otherwise keep the user's chosen device.
+        const { audioDeviceId } = useCallStore.getState();
+        const stillThere = routes.find((r) => r.deviceId === audioDeviceId && r.deviceId);
+        const route = stillThere ?? pickPreferredRoute(routes);
+        useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
         void engineRef.current?.setSinkId(route.deviceId);
       })();
     };
