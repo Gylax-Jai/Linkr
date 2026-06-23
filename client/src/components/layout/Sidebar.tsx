@@ -86,9 +86,9 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
 
   const participantId = chat.participant._id;
   const friendship = chat.participant.friendship;
-  // Self ("Saved messages") chat: own notes, no presence/friend actions (Sprint C.2).
+  // Self chat: own notes, no presence/friend actions (Sprint C.2).
   const isSelf = chat.type === "self";
-  const displayName = isSelf ? "Saved messages" : chat.participant.displayName;
+  const displayName = isSelf ? "Self chat" : chat.participant.displayName;
   const isFriend = friendship?.status === "accepted";
   const isBlocked = friendship?.status === "blocked";
   const blockedByMe = Boolean(friendship?.blockedByMe);
@@ -393,7 +393,7 @@ export function Sidebar() {
   const [search, setSearch] = useState("");
   const view = useUIStore((s) => s.sidebarView);
   const setView = useUIStore((s) => s.setSidebarView);
-  // "Saved messages": open (or create) the user's own self chat (Sprint C.2).
+  // "Self chat": open (or create) the user's own self chat (Sprint C.2).
   const openSelfChat = useCreateChatMutation();
 
   const { data: chats = [], isLoading } = useChatList();
@@ -403,7 +403,7 @@ export function Sidebar() {
     if (!q) return chats;
     return chats.filter(
       (c) =>
-        (c.type === "self" && "saved messages".includes(q)) ||
+        (c.type === "self" && "self chat".includes(q)) ||
         c.participant.displayName.toLowerCase().includes(q) ||
         c.participant.username?.toLowerCase().includes(q),
     );
@@ -430,8 +430,8 @@ export function Sidebar() {
             type="button"
             onClick={() => openSelfChat.mutate(user._id)}
             disabled={openSelfChat.isPending}
-            aria-label="Saved messages"
-            title="Saved messages (message yourself)"
+            aria-label="Self chat"
+            title="Self chat (message yourself)"
             className="grid h-8 w-8 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-primary disabled:opacity-50"
           >
             <Bookmark className="h-4 w-4" />

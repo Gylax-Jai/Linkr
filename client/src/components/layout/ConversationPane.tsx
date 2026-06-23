@@ -144,20 +144,36 @@ export function ConversationPane() {
 function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () => void }) {
   const typingByChat = useUIStore((s) => s.typingByChat);
   const onlineOverrides = useUIStore((s) => s.onlineOverrides);
+  const detailsOpen = useUIStore((s) => s.detailsOpen);
+  const mobileDetailsOpen = useUIStore((s) => s.mobileDetailsOpen);
   const setDetailsOpen = useUIStore((s) => s.setDetailsOpen);
   const openMobileDetails = useUIStore((s) => s.openMobileDetails);
+  const closeMobileDetails = useUIStore((s) => s.closeMobileDetails);
   const isTyping = typingByChat[chat._id];
   const online = onlineOverrides[chat.participant._id] ?? chat.participant.online;
   // E2EE is active for this chat once the peer has published a public key (Phase 2).
   const e2ee = usePeerHasKey(chat.participant._id) === true;
-  // Self ("Saved messages") chat: no peer presence/status/friend actions (Sprint C.2).
+  // Self chat: no peer presence/friend actions, but your own custom status still shows (Sprint C.2).
   const isSelf = chat.type === "self";
-  const title = isSelf ? "Saved messages" : chat.participant.displayName;
+  const title = isSelf ? "Self chat" : chat.participant.displayName;
 
-  // One handler for both breakpoints: reveal the desktop aside and open the mobile slide-up sheet.
+  // Clicking the name/avatar always reveals the profile (desktop aside + mobile/tablet sheet).
   const openDetails = () => {
     setDetailsOpen(true);
     openMobileDetails();
+  };
+
+  // The ⋮ "Contact info" TOGGLES the profile pane (open if closed, close if already open). The
+  // active surface differs by breakpoint — the static aside (lg+) vs the slide-in sheet (< lg).
+  const toggleDetails = () => {
+    const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+    if (isDesktop) {
+      setDetailsOpen(!detailsOpen);
+    } else if (mobileDetailsOpen) {
+      closeMobileDetails();
+    } else {
+      openMobileDetails();
+    }
   };
 
   return (
@@ -201,12 +217,12 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
           )}
         </div>
       </button>
-      {!isSelf && chat.participant.status?.trim() ? <StatusChip status={chat.participant.status.trim()} /> : null}
+      {chat.participant.status?.trim() ? <StatusChip status={chat.participant.status.trim()} /> : null}
       <EncryptedBadge iconOnly e2ee={e2ee} />
       <div className="flex items-center gap-0.5">
         <CallButton label="Voice call" icon={<Phone className="h-4 w-4" />} />
         <CallButton label="Video call" icon={<Video className="h-4 w-4" />} />
-        <HeaderMenu chat={chat} onViewInfo={openDetails} />
+        <HeaderMenu chat={chat} onViewInfo={toggleDetails} />
         <button
           type="button"
           onClick={onBack}

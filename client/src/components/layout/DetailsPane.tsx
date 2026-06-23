@@ -89,9 +89,9 @@ function DetailsContent() {
   const [tab, setTab] = useState<TabId>("profile");
 
   const participant = chat?.participant;
-  // Self ("Saved messages") chat: own space, no presence/relationship/block actions (Sprint C.2).
+  // Self chat: own space, no presence/relationship/block actions (Sprint C.2).
   const isSelf = chat?.type === "self";
-  const displayName = isSelf ? "Saved messages" : participant?.displayName;
+  const displayName = isSelf ? "Self chat" : participant?.displayName;
   const online = !isSelf && participant ? (onlineOverrides[participant._id] ?? participant.online) : false;
 
   const block = useBlockUserMutation();

@@ -3,9 +3,11 @@
 > **Living document:** everything built so far, how to run it, and what's next.  
 > For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
 
-**Last updated:** June 23, 2026 (Sprint C.2.1 — status popover fixes (above messages, no label, fits text), 50-char status cap, emoji picker now uses the real dark/light theme + docks below the field on mobile, self avatar is click-to-zoom)
+**Last updated:** June 23, 2026 (Sprint C.2.2 — Contact info button now toggles the profile pane open/closed; self chat renamed "Self chat" everywhere and now shows your own custom-status chip)
 
-Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on tablet), circular avatar lightbox, **self chat ("Saved messages")**, header "last seen X ago" when offline, custom status moved to a floating chip, compact scrollable emoji picker)  
+Earlier (Sprint C.2.1 — status popover fixes (above messages, no label, fits text), 50-char status cap, emoji picker now uses the real dark/light theme + docks below the field on mobile, self avatar is click-to-zoom)
+
+Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on tablet), circular avatar lightbox, **self chat**, header "last seen X ago" when offline, custom status moved to a floating chip, compact scrollable emoji picker)  
 **Tagline:** Connect privately. Talk freely.  
 **Brand:** Iris Violet `#7C5CFC` (gradient → `#9D7BFF`)
 
