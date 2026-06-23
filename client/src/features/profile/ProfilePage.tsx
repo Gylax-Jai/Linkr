@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { isAxiosError } from "axios";
 import { ArrowLeft, Camera, Loader2, X } from "lucide-react";
-import { AVATAR_ACCEPT, AVATAR_MAX_BYTES } from "@linkr/shared";
+import { AVATAR_ACCEPT, AVATAR_MAX_BYTES, STATUS_MAX } from "@linkr/shared";
 
 /** Status auto-clear choices (Sprint C.1). `null` = keep until manually changed. */
 const STATUS_DURATION_OPTIONS: { value: number | null; label: string }[] = [
@@ -244,10 +244,13 @@ export function ProfilePage() {
             type="text"
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            maxLength={100}
+            maxLength={STATUS_MAX}
             placeholder="What's on your mind?"
             className="mt-1.5 w-full rounded-2xl border border-border bg-surface px-4 py-2.5 text-sm text-text shadow-soft focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-ring/30"
           />
+          <p className="mt-1 text-right text-[11px] tabular-nums text-text-muted">
+            {status.length}/{STATUS_MAX}
+          </p>
           {status.trim() ? (
             <div className="mt-2 flex items-center gap-2">
               <label htmlFor="statusDuration" className="text-xs text-text-muted">

@@ -104,13 +104,13 @@ function DetailsContent() {
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex flex-col items-center gap-3 border-b border-border px-6 py-8 text-center">
         <Avatar
-          name={displayName ?? "Linkr"}
+          name={isSelf ? (sessionUser?.displayName ?? "You") : (displayName ?? "Linkr")}
           src={participant?.avatar}
           size="xl"
           ring
           online={online}
           pulseRing={online}
-          zoomable={!isSelf}
+          zoomable
           icon={isSelf ? <Bookmark className="h-7 w-7" /> : undefined}
         />
         <div className="space-y-1">

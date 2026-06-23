@@ -54,7 +54,7 @@ import {
   useUnblockUserMutation,
 } from "@/features/friends";
 import { useAuthStore, useUIStore } from "@/lib/store";
-import { useThemeStore } from "@/lib/store/themeStore";
+import { useTheme } from "@/lib/theme";
 import { useDecryptedText, usePeerHasKey } from "@/lib/crypto";
 import { EmojiPickerPopover } from "@/features/chat/EmojiPicker";
 import { bubbleRadiusClasses, getBubblePosition } from "@/lib/utils/bubbleGrouping";
@@ -161,7 +161,7 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
   };
 
   return (
-    <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-surface/80 px-4 shadow-soft backdrop-blur-sm">
+    <div className="relative z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-surface/80 px-4 shadow-soft backdrop-blur-sm">
       <Button variant="ghost" size="icon" className="md:hidden" onClick={onBack} aria-label="Back to chat list">
         <ArrowLeft className="h-4 w-4" />
       </Button>
@@ -266,13 +266,9 @@ function StatusChip({ status }: { status: string }) {
       {open ? (
         <div
           role="tooltip"
-          className="absolute right-0 top-full z-50 mt-2 w-64 max-w-[min(16rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface p-3 shadow-elevated"
+          className="absolute right-0 top-full z-50 mt-2 w-max max-w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface px-3 py-2 shadow-elevated"
         >
-          <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-            <Quote className="h-3 w-3 text-primary" />
-            Status
-          </p>
-          <p className="mt-1 break-words text-sm leading-snug text-text">{status}</p>
+          <p className="break-words text-sm leading-snug text-text">{status}</p>
         </div>
       ) : null}
     </div>
@@ -940,7 +936,20 @@ function Composer({
   const edit = useEditMessageMutation(chatId);
   const upload = useUploadMediaMutation(chatId);
   const userId = useAuthStore((s) => s.user?._id);
-  const colorMode = useThemeStore((s) => s.colorMode);
+  // Drive the emoji picker's light/dark skin from the ACTUAL applied theme mode (the legacy
+  // themeStore.colorMode is unused and always "light", which is why the picker looked light).
+  const { mode } = useTheme();
+  // Mobile (WhatsApp-style): the picker docks below the composer field instead of floating above.
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const onChange = () => setIsMobile(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const dockedEmojiRef = useRef<HTMLDivElement>(null);
   const typingRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -948,11 +957,16 @@ function Composer({
 
   const isEditing = Boolean(target.editing);
 
-  // Outside-click / Escape closes the emoji popover (the ref wraps both the toggle and the popover).
+  // Outside-click / Escape closes the emoji popover. The toggle (+ desktop floating popover) lives in
+  // `emojiRef`; the mobile docked panel lives in `dockedEmojiRef`, so a tap is "inside" if it hits
+  // either — otherwise the docked panel would close itself the moment you tapped an emoji.
   useEffect(() => {
     if (!emojiOpen) return;
     const onDown = (e: PointerEvent) => {
-      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) setEmojiOpen(false);
+      const target = e.target as Node;
+      const inToggle = emojiRef.current?.contains(target);
+      const inDocked = dockedEmojiRef.current?.contains(target);
+      if (!inToggle && !inDocked) setEmojiOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setEmojiOpen(false);
@@ -1257,11 +1271,8 @@ function Composer({
           >
             <Smile className="h-4 w-4" />
           </button>
-          {emojiOpen ? (
-            <EmojiPickerPopover
-              onSelect={insertEmoji}
-              theme={colorMode === "dark" ? "dark" : "light"}
-            />
+          {emojiOpen && !isMobile ? (
+            <EmojiPickerPopover onSelect={insertEmoji} theme={mode} />
           ) : null}
         </div>
         <textarea
@@ -1294,6 +1305,14 @@ function Composer({
           {isEditing ? <Check className="h-4 w-4" /> : <Send className="h-4 w-4" />}
         </Button>
       </div>
+
+      {/* Mobile: the picker docks here, below the field — the text box stays above it (WhatsApp-style).
+          The bottom-anchored composer grows upward, so the message list shrinks instead of being covered. */}
+      {emojiOpen && isMobile ? (
+        <div ref={dockedEmojiRef} className="mt-2">
+          <EmojiPickerPopover docked onSelect={insertEmoji} theme={mode} />
+        </div>
+      ) : null}
     </form>
   );
 }

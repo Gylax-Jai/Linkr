@@ -3,7 +3,9 @@
 > **Living document:** everything built so far, how to run it, and what's next.  
 > For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
 
-**Last updated:** June 23, 2026 (Sprint C.2 — Contact info opens a side profile (right-drawer on tablet), circular avatar lightbox, **self chat ("Saved messages")**, header "last seen X ago" when offline, custom status moved to a floating chip, compact scrollable emoji picker)  
+**Last updated:** June 23, 2026 (Sprint C.2.1 — status popover fixes (above messages, no label, fits text), 50-char status cap, emoji picker now uses the real dark/light theme + docks below the field on mobile, self avatar is click-to-zoom)
+
+Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on tablet), circular avatar lightbox, **self chat ("Saved messages")**, header "last seen X ago" when offline, custom status moved to a floating chip, compact scrollable emoji picker)  
 **Tagline:** Connect privately. Talk freely.  
 **Brand:** Iris Violet `#7C5CFC` (gradient → `#9D7BFF`)
 
@@ -188,6 +190,17 @@ A fourth round of feedback (six items). Mostly client-only; the **self chat** fe
 - **C2.4 — offline contacts just said "Offline":** added `formatLastSeen()` (`last seen just now` / `…Xm ago` / `…Xh ago` / `…yesterday at …` / `…on Mon D`). The header subtitle now shows **Online** or a relative **"last seen …"** (falling back to "Offline" when there's no timestamp).
 - **C2.5 — custom status crowded the name/presence (inline):** the status moved out of the subtitle into a compact **floating chip** (`StatusChip`) beside the name — a small quote glyph + snippet that opens a width-constrained **popover** with the full text on hover/tap (outside-click / Escape to close). Presence is back to being the subtitle's job (C2.4).
 - **C2.6 — emoji picker took up the whole screen:** capped the emoji-mart host height in `globals.css` (`em-emoji-picker { height: 18rem; max-height: min(18rem,45vh) }`) so its category list **scrolls** instead of growing to fit every row, and tightened the grid to a compact rectangle (`perLine={7}`, `emojiButtonSize={30}`, `emojiSize={20}`, `w-[min(18rem,…)]`).
+
+### Sprint C.2.1 — fourth-round follow-ups (status popover, emoji theme/mobile, self avatar)
+Eight quick corrections from the next live test. All client-only except the status cap (one shared constant). Verified green: `tsc` for shared + server + client, plus the client production build.
+- **Status popover rendered behind the messages:** the chat header had no stacking context, so the later-in-DOM message list painted over the `StatusChip` popover (and the ⋮ menu). The header is now **`relative z-30`**, lifting it (and any dropdown it owns) above the conversation.
+- **Dropped the "STATUS" label** in the popover — it just shows the status text now.
+- **Popover sized to its text:** was a fixed `w-64` (huge for "fed up"). Now **`w-max`** with a sensible `max-w`, so a short status is a small chip and only long text wraps.
+- **Status capped at 50 characters:** `STATUS_MAX` 100 → **50** (shared) — enforced by the Zod schema and the profile input `maxLength`, plus a live **`n/50`** counter on the profile form.
+- **Emoji picker was always light:** it read `themeStore.colorMode` (a legacy store stuck at `"light"`), so on the dark app it rendered a white panel. It now reads the **real applied mode** from the `ThemeProvider` (`useTheme().mode`), so it matches the active dark/light theme.
+- **Mobile emoji picker is WhatsApp-style:** on phones (`<640px`) the picker now **docks below the composer field** (full-width panel) with the text box staying above it, instead of floating over the input. Desktop keeps the floating popover above the emoji button. Outside-click tracks both the toggle and the docked panel so tapping an emoji doesn't dismiss it.
+- **Contact info opens the side profile:** verified — the ⋮ "Contact info" and the header name both call `openDetails()` (desktop pane + the C2.1 right-drawer on tablet/phone), so it reliably reveals the contact's profile bar.
+- **Self "Saved messages" photo is now click-to-zoom:** the details-pane avatar is `zoomable` for the self chat too (it was excluded), so tapping your own picture opens the circular lightbox.
 
 ### Sprint 6 — live-testing bugfixes (first real two-person test on the deployed build)
 After deploying (Vercel client + Render server) and testing with a friend, a batch of real-world bugs surfaced. Fixed in two passes — **Sprint A (server)** then **Sprint B (client UX)**.

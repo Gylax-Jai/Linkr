@@ -7,7 +7,7 @@ export const USERNAME_REGEX = /^[a-zA-Z0-9_]+$/;
 
 export const DISPLAY_NAME_MAX = 50;
 export const BIO_MAX = 200;
-export const STATUS_MAX = 100;
+export const STATUS_MAX = 50;
 
 /**
  * E.164 phone format (blueprint §4): leading "+", country code 1–9, up to 14 more digits.

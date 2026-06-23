@@ -16,9 +16,15 @@ interface EmojiSelectEvent {
 export function EmojiPickerPopover({
   onSelect,
   theme,
+  docked = false,
 }: {
   onSelect: (emoji: string) => void;
   theme: "light" | "dark";
+  /**
+   * `docked` (mobile, WhatsApp-style): a full-width panel rendered BELOW the composer field so the
+   * text box stays visible above it. Otherwise: a floating popover anchored above the emoji button.
+   */
+  docked?: boolean;
 }) {
   const [data, setData] = useState<unknown>(null);
 
@@ -32,37 +38,42 @@ export function EmojiPickerPopover({
     };
   }, []);
 
+  const wrapperClass = docked
+    ? "w-full overflow-hidden rounded-xl border border-border shadow-elevated"
+    : "absolute bottom-full left-0 z-40 mb-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl shadow-elevated";
+
   return (
-    <div className="absolute bottom-full left-0 z-40 mb-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl shadow-elevated">
+    <div className={wrapperClass}>
       {data ? (
-        <Suspense fallback={<PickerSkeleton />}>
+        <Suspense fallback={<PickerSkeleton docked={docked} />}>
           <Picker
             data={data}
             theme={theme}
             previewPosition="none"
             skinTonePosition="none"
             navPosition="top"
-            // Compact rectangle: a fixed 7-per-line grid + small buttons, and the host height is
-            // capped in globals.css so the category list scrolls instead of filling the screen.
-            perLine={7}
-            emojiButtonSize={30}
-            emojiSize={20}
+            // Docked (mobile): fill the panel width. Floating (desktop): a compact 7-per-line grid.
+            // Either way the host height is capped in globals.css so the list scrolls.
+            dynamicWidth={docked}
+            perLine={docked ? 9 : 7}
+            emojiButtonSize={docked ? 34 : 30}
+            emojiSize={docked ? 24 : 20}
             onEmojiSelect={(emoji: EmojiSelectEvent) => {
               if (emoji.native) onSelect(emoji.native);
             }}
           />
         </Suspense>
       ) : (
-        <PickerSkeleton />
+        <PickerSkeleton docked={docked} />
       )}
     </div>
   );
 }
 
-function PickerSkeleton() {
+function PickerSkeleton({ docked = false }: { docked?: boolean }) {
   return (
     <div
-      className="h-[18rem] w-full animate-pulse rounded-xl border border-border bg-surface"
+      className={`${docked ? "h-[16rem]" : "h-[18rem]"} w-full animate-pulse rounded-xl border border-border bg-surface`}
       aria-hidden="true"
     />
   );
