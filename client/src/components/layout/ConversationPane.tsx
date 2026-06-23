@@ -1145,26 +1145,27 @@ function Composer({
     if (!content) return;
 
     if (target.editing) {
+      const messageId = target.editing._id;
+      // Clear the field immediately so it feels instant; the cache is patched on success. Restore
+      // the text only if the edit actually fails (and the user hasn't started typing something new).
+      setText("");
+      onClearTarget();
       edit.mutate(
-        { messageId: target.editing._id, content },
-        {
-          onSuccess: () => {
-            setText("");
-            onClearTarget();
-          },
-        },
+        { messageId, content },
+        { onError: () => setText((t) => (t.length > 0 ? t : content)) },
       );
       return;
     }
 
+    // Clear the composer right away — the optimistic bubble already renders via the mutation's
+    // onMutate, so there's no reason to keep the text until the server ack (which includes the E2EE
+    // encryption + socket round-trip and was causing a visible ~2s lag). Restore on failure only.
+    const replyTo = target.replyTo?._id;
+    setText("");
+    onClearTarget();
     send.mutate(
-      { content, replyTo: target.replyTo?._id },
-      {
-        onSuccess: () => {
-          setText("");
-          onClearTarget();
-        },
-      },
+      { content, replyTo },
+      { onError: () => setText((t) => (t.length > 0 ? t : content)) },
     );
   };
 
