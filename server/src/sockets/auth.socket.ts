@@ -21,7 +21,7 @@ export async function socketAuthMiddleware(
       return;
     }
 
-    const userId = verifyAccessToken(token);
+    const { userId } = verifyAccessToken(token);
     const user = await UserModel.findById(userId);
     if (!user) {
       next(new Error("Unauthorized"));

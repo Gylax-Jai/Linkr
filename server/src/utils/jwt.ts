@@ -16,6 +16,14 @@ export type TokenKind = "access" | "refresh";
 interface LinkrTokenPayload {
   sub: string;
   kind: TokenKind;
+  /** Session/device id (Sprint E). Ties the token to a revocable server-side Session record. */
+  sid?: string;
+}
+
+/** Verified token result: the user id plus the session id it was minted for (when present). */
+export interface VerifiedToken {
+  userId: string;
+  sessionId?: string;
 }
 
 function secretFor(kind: TokenKind): string {
@@ -26,36 +34,43 @@ function secretFor(kind: TokenKind): string {
   return secret;
 }
 
-export function signAccessToken(userId: string): string {
-  return jwt.sign({ sub: userId, kind: "access" } satisfies LinkrTokenPayload, secretFor("access"), {
-    expiresIn: ACCESS_TOKEN_TTL_SECONDS,
-  });
+export function signAccessToken(userId: string, sessionId?: string): string {
+  return jwt.sign(
+    { sub: userId, kind: "access", ...(sessionId ? { sid: sessionId } : {}) } satisfies LinkrTokenPayload,
+    secretFor("access"),
+    { expiresIn: ACCESS_TOKEN_TTL_SECONDS },
+  );
 }
 
-export function signRefreshToken(userId: string): string {
-  return jwt.sign({ sub: userId, kind: "refresh" } satisfies LinkrTokenPayload, secretFor("refresh"), {
-    expiresIn: REFRESH_TOKEN_TTL_SECONDS,
-  });
+export function signRefreshToken(userId: string, sessionId?: string): string {
+  return jwt.sign(
+    { sub: userId, kind: "refresh", ...(sessionId ? { sid: sessionId } : {}) } satisfies LinkrTokenPayload,
+    secretFor("refresh"),
+    { expiresIn: REFRESH_TOKEN_TTL_SECONDS },
+  );
 }
 
-/** Verify a token of the given kind and return the user id. Throws 401 on any failure. */
-function verify(token: string, kind: TokenKind): string {
+/** Verify a token of the given kind and return the user + session id. Throws 401 on any failure. */
+function verify(token: string, kind: TokenKind): VerifiedToken {
   try {
     const decoded = jwt.verify(token, secretFor(kind));
     if (typeof decoded === "string" || decoded.kind !== kind || typeof decoded.sub !== "string") {
       throw ApiError.unauthorized("Invalid token");
     }
-    return decoded.sub;
+    return {
+      userId: decoded.sub,
+      sessionId: typeof decoded.sid === "string" ? decoded.sid : undefined,
+    };
   } catch (err) {
     if (err instanceof ApiError) throw err;
     throw ApiError.unauthorized("Invalid or expired token");
   }
 }
 
-export function verifyAccessToken(token: string): string {
+export function verifyAccessToken(token: string): VerifiedToken {
   return verify(token, "access");
 }
 
-export function verifyRefreshToken(token: string): string {
+export function verifyRefreshToken(token: string): VerifiedToken {
   return verify(token, "refresh");
 }

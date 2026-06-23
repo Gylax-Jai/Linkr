@@ -40,3 +40,24 @@ export interface OtpSendResponse {
 export interface UsernameAvailability {
   available: boolean;
 }
+
+/**
+ * A logged-in device/session (Sprint E). Backed by a server-side `Session` record so the user can
+ * see where they're signed in and remotely revoke a device. No tokens or secrets are ever included.
+ */
+export interface DeviceSession {
+  _id: ID;
+  /** Friendly label derived from the user agent, e.g. "Chrome on Windows". */
+  label: string;
+  /** True for the session making this request (the current device). */
+  current: boolean;
+  /** Last time this session refreshed its token (ISO). */
+  lastSeenAt: Timestamp;
+  /** When the session was created / first signed in (ISO). */
+  createdAt: Timestamp;
+}
+
+/** GET /api/sessions — every active session for the current account. */
+export interface SessionListResponse {
+  sessions: DeviceSession[];
+}

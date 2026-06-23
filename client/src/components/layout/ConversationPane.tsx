@@ -99,12 +99,17 @@ interface ComposerTarget {
 export function ConversationPane() {
   const activeChatId = useUIStore((s) => s.activeChatId);
   const setActiveChat = useUIStore((s) => s.setActiveChat);
+  const sessionUser = useAuthStore((s) => s.user);
   const chat = useChatById(activeChatId);
   const [target, setTarget] = useState<ComposerTarget>({ replyTo: null, editing: null });
+  // WhatsApp-style status strip (Sprint F): visible while viewing the latest messages, slides away as
+  // you scroll up through history, and returns when you're back at the bottom.
+  const [statusVisible, setStatusVisible] = useState(true);
 
-  // Reset reply/edit state whenever the active chat changes.
+  // Reset per-chat UI (reply/edit target + status strip) whenever the active chat changes.
   useEffect(() => {
     setTarget({ replyTo: null, editing: null });
+    setStatusVisible(true);
   }, [activeChatId]);
 
   if (!activeChatId) {
@@ -119,25 +124,53 @@ export function ConversationPane() {
     );
   }
 
+  const isSelf = chat.type === "self";
+  // Self chat reflects your own (live) status; a normal chat shows the contact's status.
+  const status = (isSelf ? sessionUser?.status : chat.participant.status)?.trim() ?? "";
+
   return (
     <section className="flex h-full flex-1 flex-col bg-bg">
       <ConversationHeader chat={chat} onBack={() => setActiveChat(null)} />
+      {status ? <ConversationStatusBanner status={status} visible={statusVisible} /> : null}
       <MessageList
         chatId={activeChatId}
         participant={chat.participant}
         onReply={(m) => setTarget({ replyTo: m, editing: null })}
         onEdit={(m) => setTarget({ replyTo: null, editing: m })}
+        onAtBottomChange={setStatusVisible}
       />
       <Composer
         chatId={activeChatId}
         participantId={chat.participant._id}
         participantName={chat.participant.displayName}
         friendship={chat.participant.friendship}
-        isSelf={chat.type === "self"}
+        isSelf={isSelf}
         target={target}
         onClearTarget={() => setTarget({ replyTo: null, editing: null })}
       />
     </section>
+  );
+}
+
+/**
+ * Mobile-only status strip under the chat header (Sprint F), styled like WhatsApp's status line below
+ * the name. Collapses (height + opacity) when scrolled away from the latest messages. On sm+ the
+ * compact `StatusChip` in the header covers this instead, so it's hidden there.
+ */
+function ConversationStatusBanner({ status, visible }: { status: string; visible: boolean }) {
+  return (
+    <div
+      aria-hidden={!visible}
+      className={cn(
+        "overflow-hidden border-b border-border bg-surface/70 backdrop-blur-sm transition-all duration-300 ease-out sm:hidden",
+        visible ? "max-h-12 opacity-100" : "max-h-0 border-b-0 opacity-0",
+      )}
+    >
+      <div className="flex items-center gap-2 px-4 py-2">
+        <Quote className="h-3 w-3 shrink-0 text-primary" />
+        <p className="truncate text-xs text-text-muted">{status}</p>
+      </div>
+    </div>
   );
 }
 
@@ -219,9 +252,11 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
       </button>
       {chat.participant.status?.trim() ? <StatusChip status={chat.participant.status.trim()} /> : null}
       <EncryptedBadge iconOnly e2ee={e2ee} />
-      <div className="flex items-center gap-0.5">
-        <CallButton label="Voice call" icon={<Phone className="h-4 w-4" />} />
-        <CallButton label="Video call" icon={<Video className="h-4 w-4" />} />
+      <div className="flex shrink-0 items-center gap-0.5">
+        {/* Call actions are placeholders; hide them on phones so the name + last seen never get
+            squeezed (Sprint F). They reappear from sm upwards where there's room. */}
+        <CallButton label="Voice call" icon={<Phone className="h-4 w-4" />} className="hidden sm:grid" />
+        <CallButton label="Video call" icon={<Video className="h-4 w-4" />} className="hidden sm:grid" />
         <HeaderMenu chat={chat} onViewInfo={toggleDetails} />
         <button
           type="button"
@@ -421,14 +456,17 @@ function HeaderMenuItem({
   );
 }
 
-function CallButton({ label, icon }: { label: string; icon: ReactNode }) {
+function CallButton({ label, icon, className }: { label: string; icon: ReactNode; className?: string }) {
   return (
     <button
       type="button"
       disabled
       aria-label={`${label} (coming soon)`}
       title={`${label} — coming soon`}
-      className="grid h-9 w-9 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50"
+      className={cn(
+        "h-9 w-9 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50",
+        className,
+      )}
     >
       {icon}
     </button>
@@ -440,11 +478,14 @@ function MessageList({
   participant,
   onReply,
   onEdit,
+  onAtBottomChange,
 }: {
   chatId: string;
   participant: ChatListItem["participant"];
   onReply: (m: MessageDTO) => void;
   onEdit: (m: MessageDTO) => void;
+  /** Reports whether the list is scrolled near the bottom — drives the mobile status strip (Sprint F). */
+  onAtBottomChange?: (atBottom: boolean) => void;
 }) {
   const userId = useAuthStore((s) => s.user?._id);
   const { data: messages = [] } = useMessages(chatId);
@@ -452,10 +493,21 @@ function MessageList({
   const react = useReactMessageMutation(chatId);
   const del = useDeleteMessageMutation(chatId);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Treat "within 120px of the bottom" as at-bottom so the status strip shows for the latest messages
+  // but tucks away once the user scrolls up into history.
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el || !onAtBottomChange) return;
+    onAtBottomChange(el.scrollHeight - el.scrollTop - el.clientHeight < 120);
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+    // A new message auto-scrolls to the bottom, so the strip should reappear.
+    onAtBottomChange?.(true);
+  }, [messages.length, onAtBottomChange]);
 
   useEffect(() => {
     if (!messages.length || !userId) return;
@@ -471,7 +523,12 @@ function MessageList({
   let lastDay = "";
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6" style={{ gap: "var(--space-bubble-gap)" }}>
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto px-4 py-6 sm:px-6"
+      style={{ gap: "var(--space-bubble-gap)" }}
+    >
       {grouped.map((message, index) => {
         const mine = message.senderKey === "me";
         const position = getBubblePosition(grouped, index);

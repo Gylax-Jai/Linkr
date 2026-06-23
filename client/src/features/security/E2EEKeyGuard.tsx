@@ -133,7 +133,8 @@ function RestoreModal({ onDismiss }: { onDismiss: () => void }) {
           <h2 className="text-base font-semibold text-text">Restore your old chats?</h2>
           <p className="text-xs text-text-muted">
             This account has encrypted history from another device. Restore it here with your passphrase or a backup
-            code — or keep chatting and do it later from Profile → Security.
+            code — or keep chatting and do it later from Settings → Security. This device is remembered once you
+            restore, so you won't be asked again.
           </p>
         </div>
         <button

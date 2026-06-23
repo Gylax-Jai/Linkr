@@ -16,13 +16,14 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       throw ApiError.unauthorized();
     }
 
-    const userId = verifyAccessToken(token);
+    const { userId, sessionId } = verifyAccessToken(token);
     const user = await UserModel.findById(userId);
     if (!user) {
       throw ApiError.unauthorized();
     }
 
     req.user = user;
+    req.sessionId = sessionId;
     next();
   } catch (err) {
     next(err);

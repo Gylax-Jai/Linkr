@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { isAxiosError } from "axios";
-import { ArrowLeft, Camera, Loader2, X } from "lucide-react";
+import { ArrowLeft, Camera, ChevronRight, Loader2, ShieldCheck, X } from "lucide-react";
 import { AVATAR_ACCEPT, AVATAR_MAX_BYTES, STATUS_MAX } from "@linkr/shared";
 
 /** Status auto-clear choices (Sprint C.1). `null` = keep until manually changed. */
@@ -15,7 +15,6 @@ const STATUS_DURATION_OPTIONS: { value: number | null; label: string }[] = [
 ];
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
-import { RecoveryCard } from "@/features/security";
 import { useAuthStore } from "@/lib/store";
 import { PATHS } from "@/routes/paths";
 import { useUpdateAvatarMutation, useUpdateProfileMutation } from "./useProfile";
@@ -286,8 +285,21 @@ export function ProfilePage() {
       </form>
 
       <div className="mx-auto w-full max-w-lg px-6 pb-10">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">Security</h2>
-        <RecoveryCard />
+        <Link
+          to={PATHS.settings}
+          className="flex items-center gap-3 rounded-2xl border border-border bg-surface p-4 shadow-soft transition-colors hover:bg-surface-2"
+        >
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-surface-2 text-text-muted">
+            <ShieldCheck className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-text">Security &amp; devices</p>
+            <p className="truncate text-xs text-text-muted">
+              Multi-device encryption, backup codes, and signed-in devices
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 shrink-0 text-text-muted" />
+        </Link>
       </div>
     </div>
   );

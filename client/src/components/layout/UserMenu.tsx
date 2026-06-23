@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ChevronDown, LogOut, Palette, User } from "lucide-react";
+import { ChevronDown, LogOut, Palette, Settings, User } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
 import { useLogoutMutation } from "@/features/auth";
@@ -83,6 +83,16 @@ export function UserMenu() {
           >
             <User className="h-4 w-4 text-text-muted" />
             Profile
+          </Link>
+
+          <Link
+            to={PATHS.settings}
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-text transition-colors hover:bg-surface-2"
+          >
+            <Settings className="h-4 w-4 text-text-muted" />
+            Settings
           </Link>
 
           <div className="my-1 border-t border-border" />

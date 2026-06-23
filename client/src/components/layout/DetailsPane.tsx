@@ -15,6 +15,7 @@ import {
 import { MessageMedia, useChatById, useMessages } from "@/features/chat";
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
 import { useAuthStore, useUIStore } from "@/lib/store";
+import { formatLastSeen } from "@/lib/utils/formatTime";
 import { cn } from "@/lib/utils";
 
 type TabId = "profile" | "media" | "files";
@@ -118,8 +119,19 @@ function DetailsContent() {
           <p className="font-mono text-xs text-text-muted">
             {isSelf ? "Only you" : participant?.username ? `@${participant.username}` : "—"}
           </p>
+          {/* Presence under the name (Sprint F): on phones this replaces the "Private chat" badge
+              (which is hidden < sm) so the contact's last seen is visible where it matters most. */}
+          {!isSelf && participant ? (
+            <p className="text-xs font-medium text-text-muted">
+              {online ? (
+                <span className="text-online">Online</span>
+              ) : (
+                (formatLastSeen(participant.lastSeen) ?? "Offline")
+              )}
+            </p>
+          ) : null}
         </div>
-        <EncryptedBadge className="mt-1" />
+        <EncryptedBadge className="mt-1 hidden sm:inline-flex" />
       </div>
 
       <div className="flex border-b border-border px-2">

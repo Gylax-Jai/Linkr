@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import {
   Ban,
   Bookmark,
@@ -9,6 +10,7 @@ import {
   Pin,
   PinOff,
   Search,
+  Settings,
   ShieldOff,
   Trash2,
   UserMinus,
@@ -30,6 +32,7 @@ import {
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { useDecryptedText } from "@/lib/crypto";
 import { formatChatListTime } from "@/lib/utils/formatTime";
+import { PATHS } from "@/routes/paths";
 import { cn } from "@/lib/utils";
 
 function ChatPreview({ chat, userId }: { chat: ChatListItem; userId: string }) {
@@ -445,6 +448,14 @@ export function Sidebar() {
           >
             <UserPlus className="h-4 w-4" />
           </button>
+          <Link
+            to={PATHS.settings}
+            aria-label="Settings"
+            title="Settings"
+            className="grid h-8 w-8 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-primary"
+          >
+            <Settings className="h-4 w-4" />
+          </Link>
         </div>
 
         {/* Chats | Friends switch: chats are conversations, Friends is your contact directory. */}

@@ -4,6 +4,7 @@ import { LoginPage } from "@/features/auth";
 import { SocketProvider } from "@/features/chat";
 import { OnboardingWizard } from "@/features/onboarding";
 import { ProfilePage } from "@/features/profile";
+import { SettingsPage } from "@/features/settings";
 import { E2EEKeyGuard } from "@/features/security";
 import { useAuthStore } from "@/lib/store";
 import { useE2EEInit } from "@/lib/crypto";
@@ -44,6 +45,16 @@ const router = createBrowserRouter([
       <RequireAuth>
         <RequireOnboarded>
           <ProfilePage />
+        </RequireOnboarded>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: PATHS.settings,
+    element: (
+      <RequireAuth>
+        <RequireOnboarded>
+          <SettingsPage />
         </RequireOnboarded>
       </RequireAuth>
     ),

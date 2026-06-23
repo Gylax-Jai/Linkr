@@ -11,11 +11,19 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../uti
 import { getUserById, loginWithGoogle, toSessionUser, type UserDocument } from "./auth.service.js";
 import { bindVerifiedPhone, sendOtp, verifyOtp } from "./otp.service.js";
 import { verifyMsg91AccessToken } from "./msg91.service.js";
+import { createSession, deleteSession, touchSession } from "../sessions/sessions.service.js";
 
-/** Issue an access token + set the refresh cookie, returning the standard auth response. */
-function issueSession(res: Parameters<typeof setRefreshCookie>[0], user: UserDocument): AuthResponse {
-  setRefreshCookie(res, signRefreshToken(user.id));
-  return { user: toSessionUser(user), accessToken: signAccessToken(user.id) };
+/**
+ * Issue an access token + set the refresh cookie for a given session, returning the standard auth
+ * response. Both tokens carry the session id (`sid`) so the session can be tracked and revoked.
+ */
+function issueSession(
+  res: Parameters<typeof setRefreshCookie>[0],
+  user: UserDocument,
+  sessionId: string,
+): AuthResponse {
+  setRefreshCookie(res, signRefreshToken(user.id, sessionId));
+  return { user: toSessionUser(user), accessToken: signAccessToken(user.id, sessionId) };
 }
 
 function requireUser(req: Request): UserDocument {
@@ -27,33 +35,49 @@ function requireUser(req: Request): UserDocument {
 export const googleLogin = asyncHandler(async (req, res) => {
   const { idToken } = req.body as { idToken: string };
   const user = await loginWithGoogle(idToken);
-  res.status(200).json(issueSession(res, user));
+  // Each login creates a fresh device/session record (Sprint E) so it appears in the device list.
+  const sessionId = await createSession(user.id, req);
+  res.status(200).json(issueSession(res, user, sessionId));
 });
 
-/** POST /api/auth/refresh — exchange a valid refresh cookie for a fresh access token (rotates refresh). */
+/**
+ * POST /api/auth/refresh — exchange a valid refresh cookie for a fresh access token (rotates the
+ * refresh token, reusing the same session). Rejected if the session was revoked remotely (Sprint E).
+ */
 export const refresh = asyncHandler(async (req, res) => {
   const token = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE_NAME];
   if (!token) throw ApiError.unauthorized("Session expired");
 
   let userId: string;
+  let sessionId: string | undefined;
   try {
-    userId = verifyRefreshToken(token);
+    ({ userId, sessionId } = verifyRefreshToken(token));
   } catch (err) {
     clearRefreshCookie(res);
     throw err;
   }
 
   const user = await getUserById(userId);
-  if (!user) {
+  // A missing user, a token minted before sessions existed, or a revoked session all end the session.
+  if (!user || !sessionId || !(await touchSession(sessionId, req))) {
     clearRefreshCookie(res);
     throw ApiError.unauthorized("Session expired");
   }
 
-  res.status(200).json(issueSession(res, user));
+  res.status(200).json(issueSession(res, user, sessionId));
 });
 
-/** POST /api/auth/logout — clear the refresh cookie. */
-export const logout = asyncHandler(async (_req, res) => {
+/** POST /api/auth/logout — revoke this device's session and clear the refresh cookie. */
+export const logout = asyncHandler(async (req, res) => {
+  const token = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE_NAME];
+  if (token) {
+    try {
+      const { sessionId } = verifyRefreshToken(token);
+      if (sessionId) await deleteSession(sessionId);
+    } catch {
+      /* invalid/expired token — nothing to revoke, just clear the cookie below */
+    }
+  }
   clearRefreshCookie(res);
   res.status(200).json({ success: true });
 });

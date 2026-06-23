@@ -10,6 +10,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: HydratedDocument<UserDoc>;
+      /** Session/device id from the access token (Sprint E); identifies the current device. */
+      sessionId?: string;
     }
   }
 }

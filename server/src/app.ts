@@ -11,6 +11,10 @@ import { notFoundHandler, errorHandler } from "./middleware/errorHandler.js";
 export function createApp(): Express {
   const app = express();
 
+  // Trust the first proxy hop (Render/Vercel) so `req.ip` reflects the real client for session
+  // metadata (Sprint E). Scoped to one hop to avoid spoofed X-Forwarded-For from arbitrary clients.
+  app.set("trust proxy", 1);
+
   // Security headers (blueprint §16) and CORS scoped to the known client origin only.
   app.use(helmet());
   app.use(
