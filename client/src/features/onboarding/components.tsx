@@ -7,8 +7,10 @@ export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
     <input
       ref={ref}
       className={cn(
-        "w-full rounded-2xl border border-border bg-surface-2/60 px-4 py-2.5 text-sm text-text outline-none transition-colors",
-        "placeholder:text-text-muted focus:border-primary/60 focus:ring-2 focus:ring-ring/40",
+        // Fully opaque surface + medium weight + explicit bright text so the typed value stays
+        // high-contrast in dark mode (a translucent bg over the page made it look faint on mobile).
+        "w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-sm font-medium text-text outline-none transition-colors",
+        "placeholder:font-normal placeholder:text-text-muted focus:border-primary/60 focus:ring-2 focus:ring-ring/40",
         className,
       )}
       {...props}

@@ -746,6 +746,17 @@ function Composer({
     };
   }, [emojiOpen]);
 
+  // Toggle the in-app emoji picker. Opening it blurs the textarea so the device's NATIVE keyboard
+  // (which has its own emoji pane) collapses first — otherwise mobile shows two emoji panels at once.
+  // Focusing the textarea again (see onFocus below) closes this picker, so only one is ever open.
+  const toggleEmoji = () => {
+    setEmojiOpen((open) => {
+      const next = !open;
+      if (next) inputRef.current?.blur();
+      return next;
+    });
+  };
+
   // Insert an emoji at the caret (falls back to append) and keep the textarea focused.
   const insertEmoji = (emoji: string) => {
     const el = inputRef.current;
@@ -756,10 +767,13 @@ function Composer({
     const start = el.selectionStart ?? text.length;
     const end = el.selectionEnd ?? text.length;
     setText(text.slice(0, start) + emoji + text.slice(end));
+    const pos = start + emoji.length;
     requestAnimationFrame(() => {
-      el.focus();
-      const pos = start + emoji.length;
       el.setSelectionRange(pos, pos);
+      // Only steal focus on a fine pointer (desktop). On touch devices, focusing the textarea
+      // reopens the native keyboard on top of the in-app picker — the very "two packs" bug. Touch
+      // users tap the field directly (which closes the picker via outside-click) when ready to type.
+      if (!window.matchMedia("(pointer: coarse)").matches) el.focus();
     });
   };
 
@@ -1015,7 +1029,7 @@ function Composer({
             aria-label="Insert emoji"
             title="Emoji"
             aria-expanded={emojiOpen}
-            onClick={() => setEmojiOpen((v) => !v)}
+            onClick={() => toggleEmoji()}
             className={cn(
               "grid h-9 w-9 place-items-center rounded-full transition-colors hover:bg-surface hover:text-text",
               emojiOpen ? "text-primary" : "text-text-muted",

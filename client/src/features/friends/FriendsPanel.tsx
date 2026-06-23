@@ -1,6 +1,8 @@
 import type { FriendshipListItem } from "@linkr/shared";
+import { Ban } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
+import { MessageFriendButton, UnfriendButton } from "./FriendActions";
 import {
   useAcceptFriendRequestMutation,
   useBlockUserMutation,
@@ -62,9 +64,20 @@ function FriendRow({ item }: { item: FriendshipListItem }) {
         <p className="truncate text-sm font-medium text-text">{item.user.displayName}</p>
         <p className="truncate font-mono text-[11px] text-text-muted">{label(item.user)}</p>
       </div>
-      <Button variant="ghost" size="sm" disabled={block.isPending} onClick={() => block.mutate(item.user._id)}>
-        Block
-      </Button>
+      <div className="flex shrink-0 items-center gap-1">
+        <MessageFriendButton userId={item.user._id} />
+        <UnfriendButton userId={item.user._id} name={item.user.displayName} />
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={block.isPending}
+          onClick={() => block.mutate(item.user._id)}
+          aria-label={`Block ${item.user.displayName}`}
+          title="Block"
+        >
+          <Ban className="h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
   );
 }

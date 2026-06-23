@@ -119,7 +119,7 @@ export function FriendActions({ user }: { user: UserSearchResult }) {
   );
 }
 
-function MessageFriendButton({ userId, onStarted }: { userId: string; onStarted?: () => void }) {
+export function MessageFriendButton({ userId, onStarted }: { userId: string; onStarted?: () => void }) {
   const createChat = useCreateChatMutation();
 
   return (
@@ -140,7 +140,7 @@ function MessageFriendButton({ userId, onStarted }: { userId: string; onStarted?
   );
 }
 
-function UnfriendButton({ userId, name }: { userId: string; name: string }) {
+export function UnfriendButton({ userId, name }: { userId: string; name: string }) {
   const remove = useRemoveFriendMutation();
 
   return (

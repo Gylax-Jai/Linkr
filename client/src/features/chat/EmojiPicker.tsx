@@ -33,7 +33,7 @@ export function EmojiPickerPopover({
   }, []);
 
   return (
-    <div className="absolute bottom-full left-0 z-40 mb-2 overflow-hidden rounded-xl shadow-elevated">
+    <div className="absolute bottom-full left-0 z-40 mb-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl shadow-elevated">
       {data ? (
         <Suspense fallback={<PickerSkeleton />}>
           <Picker
@@ -42,6 +42,9 @@ export function EmojiPickerPopover({
             previewPosition="none"
             skinTonePosition="none"
             navPosition="bottom"
+            // Fill the (responsive) container width so the grid reflows on narrow phone screens
+            // instead of overflowing off the edge.
+            dynamicWidth
             onEmojiSelect={(emoji: EmojiSelectEvent) => {
               if (emoji.native) onSelect(emoji.native);
             }}
@@ -57,7 +60,7 @@ export function EmojiPickerPopover({
 function PickerSkeleton() {
   return (
     <div
-      className="h-[28rem] w-[22rem] max-w-[80vw] animate-pulse rounded-xl border border-border bg-surface"
+      className="h-[28rem] w-full animate-pulse rounded-xl border border-border bg-surface"
       aria-hidden="true"
     />
   );
