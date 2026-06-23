@@ -105,6 +105,7 @@ function DetailsContent() {
           ring
           online={online}
           pulseRing={online}
+          zoomable
         />
         <div className="space-y-1">
           <p className="text-lg font-semibold tracking-tight">{participant?.displayName ?? "Select a chat"}</p>
@@ -136,7 +137,9 @@ function DetailsContent() {
           <div className="space-y-4">
             <DetailSection icon={<Info className="h-4 w-4" />} label="About">
               {participant
-                ? `You're connected with ${participant.displayName}. Only friends can message and call on Linkr.`
+                ? (participant.bio?.trim()
+                  ? participant.bio
+                  : `You're connected with ${participant.displayName}. Only friends can message and call on Linkr.`)
                 : (sessionUser?.bio ?? "Select a conversation to view contact details.")}
             </DetailSection>
 

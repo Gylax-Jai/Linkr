@@ -381,7 +381,8 @@ export function Sidebar() {
   const openFriendSearch = useUIStore((s) => s.openFriendSearch);
   const closeFriendSearch = useUIStore((s) => s.closeFriendSearch);
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"chats" | "friends">("chats");
+  const view = useUIStore((s) => s.sidebarView);
+  const setView = useUIStore((s) => s.setSidebarView);
 
   const { data: chats = [], isLoading } = useChatList();
 

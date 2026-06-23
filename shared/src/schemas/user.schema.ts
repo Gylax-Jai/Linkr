@@ -30,12 +30,24 @@ export const profileSchema = z.object({
 
 export type ProfileInput = z.infer<typeof profileSchema>;
 
+/**
+ * How long a custom status stays visible before auto-clearing (Sprint C.1). `null` = never expire.
+ * The server turns the chosen number of hours into an absolute `statusExpiresAt`.
+ */
+export const STATUS_DURATION_HOURS = [1, 4, 24, 48, 168] as const;
+export const statusDurationSchema = z
+  .number()
+  .refine((n) => (STATUS_DURATION_HOURS as readonly number[]).includes(n), "Invalid status duration")
+  .nullable();
+
 /** PATCH /api/users/me — displayName, bio, status only (username is immutable). */
 export const profileUpdateSchema = z
   .object({
     displayName: displayNameSchema.optional(),
     bio: bioSchema.optional(),
     status: statusSchema.optional(),
+    /** Hours until the status auto-clears; `null` = no expiry. Only meaningful when `status` is set. */
+    statusDurationHours: statusDurationSchema.optional(),
   })
   .refine((data) => data.displayName !== undefined || data.bio !== undefined || data.status !== undefined, {
     message: "At least one field must be provided",

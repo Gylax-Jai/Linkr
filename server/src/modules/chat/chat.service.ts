@@ -25,6 +25,17 @@ const REPLY_POPULATE = {
   select: "content sender deletedForEveryone encrypted",
 } as const;
 
+/**
+ * Resolve a user's currently-visible custom status: returns the text only if it's non-empty AND
+ * not past its expiry (Sprint C.1). Expired or unset statuses resolve to `undefined`.
+ */
+function activeStatus(status?: string | null, expiresAt?: Date | null): string | undefined {
+  const text = status?.trim();
+  if (!text) return undefined;
+  if (expiresAt && expiresAt.getTime() <= Date.now()) return undefined;
+  return text;
+}
+
 /** Build a small reply preview from a populated `replyTo` doc (undefined if not populated). */
 function toReplyPreview(replyTo: unknown): ReplyPreview | undefined {
   if (!replyTo || typeof replyTo !== "object" || !("sender" in replyTo)) return undefined;
@@ -169,7 +180,7 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
   for (const chat of chats) {
     const participantId = await getOtherMemberId(chat, userId);
     const participant = await UserModel.findById(participantId).select(
-      "username displayName avatar online lastSeen",
+      "username displayName avatar online lastSeen bio status statusExpiresAt",
     );
     if (!participant) continue;
 
@@ -207,6 +218,8 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
         avatar: resolveAvatarUrl(participant.avatar, participant.id),
         online: Boolean(participant.online),
         lastSeen: participant.lastSeen?.toISOString(),
+        bio: participant.bio ?? undefined,
+        status: activeStatus(participant.status, participant.statusExpiresAt),
         friendship,
       },
       lastMessage: lastMsg,

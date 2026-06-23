@@ -93,6 +93,11 @@ export async function getUserById(id: string): Promise<UserDocument | null> {
 
 /** Map a user document to the client-safe session view (never includes phone fields). */
 export function toSessionUser(user: UserDocument): SessionUser {
+  // Treat an expired custom status as cleared so the owner's own UI also stops showing it (Sprint C.1).
+  const statusExpiresAt = user.statusExpiresAt instanceof Date ? user.statusExpiresAt : undefined;
+  const statusExpired = Boolean(statusExpiresAt && statusExpiresAt.getTime() <= Date.now());
+  const status = statusExpired ? undefined : (user.status ?? undefined);
+
   return {
     _id: user.id,
     email: user.email,
@@ -100,7 +105,8 @@ export function toSessionUser(user: UserDocument): SessionUser {
     displayName: user.displayName,
     avatar: resolveAvatarUrl(user.avatar, user.id),
     bio: user.bio ?? undefined,
-    status: user.status ?? undefined,
+    status,
+    statusExpiresAt: statusExpired ? undefined : statusExpiresAt?.toISOString(),
     onboarded: Boolean(user.onboarded),
     phoneVerified: Boolean(user.phoneVerified),
     privacy: {

@@ -23,6 +23,7 @@ import {
 } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
+import { useLogoutMutation } from "@/features/auth";
 import { useAuthStore } from "@/lib/store";
 import { PATHS } from "@/routes/paths";
 import { MSG91_CAPTCHA_CONTAINER_ID } from "@/lib/msg91";
@@ -50,6 +51,7 @@ export function OnboardingWizard() {
   const [statusText, setStatusText] = useState("");
 
   const complete = useCompleteOnboardingMutation();
+  const logout = useLogoutMutation();
 
   // `avatarOverride` carries the freshly-uploaded photo URL (if the user picked one in step 3) so we
   // persist it instead of the default Google avatar.
@@ -116,6 +118,20 @@ export function OnboardingWizard() {
               error={complete.isError ? "Couldn't finish setup. That username may be taken — try another." : null}
             />
           )}
+        </div>
+
+        {/* Step 1 has no Back button, so offer an escape hatch here: wrong Google account, or someone
+            else's session left signed in. Available on every step for convenience. */}
+        <div className="mt-4 text-center text-xs text-text-muted">
+          <span className="truncate">Signed in as {user?.email ?? "your account"}</span>
+          <button
+            type="button"
+            onClick={() => logout.mutate()}
+            disabled={logout.isPending}
+            className="ml-1 font-medium text-primary underline-offset-2 hover:underline disabled:opacity-60"
+          >
+            Use a different account
+          </button>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 import { ConversationPane } from "./ConversationPane";
 import { DetailsPane, MobileDetailsSheet } from "./DetailsPane";
+import { Lightbox } from "@/components/ui/Lightbox";
 import { useUIStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +39,7 @@ export function AppShell() {
         {detailsOpen && <DetailsPane />}
       </div>
       <MobileDetailsSheet />
+      <Lightbox />
     </div>
   );
 }

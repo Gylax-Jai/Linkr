@@ -20,6 +20,11 @@ const userSchema = new Schema(
     avatar: { type: String },
     bio: { type: String },
     status: { type: String },
+    /**
+     * Optional auto-expiry for `status` (Sprint C.1). When set and in the past, the status is
+     * treated as cleared (filtered out on read). Null/absent means the status never expires.
+     */
+    statusExpiresAt: { type: Date },
     onboarded: { type: Boolean, default: false },
 
     // Encrypted phone storage — never serialized to clients.

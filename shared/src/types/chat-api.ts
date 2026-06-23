@@ -24,6 +24,10 @@ export interface ChatParticipant {
   avatar?: string;
   online: boolean;
   lastSeen?: Timestamp;
+  /** Profile bio shown in the contact details "About" section (Sprint C.1). */
+  bio?: string;
+  /** Free-text custom status (e.g. "At the gym"); shown under the name in the chat header (Sprint C.1). */
+  status?: string;
   /** Relationship between the current user and this participant (Sprint 5.5). */
   friendship?: ChatParticipantFriendship;
 }

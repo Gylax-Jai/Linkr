@@ -1,21 +1,28 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ArrowLeft,
+  Ban,
   Check,
   CheckCheck,
   Copy,
   CornerUpLeft,
   FileText,
+  Info,
   Loader2,
+  MoreVertical,
   Paperclip,
   Pencil,
   Phone,
   Send,
+  Share2,
+  ShieldOff,
   Smile,
   SmilePlus,
   Trash2,
+  UserMinus,
   UserPlus,
   Video,
+  VolumeX,
   X,
 } from "lucide-react";
 import { isAxiosError } from "axios";
@@ -38,8 +45,11 @@ import {
 } from "@/features/chat";
 import {
   useAcceptFriendRequestMutation,
+  useBlockUserMutation,
   useCancelFriendRequestMutation,
+  useRemoveFriendMutation,
   useSendFriendRequestMutation,
+  useUnblockUserMutation,
 } from "@/features/friends";
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { useThemeStore } from "@/lib/store/themeStore";
@@ -168,6 +178,10 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
                 <span>.</span>
               </span>
             </p>
+          ) : chat.participant.status?.trim() ? (
+            // A custom status (e.g. "At the gym") takes the subtitle; presence is still conveyed by
+            // the avatar dot. Falls back to Online/Offline when no status is set (Sprint C.1).
+            <p className="truncate text-xs text-text-muted">{chat.participant.status}</p>
           ) : (
             <p className="truncate font-mono text-xs text-text-muted">
               {online ? "Online" : "Offline"}
@@ -179,6 +193,7 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
       <div className="flex items-center gap-0.5">
         <CallButton label="Voice call" icon={<Phone className="h-4 w-4" />} />
         <CallButton label="Video call" icon={<Video className="h-4 w-4" />} />
+        <HeaderMenu chat={chat} onViewInfo={openDetails} />
         <button
           type="button"
           onClick={onBack}
@@ -190,6 +205,133 @@ function ConversationHeader({ chat, onBack }: { chat: ChatListItem; onBack: () =
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Overflow (⋮) menu in the chat header (Sprint C.1): contact info, mute (soon), block/unblock,
+ * unfriend, and share (soon). Closes on outside-click / Escape / action.
+ */
+function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const block = useBlockUserMutation();
+  const unblock = useUnblockUserMutation();
+  const unfriend = useRemoveFriendMutation();
+
+  const participant = chat.participant;
+  const friendship = participant.friendship;
+  const blocked = friendship?.status === "blocked";
+  const blockedByMe = Boolean(friendship?.blockedByMe);
+  const isFriend = friendship?.status === "accepted";
+  const pending = block.isPending || unblock.isPending || unfriend.isPending;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const run = (fn: () => void) => {
+    fn();
+    setOpen(false);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="More"
+        className={cn(
+          "grid h-9 w-9 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text",
+          open && "bg-surface-2 text-text",
+        )}
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-elevated"
+        >
+          <HeaderMenuItem icon={<Info className="h-4 w-4" />} label="Contact info" onClick={() => run(onViewInfo)} />
+          <HeaderMenuItem icon={<VolumeX className="h-4 w-4" />} label="Mute" disabled hint="Soon" />
+          {isFriend ? (
+            <HeaderMenuItem
+              icon={<UserMinus className="h-4 w-4" />}
+              label="Unfriend"
+              disabled={pending}
+              onClick={() => run(() => unfriend.mutate(participant._id))}
+            />
+          ) : null}
+          {blocked && blockedByMe ? (
+            <HeaderMenuItem
+              icon={<ShieldOff className="h-4 w-4" />}
+              label="Unblock"
+              disabled={pending}
+              onClick={() => run(() => unblock.mutate(participant._id))}
+            />
+          ) : !blocked ? (
+            <HeaderMenuItem
+              icon={<Ban className="h-4 w-4" />}
+              label="Block"
+              danger
+              disabled={pending}
+              onClick={() => run(() => block.mutate(participant._id))}
+            />
+          ) : null}
+          <HeaderMenuItem icon={<Share2 className="h-4 w-4" />} label="Share contact" disabled hint="Soon" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function HeaderMenuItem({
+  icon,
+  label,
+  onClick,
+  disabled = false,
+  danger = false,
+  hint,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  hint?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-surface-2 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent",
+        danger ? "text-red-500" : "text-text",
+      )}
+    >
+      <span className={cn(danger ? "text-red-500" : "text-text-muted")}>{icon}</span>
+      <span className="flex-1">{label}</span>
+      {hint ? <span className="text-[10px] uppercase tracking-wide text-text-muted">{hint}</span> : null}
+    </button>
   );
 }
 

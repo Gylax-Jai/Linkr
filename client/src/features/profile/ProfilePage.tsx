@@ -3,6 +3,16 @@ import { Link } from "react-router-dom";
 import { isAxiosError } from "axios";
 import { ArrowLeft, Camera, Loader2, X } from "lucide-react";
 import { AVATAR_ACCEPT, AVATAR_MAX_BYTES } from "@linkr/shared";
+
+/** Status auto-clear choices (Sprint C.1). `null` = keep until manually changed. */
+const STATUS_DURATION_OPTIONS: { value: number | null; label: string }[] = [
+  { value: null, label: "Don't clear" },
+  { value: 1, label: "1 hour" },
+  { value: 4, label: "4 hours" },
+  { value: 24, label: "1 day" },
+  { value: 48, label: "2 days" },
+  { value: 168, label: "1 week" },
+];
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/lib/store";
@@ -28,6 +38,8 @@ export function ProfilePage() {
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [bio, setBio] = useState(user?.bio ?? "");
   const [status, setStatus] = useState(user?.status ?? "");
+  // Default to 1 day (the user's requested default) for new/edited statuses.
+  const [statusDuration, setStatusDuration] = useState<number | null>(24);
   const [saved, setSaved] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   // Stage-then-save: a picked photo is held locally (with a preview object URL) and only uploaded
@@ -68,8 +80,15 @@ export function ProfilePage() {
       }
     }
 
+    const trimmedStatus = status.trim();
     update.mutate(
-      { displayName: displayName.trim(), bio: bio.trim(), status: status.trim() },
+      {
+        displayName: displayName.trim(),
+        bio: bio.trim(),
+        status: trimmedStatus,
+        // Only meaningful when a status is set; the server ignores it for an empty status.
+        ...(trimmedStatus ? { statusDurationHours: statusDuration } : {}),
+      },
       {
         onSuccess: () => {
           clearStagedAvatar();
@@ -229,6 +248,27 @@ export function ProfilePage() {
             placeholder="What's on your mind?"
             className="mt-1.5 w-full rounded-2xl border border-border bg-surface px-4 py-2.5 text-sm text-text shadow-soft focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-ring/30"
           />
+          {status.trim() ? (
+            <div className="mt-2 flex items-center gap-2">
+              <label htmlFor="statusDuration" className="text-xs text-text-muted">
+                Clear after
+              </label>
+              <select
+                id="statusDuration"
+                value={statusDuration === null ? "never" : String(statusDuration)}
+                onChange={(e) =>
+                  setStatusDuration(e.target.value === "never" ? null : Number(e.target.value))
+                }
+                className="rounded-xl border border-border bg-surface px-3 py-1.5 text-xs text-text shadow-soft focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-ring/30"
+              >
+                {STATUS_DURATION_OPTIONS.map((opt) => (
+                  <option key={opt.label} value={opt.value === null ? "never" : String(opt.value)}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
         </div>
 
         {update.isError ? (

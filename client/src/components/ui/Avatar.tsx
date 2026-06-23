@@ -1,4 +1,5 @@
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
+import { useUIStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 type AvatarSize = "sm" | "md" | "lg" | "xl";
@@ -32,6 +33,8 @@ interface AvatarProps {
   online?: boolean;
   /** Animated pulse ring when user is online (details pane). */
   pulseRing?: boolean;
+  /** When true and a photo is present, clicking the avatar opens a full-screen lightbox. */
+  zoomable?: boolean;
   className?: string;
 }
 
@@ -43,12 +46,15 @@ export function Avatar({
   ring = false,
   online = false,
   pulseRing = false,
+  zoomable = false,
   className,
 }: AvatarProps) {
   // Local avatars are served from an authenticated route; fetch them as a blob. Public URLs
   // (Cloudinary / Google) pass straight through.
   const { src: resolvedSrc } = useAuthedObjectUrl(src);
+  const openLightbox = useUIStore((s) => s.openLightbox);
   const showImage = Boolean(resolvedSrc);
+  const canZoom = zoomable && showImage;
 
   return (
     <span className={cn("relative inline-flex shrink-0", className)}>
@@ -59,10 +65,12 @@ export function Avatar({
         <img
           src={resolvedSrc}
           alt=""
+          onClick={canZoom ? () => openLightbox(resolvedSrc!, name) : undefined}
           className={cn(
             "relative rounded-full object-cover shadow-soft",
             SIZE_STYLES[size],
             ring && "ring-2 ring-primary/30 ring-offset-2 ring-offset-surface",
+            canZoom && "cursor-zoom-in",
           )}
           onError={(e) => {
             e.currentTarget.style.display = "none";

@@ -168,6 +168,15 @@ export async function updateProfile(user: UserDocument, input: ProfileUpdateInpu
   }
   if (input.status !== undefined) {
     user.status = input.status;
+    // Recompute expiry whenever the status text changes (Sprint C.1). A cleared status drops the
+    // expiry; `statusDurationHours` of null (or absent) means "never expire".
+    if (!input.status.trim()) {
+      user.statusExpiresAt = undefined;
+    } else if (input.statusDurationHours != null) {
+      user.statusExpiresAt = new Date(Date.now() + input.statusDurationHours * 60 * 60 * 1000);
+    } else {
+      user.statusExpiresAt = undefined;
+    }
   }
   await user.save();
   return user;

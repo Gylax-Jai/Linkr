@@ -108,7 +108,13 @@ export function NotificationCenter() {
         <div
           role="dialog"
           aria-label="Notifications"
-          className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-border bg-surface shadow-elevated"
+          className={cn(
+            // Mobile: anchor to the viewport (fixed) and span the width minus small gutters so the
+            // 20rem desktop panel can't overflow a 360px screen. Desktop (sm+): classic dropdown
+            // anchored under the bell.
+            "fixed inset-x-2 top-16 z-50 overflow-hidden rounded-2xl border border-border bg-surface shadow-elevated",
+            "sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80",
+          )}
         >
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <p className="text-sm font-semibold">Notifications</p>
@@ -117,7 +123,7 @@ export function NotificationCenter() {
             ) : null}
           </div>
 
-          <div className="max-h-96 overflow-y-auto">
+          <div className="max-h-[70vh] overflow-y-auto sm:max-h-96">
             {isLoading ? (
               <p className="px-4 py-6 text-center text-sm text-text-muted">Loading…</p>
             ) : notifications.length === 0 ? (

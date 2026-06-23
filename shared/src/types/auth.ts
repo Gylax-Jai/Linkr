@@ -12,6 +12,8 @@ export interface SessionUser {
   avatar?: string;
   bio?: string;
   status?: string;
+  /** When the custom status auto-clears (ISO). Absent = no expiry (Sprint C.1). */
+  statusExpiresAt?: Timestamp;
   onboarded: boolean;
   phoneVerified: boolean;
   privacy: PrivacySettings;
