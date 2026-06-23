@@ -17,7 +17,9 @@ export function AppShell() {
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
-      <Header />
+      {/* On mobile, an open chat goes full-screen (app-like): hide the global Linkr bar so only the
+          conversation header shows. Always visible from md up (3-pane desktop layout). Sprint H. */}
+      <Header className={cn(showConversation && "hidden md:flex")} />
       <div className="relative flex flex-1 overflow-hidden">
         <div
           className={cn(

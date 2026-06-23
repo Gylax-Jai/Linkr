@@ -168,18 +168,18 @@ function AvatarStatusBubble({ status, visible }: { status: string; visible: bool
     <div
       aria-hidden={!visible}
       className={cn(
-        // Anchored to the avatar's left edge and extending right (avoids clipping at the screen edge);
-        // the tail sits under the avatar center.
-        "pointer-events-none absolute left-0 top-full z-10 mt-2 transition-all duration-300 ease-out",
+        // Overlay anchored to the avatar's left edge, hanging just below the header (Sprint H): it sits
+        // ON TOP of the thread (no reserved space) and the tail points up into the avatar.
+        "pointer-events-none absolute left-0 top-full z-30 mt-1 transition-all duration-300 ease-out",
         visible ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0",
       )}
     >
       {/* Upward tail: a small rotated square tucked under the avatar center, sharing the surface. */}
       <span
         aria-hidden="true"
-        className="absolute -top-1 left-3.5 h-2.5 w-2.5 -translate-x-1/2 rotate-45 rounded-[2px] bg-surface-2"
+        className="absolute -top-1 left-3.5 h-2.5 w-2.5 -translate-x-1/2 rotate-45 rounded-[2px] border-l border-t border-border bg-surface-2"
       />
-      <div className="relative max-w-[min(220px,calc(100vw-7rem))] rounded-xl bg-surface-2 px-3 py-1.5 shadow-elevated">
+      <div className="relative max-w-[min(220px,calc(100vw-7rem))] rounded-xl border border-border bg-surface-2 px-3 py-1 shadow-elevated">
         <p className="truncate text-xs font-medium text-text">{status}</p>
       </div>
     </div>
@@ -233,16 +233,12 @@ function ConversationHeader({
     }
   };
 
-  // Reserve space under the header on mobile for the status bubble so messages don't jump when it
-  // shows/hides (sm+ uses the inline StatusChip instead, so no reserved space there). Sprint G.2.
-  const showMobileBubble = Boolean(status);
-
   return (
     <div
       className={cn(
-        // Mobile height grows to host the under-avatar bubble; desktop stays a fixed 64px bar.
-        "relative z-30 flex min-h-16 shrink-0 items-center gap-2 border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm transition-[padding] duration-300 ease-out sm:h-16 sm:min-h-0 sm:gap-3 sm:px-4 sm:pb-0",
-        showMobileBubble && statusVisible ? "pb-12" : "pb-0",
+        // Fixed 64px bar; the status bubble (mobile) is an OVERLAY that hangs below via overflow-visible
+        // so it never reserves space or pushes messages down (Sprint H). z-30 keeps it above the thread.
+        "relative z-30 flex h-16 shrink-0 items-center gap-2 overflow-visible border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm sm:gap-3 sm:px-4",
       )}
     >
       <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onBack} aria-label="Back to chat list">
