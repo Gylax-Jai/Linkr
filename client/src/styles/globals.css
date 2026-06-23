@@ -13,6 +13,16 @@
     height: 100dvh;
   }
 
+  /*
+   * Sprint I — mobile keyboard: when the soft keyboard is open, `useVisualViewport` sets `--app-vh`
+   * to the height actually visible above it. `#root` follows that so the chat header stays pinned and
+   * only the message list shrinks. Falls back to `100dvh` when the variable is unset (desktop / no
+   * visualViewport support).
+   */
+  #root {
+    height: var(--app-vh, 100dvh);
+  }
+
   /* Lock the page itself — only inner panes (chat list, message list, details, dropdowns) scroll. */
   html,
   body {

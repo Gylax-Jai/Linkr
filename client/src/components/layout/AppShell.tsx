@@ -4,6 +4,7 @@ import { ConversationPane } from "./ConversationPane";
 import { DetailsPane, MobileDetailsSheet } from "./DetailsPane";
 import { Lightbox } from "@/components/ui/Lightbox";
 import { useUIStore } from "@/lib/store";
+import { useVisualViewport } from "@/lib/hooks/useVisualViewport";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,6 +15,9 @@ export function AppShell() {
   const activeChatId = useUIStore((s) => s.activeChatId);
   const detailsOpen = useUIStore((s) => s.detailsOpen);
   const showConversation = Boolean(activeChatId);
+
+  // Keep the layout glued to the visible area when the mobile soft keyboard opens (Sprint I).
+  useVisualViewport();
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">

@@ -129,7 +129,7 @@ export function ConversationPane() {
   const status = (isSelf ? sessionUser?.status : chat.participant.status)?.trim() ?? "";
 
   return (
-    <section className="flex h-full flex-1 flex-col bg-bg">
+    <section className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg">
       <ConversationHeader
         chat={chat}
         onBack={() => setActiveChat(null)}
@@ -238,7 +238,8 @@ function ConversationHeader({
       className={cn(
         // Fixed 64px bar; the status bubble (mobile) is an OVERLAY that hangs below via overflow-visible
         // so it never reserves space or pushes messages down (Sprint H). z-30 keeps it above the thread.
-        "relative z-30 flex h-16 shrink-0 items-center gap-2 overflow-visible border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm sm:gap-3 sm:px-4",
+        // sticky top-0 keeps it pinned if the soft keyboard tries to scroll the column (Sprint I).
+        "sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 overflow-visible border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm sm:gap-3 sm:px-4",
       )}
     >
       <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onBack} aria-label="Back to chat list">
