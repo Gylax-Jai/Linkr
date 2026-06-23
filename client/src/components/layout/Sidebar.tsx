@@ -40,6 +40,14 @@ function ChatPreview({ chat, userId }: { chat: ChatListItem; userId: string }) {
   );
   if (!last) return "No messages yet";
   const prefix = last.sender === userId ? "You: " : "";
+  if (last.type === "call" && last.call) {
+    const kind = last.call.media === "video" ? "Video call" : "Voice call";
+    if (last.call.outcome === "missed" || last.call.outcome === "cancelled") {
+      return last.sender === userId ? `📞 ${kind} (no answer)` : `📞 Missed ${kind.toLowerCase()}`;
+    }
+    if (last.call.outcome === "declined") return `📞 ${kind} declined`;
+    return `📞 ${kind}`;
+  }
   if (last.content) {
     if (body.state === "pending") return `${prefix}Decrypting…`;
     if (body.state === "failed") return `${prefix}🔒 Encrypted message`;

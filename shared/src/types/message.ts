@@ -1,6 +1,7 @@
 import type { ID, Timestamp } from "./common.js";
+import type { CallLogMeta } from "./call.js";
 
-export type MessageType = "text" | "image" | "video" | "file" | "voice";
+export type MessageType = "text" | "image" | "video" | "file" | "voice" | "call";
 
 export type MessageStatus = "sent" | "delivered" | "read";
 
@@ -33,6 +34,8 @@ export interface Message {
   /** Server-validated MIME type of the attachment. */
   mediaMime?: string;
   replyTo?: ID;
+  /** Present only for `type: "call"` rows — the call's media/outcome/duration. */
+  call?: CallLogMeta;
   reactions: Reaction[];
   pinned: boolean;
   deletedFor: ID[];

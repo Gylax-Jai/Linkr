@@ -20,6 +20,8 @@ export class CallEngine {
   private localStream: MediaStream | null = null;
   private remoteStream = new MediaStream();
   private remoteAudio: HTMLAudioElement | null = null;
+  /** Desired loudspeaker routing; re-applied whenever the remote audio element is (re)created. */
+  private speakerOn = false;
   private readonly media: CallMedia;
   private readonly cb: CallEngineCallbacks;
 
@@ -90,6 +92,34 @@ export class CallEngine {
     });
   }
 
+  /**
+   * Route remote audio to the loudspeaker vs the default device, best-effort. Uses `setSinkId`
+   * (Chrome/Edge/Android) to pick a non-default output when speaker is on; unsupported browsers
+   * (Safari/Firefox) keep the system default. Always ensures full playback volume.
+   */
+  async setSpeaker(on: boolean): Promise<void> {
+    this.speakerOn = on;
+    const el = this.remoteAudio as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (!el) return;
+    el.volume = 1;
+    if (typeof el.setSinkId !== "function") return;
+    try {
+      if (!on) {
+        await el.setSinkId("");
+        return;
+      }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter((d) => d.kind === "audiooutput");
+      // Prefer a device that looks like a speaker; otherwise the first non-default output.
+      const speaker =
+        outputs.find((d) => /speaker/i.test(d.label)) ??
+        outputs.find((d) => d.deviceId !== "default" && d.deviceId !== "communications");
+      await el.setSinkId(speaker?.deviceId ?? "");
+    } catch {
+      // setSinkId can reject without an explicit device permission; keep the default sink.
+    }
+  }
+
   /** A simple connection-quality read for the in-call indicator (RTT in ms, or null). */
   async getRoundTripMs(): Promise<number | null> {
     try {
@@ -115,6 +145,8 @@ export class CallEngine {
     void this.remoteAudio.play().catch(() => {
       /* Autoplay may be blocked until a user gesture; the accept/start click satisfies it. */
     });
+    // Re-apply the desired speaker routing now that the element exists.
+    if (this.speakerOn) void this.setSpeaker(true);
   }
 
   /** Tear everything down: stop local capture, stop playback, close the connection. */

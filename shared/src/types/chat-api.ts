@@ -1,4 +1,5 @@
 import type { ID, Timestamp } from "./common.js";
+import type { CallLogMeta } from "./call.js";
 import type { FriendshipDirection, FriendshipStatus } from "./friendship.js";
 import type { MessageStatus, MessageType, Reaction } from "./message.js";
 
@@ -69,6 +70,8 @@ export interface MessageDTO {
   mediaMime?: string;
   /** Message this one replies to, hydrated to a small preview. */
   replyTo?: ReplyPreview;
+  /** Present only for `type: "call"` rows — the call's media/outcome/duration (Sprint 3.1.1). */
+  call?: CallLogMeta;
   /** Emoji reactions (one per user; toggling replaces the previous). */
   reactions: Reaction[];
   /** Set when the message body was edited in place. */

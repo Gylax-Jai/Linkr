@@ -24,6 +24,25 @@ const messageSchema = new Schema(
     /** Server-validated MIME type of the attachment. */
     mediaMime: { type: String },
     replyTo: { type: Types.ObjectId, ref: "Message" },
+    /**
+     * Call-log metadata for `type: "call"` rows (Sprint 3.1.1). This is activity metadata
+     * (media/outcome/duration), like WhatsApp's call entries — never message content.
+     */
+    call: {
+      type: new Schema(
+        {
+          media: { type: String, enum: ["audio", "video"], required: true },
+          outcome: {
+            type: String,
+            enum: ["completed", "missed", "declined", "cancelled", "failed"],
+            required: true,
+          },
+          durationSec: { type: Number },
+        },
+        { _id: false },
+      ),
+      required: false,
+    },
     reactions: [
       {
         user: { type: Types.ObjectId, ref: "User", required: true },

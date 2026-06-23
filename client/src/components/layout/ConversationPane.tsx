@@ -14,6 +14,9 @@ import {
   Paperclip,
   Pencil,
   Phone,
+  PhoneMissed,
+  PhoneIncoming,
+  PhoneOutgoing,
   Quote,
   Send,
   Share2,
@@ -616,6 +619,15 @@ function MessageList({
         const showDay = day !== lastDay;
         if (showDay) lastDay = day;
 
+        if (message.type === "call") {
+          return (
+            <div key={message._id}>
+              {showDay ? <DateSeparator label={day} /> : null}
+              <CallLogRow message={message} mine={mine} />
+            </div>
+          );
+        }
+
         return (
           <div key={message._id}>
             {showDay ? <DateSeparator label={day} /> : null}
@@ -851,6 +863,58 @@ function MenuItem({
       {icon}
       {children}
     </button>
+  );
+}
+
+/** Centered system row for a call-log message (Sprint 3.1.1) — like WhatsApp's call entries. */
+function CallLogRow({ message, mine }: { message: MessageDTO; mine: boolean }) {
+  const call = message.call;
+  if (!call) return null;
+
+  const kind = call.media === "video" ? "Video call" : "Voice call";
+  const failed = call.outcome === "missed" || call.outcome === "cancelled" || call.outcome === "declined";
+
+  let label: string;
+  let Icon = mine ? PhoneOutgoing : PhoneIncoming;
+  switch (call.outcome) {
+    case "completed": {
+      const secs = call.durationSec ?? 0;
+      const mm = Math.floor(secs / 60);
+      const ss = (secs % 60).toString().padStart(2, "0");
+      label = `${kind} · ${mm}:${ss}`;
+      break;
+    }
+    case "declined":
+      label = mine ? `${kind} declined` : `${kind} declined`;
+      Icon = PhoneMissed;
+      break;
+    case "cancelled":
+      // The caller cancelled before answer: a missed call for the callee, "Cancelled" for the caller.
+      label = mine ? `${kind} cancelled` : `Missed ${kind.toLowerCase()}`;
+      Icon = PhoneMissed;
+      break;
+    case "missed":
+      label = mine ? "No answer" : `Missed ${kind.toLowerCase()}`;
+      Icon = PhoneMissed;
+      break;
+    default:
+      label = `${kind} failed`;
+      Icon = PhoneMissed;
+  }
+
+  return (
+    <div className="my-[var(--space-chat-gap)] flex justify-center">
+      <span
+        className={cn(
+          "inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs shadow-soft",
+          failed ? "text-red-500" : "text-text-muted",
+        )}
+      >
+        <Icon className="h-3.5 w-3.5" />
+        <span className="font-medium">{label}</span>
+        <span className="tabular-nums opacity-70">{formatMessageTime(message.createdAt)}</span>
+      </span>
+    </div>
   );
 }
 

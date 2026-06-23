@@ -1,5 +1,8 @@
 import type { HydratedDocument } from "mongoose";
 import type {
+  CallLogMeta,
+  CallMedia,
+  CallOutcome,
   ChatListItem,
   ChatParticipantFriendship,
   MessageDTO,
@@ -63,6 +66,28 @@ function toPublicMediaUrl(doc: MessageDocument): string | undefined {
   return ref;
 }
 
+/** Map Mongoose's loosely-typed `call` subdoc to a validated `CallLogMeta` (InferSchemaType → `{}`). */
+function toCallLogMeta(raw: unknown): CallLogMeta | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const c = raw as Record<string, unknown>;
+  if (c.media !== "audio" && c.media !== "video") return undefined;
+  const outcome = c.outcome;
+  if (
+    outcome !== "completed" &&
+    outcome !== "missed" &&
+    outcome !== "declined" &&
+    outcome !== "cancelled" &&
+    outcome !== "failed"
+  ) {
+    return undefined;
+  }
+  return {
+    media: c.media as CallMedia,
+    outcome: outcome as CallOutcome,
+    ...(typeof c.durationSec === "number" ? { durationSec: c.durationSec } : {}),
+  };
+}
+
 function toMessageDTO(doc: MessageDocument): MessageDTO {
   const deletedForEveryone = Boolean(doc.deletedForEveryone);
   const mediaUrl = deletedForEveryone ? undefined : toPublicMediaUrl(doc);
@@ -82,6 +107,7 @@ function toMessageDTO(doc: MessageDocument): MessageDTO {
     mediaSize: mediaUrl && typeof doc.mediaSize === "number" ? doc.mediaSize : undefined,
     mediaMime: mediaUrl && typeof doc.mediaMime === "string" ? doc.mediaMime : undefined,
     replyTo: toReplyPreview(doc.replyTo),
+    call: toCallLogMeta(doc.call),
     reactions: deletedForEveryone
       ? []
       : (doc.reactions ?? []).map((r) => ({ user: String(r.user), emoji: r.emoji })),
@@ -397,6 +423,44 @@ export async function sendMessage(
   }
 
   return toMessageDTO(message);
+}
+
+/**
+ * Write a call-log row into a chat and broadcast it to both members (Sprint 3.1.1). Called by the
+ * call signaling layer when a call ends. `callerId` is the message sender; the client renders the
+ * direction (outgoing/incoming) by comparing the sender to the viewing user. Best-effort: failures
+ * are swallowed so they never break call teardown.
+ */
+export async function createCallLogMessage(
+  chatId: string,
+  callerId: string,
+  meta: CallLogMeta,
+): Promise<void> {
+  try {
+    const chat = await ChatModel.findById(chatId);
+    if (!chat) return;
+
+    const message = await MessageModel.create({
+      chatId,
+      sender: callerId,
+      type: "call",
+      call: {
+        media: meta.media,
+        outcome: meta.outcome,
+        ...(typeof meta.durationSec === "number" ? { durationSec: meta.durationSec } : {}),
+      },
+      status: "sent",
+      readBy: [callerId],
+    });
+
+    chat.lastMessage = message._id;
+    if ((chat.hiddenFor ?? []).length > 0) chat.set("hiddenFor", []);
+    await chat.save();
+
+    emitToChatMembers(chat, SOCKET_EVENTS.MESSAGE_NEW, { message: toMessageDTO(message) });
+  } catch {
+    /* never let call-log persistence break call teardown */
+  }
 }
 
 /** Edit a message body in place (sender only). Broadcasts to both members. */

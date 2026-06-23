@@ -22,7 +22,7 @@ export const OTP_MAX_ATTEMPTS = 5; // lock verification after this many wrong tr
 export const OTP_RESEND_COOLDOWN_MS = 30_000; // min gap between resend requests per phone
 
 export const FRIENDSHIP_STATUSES = ["pending", "accepted", "rejected", "blocked"] as const;
-export const MESSAGE_TYPES = ["text", "image", "video", "file", "voice"] as const;
+export const MESSAGE_TYPES = ["text", "image", "video", "file", "voice", "call"] as const;
 export const MESSAGE_STATUSES = ["sent", "delivered", "read"] as const;
 export const CHAT_TYPES = ["1:1", "group", "self"] as const;
 export const VISIBILITY_VALUES = ["everyone", "friends", "nobody"] as const;

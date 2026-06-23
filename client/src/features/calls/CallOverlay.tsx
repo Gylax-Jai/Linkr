@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Mic, MicOff, PhoneOff } from "lucide-react";
+import { ChevronDown, Mic, MicOff, PhoneOff, Volume2, VolumeX } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useCallStore } from "@/lib/store";
 import type { CallEndReason } from "@/lib/store";
@@ -9,7 +9,7 @@ import { useCallActions } from "./CallProvider";
 const END_LABELS: Record<CallEndReason, string> = {
   hangup: "Call ended",
   rejected: "Call declined",
-  unavailable: "Unavailable",
+  unavailable: "No answer",
   busy: "Busy",
   failed: "Connection failed",
   "no-mic": "Microphone unavailable",
@@ -24,7 +24,7 @@ function formatDuration(ms: number): string {
 }
 
 /** Live mm:ss timer for a connected call. */
-function CallTimer({ connectedAt }: { connectedAt: number }) {
+export function CallTimer({ connectedAt }: { connectedAt: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -33,31 +33,41 @@ function CallTimer({ connectedAt }: { connectedAt: number }) {
   return <span className="font-mono tabular-nums">{formatDuration(now - connectedAt)}</span>;
 }
 
-/** In-call surface for the caller/active call: status, duration, mute + hang-up controls. */
+/**
+ * Shared status text for a call surface (overlay + bar). Returns null while active so a live timer
+ * can render instead.
+ */
+export function useCallStatusText(): string | null {
+  const phase = useCallStore((s) => s.phase);
+  const ringing = useCallStore((s) => s.ringing);
+  const connectedAt = useCallStore((s) => s.connectedAt);
+  const endReason = useCallStore((s) => s.endReason);
+
+  if (phase === "outgoing") return ringing ? "Ringing…" : "Calling…";
+  if (phase === "connecting") return "Connecting…";
+  if (phase === "active" && connectedAt) return null;
+  if (phase === "ended" && endReason) return END_LABELS[endReason];
+  return "…";
+}
+
+/** Full-screen in-call surface: status, duration, mute, speaker, minimize, hang-up. */
 export function CallOverlay() {
   const phase = useCallStore((s) => s.phase);
+  const uiMode = useCallStore((s) => s.uiMode);
   const peer = useCallStore((s) => s.peer);
   const muted = useCallStore((s) => s.muted);
+  const speakerOn = useCallStore((s) => s.speakerOn);
   const connectedAt = useCallStore((s) => s.connectedAt);
   const connection = useCallStore((s) => s.connection);
-  const endReason = useCallStore((s) => s.endReason);
-  const { hangUp, toggleMute } = useCallActions();
+  const { hangUp, toggleMute, toggleSpeaker, minimize } = useCallActions();
+  const statusText = useCallStatusText();
 
-  // The incoming modal owns the "incoming" phase; this overlay covers everything else.
+  // The incoming modal owns "incoming"; this overlay covers the rest — but only when expanded.
   if (phase === "idle" || phase === "incoming" || !peer) return null;
+  if (uiMode !== "expanded") return null;
 
   const name = peer.displayName || peer.username || "Unknown";
-
-  const statusText =
-    phase === "outgoing"
-      ? "Ringing…"
-      : phase === "connecting"
-        ? "Connecting…"
-        : phase === "active" && connectedAt
-          ? null // timer renders instead
-          : phase === "ended" && endReason
-            ? END_LABELS[endReason]
-            : "…";
+  const ringingPhase = phase === "outgoing" || phase === "connecting";
 
   const dotClass =
     connection === "connected"
@@ -73,9 +83,19 @@ export function CallOverlay() {
       aria-label={`Call with ${name}`}
       className="fixed inset-0 z-[110] grid place-items-center bg-black/85 p-4 backdrop-blur-sm animate-fade-in-up"
     >
+      <button
+        type="button"
+        onClick={minimize}
+        aria-label="Minimize call"
+        title="Minimize"
+        className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+      >
+        <ChevronDown className="h-5 w-5" />
+      </button>
+
       <div className="flex w-full max-w-sm flex-col items-center gap-6 rounded-3xl bg-surface p-8 text-center shadow-elevated">
         <div className="relative">
-          {phase === "outgoing" || phase === "connecting" ? (
+          {ringingPhase ? (
             <span className="avatar-pulse-ring absolute inset-0 rounded-full" aria-hidden="true" />
           ) : null}
           <Avatar name={name} src={peer.avatar} size="xl" />
@@ -91,8 +111,8 @@ export function CallOverlay() {
           </p>
         </div>
 
-        <div className="flex items-center gap-6">
-          {phase === "active" || phase === "connecting" ? (
+        <div className="flex items-center gap-5">
+          {phase !== "ended" ? (
             <button
               type="button"
               onClick={toggleMute}
@@ -106,6 +126,22 @@ export function CallOverlay() {
               {muted ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
             </button>
           ) : null}
+
+          {phase !== "ended" ? (
+            <button
+              type="button"
+              onClick={toggleSpeaker}
+              aria-label={speakerOn ? "Speaker off" : "Speaker on"}
+              aria-pressed={speakerOn}
+              className={cn(
+                "grid h-14 w-14 place-items-center rounded-full shadow-soft transition-transform hover:scale-105 active:scale-95",
+                speakerOn ? "bg-primary text-primary-foreground" : "bg-surface-2 text-text",
+              )}
+            >
+              {speakerOn ? <Volume2 className="h-6 w-6" /> : <VolumeX className="h-6 w-6" />}
+            </button>
+          ) : null}
+
           <button
             type="button"
             onClick={hangUp}

@@ -16,6 +16,32 @@ export interface CallInitiatePayload {
   media: CallMedia;
 }
 
+/**
+ * Server → caller ack for `call:initiate`. `ok` gates whether the call proceeds; `ringing` is true
+ * when the callee has a live device (show "Ringing…") and false when they're offline ("Calling…").
+ */
+export interface CallInitiateAck {
+  ok: boolean;
+  /** Failure code when `ok` is false: INVALID / NOT_ALLOWED / BUSY / ERROR. */
+  reason?: string;
+  /** True when the callee is connected (ringing now); false when offline (calling, may go unanswered). */
+  ringing?: boolean;
+}
+
+/** How a call finished — drives the in-chat call-log label. */
+export type CallOutcome = "completed" | "missed" | "declined" | "cancelled" | "failed";
+
+/**
+ * Metadata for a call-log chat message (a `type: "call"` message). Stored in cleartext — it's
+ * activity metadata (like WhatsApp's call entries), never message content.
+ */
+export interface CallLogMeta {
+  media: CallMedia;
+  outcome: CallOutcome;
+  /** Connected duration in whole seconds (present only when `outcome === "completed"`). */
+  durationSec?: number;
+}
+
 /** Server → callee: a call is ringing. */
 export interface CallIncomingPayload {
   callId: string;

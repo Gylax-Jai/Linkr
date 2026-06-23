@@ -2,7 +2,10 @@ import type { Server, Socket } from "socket.io";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import type {
   CallIncomingPayload,
+  CallInitiateAck,
   CallInitiatePayload,
+  CallMedia,
+  CallOutcome,
   CallSignalPayload,
   PublicUser,
   WebRtcIceCandidatePayload,
@@ -11,24 +14,38 @@ import type {
 import { logger } from "../utils/logger.js";
 import { UserModel } from "../models/User.js";
 import { areFriends } from "../modules/friends/friendship.helpers.js";
-import { getChatForUser, getOtherMemberId } from "../modules/chat/chat.service.js";
+import {
+  createCallLogMessage,
+  getChatForUser,
+  getOtherMemberId,
+} from "../modules/chat/chat.service.js";
 import { requireSocketUser } from "./auth.socket.js";
+
+/** How long an unanswered call rings before it's marked missed (WhatsApp-like). */
+const RING_TIMEOUT_MS = 35_000;
 
 /**
  * Live call bookkeeping (in-memory, per process). 1:1 only. We track who's in a call so we can:
- *  - reject a 3rd-party call to a busy user (CALL_BUSY), and
- *  - tell the peer the call ended if a participant disconnects.
+ *  - reject a 3rd-party call to a busy user (CALL_BUSY),
+ *  - tell the peer the call ended if a participant disconnects,
+ *  - time out an unanswered call, and
+ *  - write the correct call-log row (completed/missed/declined/cancelled) when it ends.
  * State is intentionally ephemeral — a server restart simply drops in-flight calls.
  */
-interface CallParticipants {
+interface CallRecord {
   caller: string;
   callee: string;
   chatId: string;
+  media: CallMedia;
+  /** Set when the callee accepts — its presence means the call connected (drives duration). */
+  acceptedAt?: number;
+  /** Ring-timeout handle; cleared on accept/reject/end. */
+  ringTimeout?: ReturnType<typeof setTimeout>;
 }
-const callsById = new Map<string, CallParticipants>();
+const callsById = new Map<string, CallRecord>();
 const callsByUser = new Map<string, Set<string>>();
 
-function trackCall(callId: string, parts: CallParticipants): void {
+function trackCall(callId: string, parts: CallRecord): void {
   callsById.set(callId, parts);
   for (const uid of [parts.caller, parts.callee]) {
     let set = callsByUser.get(uid);
@@ -40,7 +57,7 @@ function trackCall(callId: string, parts: CallParticipants): void {
   }
 }
 
-function untrackCall(callId: string): CallParticipants | undefined {
+function untrackCall(callId: string): CallRecord | undefined {
   const parts = callsById.get(callId);
   if (!parts) return undefined;
   callsById.delete(callId);
@@ -55,6 +72,29 @@ function untrackCall(callId: string): CallParticipants | undefined {
 function isBusy(userId: string): boolean {
   const set = callsByUser.get(userId);
   return !!set && set.size > 0;
+}
+
+/**
+ * End a tracked call exactly once: clear its timer, stop tracking it, and persist a call-log row.
+ * Idempotent — a second call for the same id (e.g. both peers hang up) is a no-op. The duration is
+ * computed from `acceptedAt` only for completed calls.
+ */
+function finalizeCall(callId: string | undefined, outcome: CallOutcome): void {
+  if (!callId) return;
+  const parts = untrackCall(callId);
+  if (!parts) return;
+  if (parts.ringTimeout) clearTimeout(parts.ringTimeout);
+
+  const durationSec =
+    outcome === "completed" && parts.acceptedAt
+      ? Math.max(0, Math.round((Date.now() - parts.acceptedAt) / 1000))
+      : undefined;
+
+  void createCallLogMessage(parts.chatId, parts.caller, {
+    media: parts.media,
+    outcome,
+    ...(durationSec !== undefined ? { durationSec } : {}),
+  });
 }
 
 /**
@@ -78,7 +118,7 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
   const userId = requireSocketUser(socket);
   if (!userId) return;
 
-  type Ack = (res?: { ok: boolean; reason?: string }) => void;
+  type Ack = (res?: CallInitiateAck) => void;
 
   socket.on(
     SOCKET_EVENTS.CALL_INITIATE,
@@ -101,31 +141,39 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
           return;
         }
 
-        // Is the callee connected on any device?
-        const peerSockets = await io.in(`user:${peerId}`).fetchSockets();
-        if (peerSockets.length === 0) {
-          ack?.({ ok: false, reason: "UNAVAILABLE" });
-          return;
-        }
-
         const caller = await UserModel.findById(userId).select("username displayName avatar");
         if (!caller) {
           ack?.({ ok: false, reason: "NOT_ALLOWED" });
           return;
         }
 
-        const from: PublicUser = {
-          _id: userId,
-          username: caller.username ?? undefined,
-          displayName: caller.displayName,
-          avatar: caller.avatar ?? undefined,
-        };
+        // Is the callee connected on any device? If so it rings now; if not, the caller still
+        // gets a "Calling…" state and the call rings out into a missed-call log after the timeout.
+        const peerSockets = await io.in(`user:${peerId}`).fetchSockets();
+        const peerOnline = peerSockets.length > 0;
 
-        trackCall(callId, { caller: userId, callee: peerId, chatId });
+        const record: CallRecord = { caller: userId, callee: peerId, chatId, media };
+        trackCall(callId, record);
 
-        const incoming: CallIncomingPayload = { callId, chatId, media, from };
-        io.to(`user:${peerId}`).emit(SOCKET_EVENTS.CALL_INCOMING, incoming);
-        ack?.({ ok: true });
+        if (peerOnline) {
+          const from: PublicUser = {
+            _id: userId,
+            username: caller.username ?? undefined,
+            displayName: caller.displayName,
+            avatar: caller.avatar ?? undefined,
+          };
+          const incoming: CallIncomingPayload = { callId, chatId, media, from };
+          io.to(`user:${peerId}`).emit(SOCKET_EVENTS.CALL_INCOMING, incoming);
+        }
+
+        // Ring-out → missed. Tell both ends the call ended, then write the missed-call log.
+        record.ringTimeout = setTimeout(() => {
+          io.to(`user:${record.caller}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
+          io.to(`user:${record.callee}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
+          finalizeCall(callId, "missed");
+        }, RING_TIMEOUT_MS);
+
+        ack?.({ ok: true, ringing: peerOnline });
       } catch (err) {
         logger.warn("call:initiate failed", {
           userId,
@@ -136,29 +184,42 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
     },
   );
 
-  // Relay a simple control message (accept/reject/end) to the OTHER participant of the call.
-  const relayControl = async (event: string, payload: CallSignalPayload, endCall: boolean) => {
-    try {
-      const { callId, chatId } = payload ?? {};
-      if (!callId || !chatId) return;
-      const peerId = await resolvePeer(userId, chatId);
-      if (!peerId) return;
-      io.to(`user:${peerId}`).emit(event, { callId, chatId } satisfies CallSignalPayload);
-      if (endCall) untrackCall(callId);
-    } catch {
-      /* ignore */
-    }
+  // Relay a control message to the OTHER participant. Friendship is re-checked on every hop.
+  const relayToPeer = async (event: string, payload: CallSignalPayload): Promise<void> => {
+    const { callId, chatId } = payload ?? {};
+    if (!callId || !chatId) return;
+    const peerId = await resolvePeer(userId, chatId);
+    if (peerId) io.to(`user:${peerId}`).emit(event, { callId, chatId } satisfies CallSignalPayload);
   };
 
-  socket.on(SOCKET_EVENTS.CALL_ACCEPT, (payload: CallSignalPayload) =>
-    relayControl(SOCKET_EVENTS.CALL_ACCEPT, payload, false),
-  );
-  socket.on(SOCKET_EVENTS.CALL_REJECT, (payload: CallSignalPayload) =>
-    relayControl(SOCKET_EVENTS.CALL_REJECT, payload, true),
-  );
-  socket.on(SOCKET_EVENTS.CALL_END, (payload: CallSignalPayload) =>
-    relayControl(SOCKET_EVENTS.CALL_END, payload, true),
-  );
+  // Callee accepted → mark the call connected (stops the ring timer) and tell the caller to offer.
+  socket.on(SOCKET_EVENTS.CALL_ACCEPT, (payload: CallSignalPayload) => {
+    void (async () => {
+      const record = payload?.callId ? callsById.get(payload.callId) : undefined;
+      if (record && !record.acceptedAt) {
+        record.acceptedAt = Date.now();
+        if (record.ringTimeout) clearTimeout(record.ringTimeout);
+      }
+      await relayToPeer(SOCKET_EVENTS.CALL_ACCEPT, payload);
+    })();
+  });
+
+  // Callee declined → relay, then log a declined call.
+  socket.on(SOCKET_EVENTS.CALL_REJECT, (payload: CallSignalPayload) => {
+    void (async () => {
+      await relayToPeer(SOCKET_EVENTS.CALL_REJECT, payload);
+      finalizeCall(payload?.callId, "declined");
+    })();
+  });
+
+  // Hang up → relay, then log completed (if it had connected) or cancelled (rang, never answered).
+  socket.on(SOCKET_EVENTS.CALL_END, (payload: CallSignalPayload) => {
+    void (async () => {
+      await relayToPeer(SOCKET_EVENTS.CALL_END, payload);
+      const record = payload?.callId ? callsById.get(payload.callId) : undefined;
+      finalizeCall(payload?.callId, record?.acceptedAt ? "completed" : "cancelled");
+    })();
+  });
 
   // WebRTC handshake — relayed verbatim. Friendship is re-checked on every hop.
   socket.on(SOCKET_EVENTS.WEBRTC_OFFER, async (payload: WebRtcSdpPayload) => {
@@ -185,13 +246,15 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
       if (remaining.length > 0) return;
 
       for (const callId of [...set]) {
-        const parts = untrackCall(callId);
+        const parts = callsById.get(callId);
         if (!parts) continue;
         const peerId = parts.caller === userId ? parts.callee : parts.caller;
         io.to(`user:${peerId}`).emit(SOCKET_EVENTS.CALL_END, {
           callId,
           chatId: parts.chatId,
         } satisfies CallSignalPayload);
+        // Connected → completed; dropped while still ringing → missed.
+        finalizeCall(callId, parts.acceptedAt ? "completed" : "missed");
       }
     })();
   });

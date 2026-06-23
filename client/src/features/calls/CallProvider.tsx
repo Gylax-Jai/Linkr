@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import type {
   CallIncomingPayload,
+  CallInitiateAck,
   CallMedia,
   CallSignalPayload,
   PublicUser,
@@ -13,7 +14,9 @@ import { useAuthStore, useCallStore } from "@/lib/store";
 import type { CallEndReason } from "@/lib/store";
 import { CallEngine } from "./CallEngine";
 import { fetchIceConfig } from "./useIceConfig";
+import { startCallTone, stopCallTone, playEndTone } from "./callSounds";
 import { CallOverlay } from "./CallOverlay";
+import { CallBar } from "./CallBar";
 import { IncomingCallModal } from "./IncomingCallModal";
 
 interface CallActions {
@@ -22,6 +25,9 @@ interface CallActions {
   rejectCall: () => void;
   hangUp: () => void;
   toggleMute: () => void;
+  toggleSpeaker: () => void;
+  minimize: () => void;
+  expand: () => void;
 }
 
 const CallActionsContext = createContext<CallActions | null>(null);
@@ -78,8 +84,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       });
       await engine.startLocalMedia();
       engineRef.current = engine;
-      // Apply the saved mute preference, then flush any buffered remote signaling.
+      // Apply the saved mute/speaker preferences, then flush any buffered remote signaling.
       engine.setMuted(useCallStore.getState().muted);
+      void engine.setSpeaker(useCallStore.getState().speakerOn);
       for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
       pendingIceRef.current = [];
       return engine;
@@ -93,8 +100,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       getSocket()?.emit(
         SOCKET_EVENTS.CALL_INITIATE,
         { callId, chatId, media },
-        (res?: { ok: boolean; reason?: string }) => {
-          if (res?.ok) return; // Ringing — wait for accept/reject.
+        (res?: CallInitiateAck) => {
+          if (res?.ok) {
+            // ringing=true → callee device is live ("Ringing…"); false → offline ("Calling…").
+            useCallStore.getState().setRinging(Boolean(res.ringing));
+            return;
+          }
           const reason: CallEndReason =
             res?.reason === "BUSY"
               ? "busy"
@@ -152,7 +163,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       engineRef.current?.setMuted(useCallStore.getState().muted);
     };
 
-    return { startCall, acceptCall, rejectCall, hangUp, toggleMute };
+    const toggleSpeaker: CallActions["toggleSpeaker"] = () => {
+      useCallStore.getState().toggleSpeaker();
+      void engineRef.current?.setSpeaker(useCallStore.getState().speakerOn);
+    };
+
+    const minimize: CallActions["minimize"] = () => useCallStore.getState().minimize();
+    const expand: CallActions["expand"] = () => useCallStore.getState().expand();
+
+    return { startCall, acceptCall, rejectCall, hangUp, toggleMute, toggleSpeaker, minimize, expand };
   }, []);
 
   // Subscribe to call signaling once authenticated. Handlers read fresh state via getState().
@@ -202,6 +221,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           });
           await engine.startLocalMedia();
           engine.setMuted(useCallStore.getState().muted);
+          void engine.setSpeaker(useCallStore.getState().speakerOn);
           engineRef.current = engine;
           for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
           pendingIceRef.current = [];
@@ -289,8 +309,37 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   return (
     <CallActionsContext.Provider value={actions}>
       {children}
+      <CallSounds />
       <IncomingCallModal />
+      <CallBar />
       <CallOverlay />
     </CallActionsContext.Provider>
   );
+}
+
+/**
+ * Drives call audio cues off the phase machine: ringback while the caller waits, ringtone for an
+ * incoming call, and a short blip when a call ends. Renders nothing.
+ */
+function CallSounds() {
+  const phase = useCallStore((s) => s.phase);
+  const direction = useCallStore((s) => s.direction);
+
+  useEffect(() => {
+    if (phase === "outgoing") {
+      startCallTone("ringback");
+    } else if (phase === "incoming") {
+      startCallTone("ringtone");
+    } else {
+      // connecting / active / idle — silence the waiting tones.
+      stopCallTone();
+      if (phase === "ended") playEndTone();
+    }
+    return () => {
+      // Safety: ensure tones never leak across phase changes.
+      if (phase === "outgoing" || phase === "incoming") stopCallTone();
+    };
+  }, [phase, direction]);
+
+  return null;
 }
