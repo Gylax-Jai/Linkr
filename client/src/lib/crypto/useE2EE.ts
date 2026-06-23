@@ -22,6 +22,22 @@ export function useE2EEInit(): void {
   }, [status, userId]);
 }
 
+export interface E2EEAccount {
+  /** Crypto lifecycle: idle | initializing | ready | locked | unsupported. */
+  status: import("./cryptoStore").E2EEStatus;
+  /** Ready, but the account has no server key backup yet → prompt to set a recovery passphrase. */
+  needsBackup: boolean;
+  /** A server backup exists but this device can't read history until the passphrase is provided. */
+  locked: boolean;
+}
+
+/** Account-level E2EE state (Sprint D) for the unlock/setup UI and recovery settings. */
+export function useE2EEAccount(): E2EEAccount {
+  const status = useCryptoStore((s) => s.status);
+  const needsBackup = useCryptoStore((s) => s.needsBackup);
+  return { status, needsBackup, locked: status === "locked" };
+}
+
 export type DecryptedState = "empty" | "plain" | "decrypted" | "pending" | "failed";
 
 export interface DecryptedText {

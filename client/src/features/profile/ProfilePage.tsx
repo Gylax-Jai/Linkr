@@ -15,6 +15,7 @@ const STATUS_DURATION_OPTIONS: { value: number | null; label: string }[] = [
 ];
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
+import { RecoveryCard } from "@/features/security";
 import { useAuthStore } from "@/lib/store";
 import { PATHS } from "@/routes/paths";
 import { useUpdateAvatarMutation, useUpdateProfileMutation } from "./useProfile";
@@ -283,6 +284,11 @@ export function ProfilePage() {
           {saving ? "Saving…" : "Save changes"}
         </Button>
       </form>
+
+      <div className="mx-auto w-full max-w-lg px-6 pb-10">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">Security</h2>
+        <RecoveryCard />
+      </div>
     </div>
   );
 }

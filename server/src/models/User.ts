@@ -41,6 +41,27 @@ const userSchema = new Schema(
      * owner's browser. Absent for accounts that have never run the web client (e.g. the dev bot).
      */
     publicKey: { type: String },
+
+    /**
+     * Account-level E2EE key backup (Sprint D). The owner's keypair encrypted client-side with a key
+     * derived from their recovery passphrase. The server stores this opaque blob so a NEW device can
+     * restore the account keypair (with the passphrase) and read history — it can NEVER decrypt it.
+     * `select: false` so it's only ever returned by the dedicated self endpoint, never leaked by a
+     * profile/participant mapper. Cleared automatically when the public key changes (key reset).
+     */
+    keyBackup: {
+      type: {
+        v: { type: Number },
+        salt: { type: String },
+        nonce: { type: String },
+        ciphertext: { type: String },
+        opslimit: { type: Number },
+        memlimit: { type: Number },
+      },
+      select: false,
+      _id: false,
+      default: undefined,
+    },
     privacy: {
       lastSeen: { type: String, enum: VISIBILITY_VALUES, default: "friends" },
       profile: { type: String, enum: ["everyone", "friends"], default: "everyone" },

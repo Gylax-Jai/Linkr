@@ -1,8 +1,13 @@
 import type { Request } from "express";
-import type { PublishKeyInput, PublicKeyResponse } from "@linkr/shared";
+import type {
+  KeyBackupResponse,
+  PublishKeyInput,
+  PublicKeyResponse,
+  UploadKeyBackupInput,
+} from "@linkr/shared";
 import { ApiError } from "../../utils/ApiError.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
-import { getPublicKey, publishPublicKey } from "./keys.service.js";
+import { getKeyBackup, getPublicKey, publishPublicKey, saveKeyBackup } from "./keys.service.js";
 
 function requireUserId(req: Request): string {
   if (!req.user) throw ApiError.unauthorized();
@@ -13,6 +18,19 @@ function requireUserId(req: Request): string {
 export const publishKey = asyncHandler(async (req, res) => {
   const { publicKey } = req.body as PublishKeyInput;
   await publishPublicKey(requireUserId(req), publicKey);
+  res.status(204).end();
+});
+
+/** GET /api/keys/backup — fetch the caller's own encrypted account-key backup (Sprint D). */
+export const getMyBackup = asyncHandler(async (req, res) => {
+  const body: KeyBackupResponse = await getKeyBackup(requireUserId(req));
+  res.status(200).json(body);
+});
+
+/** PUT /api/keys/backup — store/replace the caller's account public key + encrypted backup. */
+export const putMyBackup = asyncHandler(async (req, res) => {
+  const { publicKey, backup } = req.body as UploadKeyBackupInput;
+  await saveKeyBackup(requireUserId(req), publicKey, backup);
   res.status(204).end();
 });
 

@@ -3,7 +3,9 @@
 > **Living document:** everything built so far, how to run it, and what's next.  
 > For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
 
-**Last updated:** June 23, 2026 (Sprint C.2.2 — Contact info button now toggles the profile pane open/closed; self chat renamed "Self chat" everywhere and now shows your own custom-status chip)
+**Last updated:** June 23, 2026 (Sprint D — **account-level E2EE / multi-device**: your encryption key can be backed up to the server encrypted with a recovery passphrase, so logging in on another device restores your key and decrypts your whole chat history)
+
+Earlier (Sprint C.2.2 — Contact info button now toggles the profile pane open/closed; self chat renamed "Self chat" everywhere and now shows your own custom-status chip)
 
 Earlier (Sprint C.2.1 — status popover fixes (above messages, no label, fits text), 50-char status cap, emoji picker now uses the real dark/light theme + docks below the field on mobile, self avatar is click-to-zoom)
 
@@ -137,6 +139,18 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 - **Honest crypto framing kept:** still "encrypted in transit only", **E2EE remains deferred**. No new env vars.
 - **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (emoji-mart split into its own lazy chunks; chunk-size warning only).
 
+### Sprint D — Account-level E2EE / multi-device 🔐🔁
+Phase 2 made encryption **device-bound**: the private key lived only in one browser's IndexedDB, so logging in elsewhere minted a fresh key and **old messages were unreadable**. Sprint D makes encryption **account-bound** — your key can be securely backed up and restored on any device with a **recovery passphrase**, so a new login decrypts your **whole history**. The server still never sees a private key or the passphrase (zero-knowledge backup).
+
+- **Encrypted key backup (`client/src/lib/crypto/keyBackup.ts`):** the account keypair is wrapped client-side with a key derived from the user's **recovery passphrase** via **Argon2id** (`crypto_pwhash`, memory-hard) over a random salt, then sealed with **`crypto_secretbox`** (XSalsa20-Poly1305, authenticated). The salt/nonce + exact Argon2id limits travel inside the blob so any device re-derives the same key. The server stores only this **opaque blob** — it can never read it.
+- **Backup API (`/api/keys/backup`):** `GET` returns the caller's own encrypted backup + the public key it unlocks to; `PUT` stores the public key + backup **atomically** so they always match. The blob lives in `User.keyBackup` (**`select:false`** — only the dedicated self endpoint ever returns it). **`POST /api/keys` now clears the backup when the public key actually changes** (a key reset), so a stale backup never lingers; re-publishing the same key leaves it intact.
+- **State machine (`cryptoStore.ts`):** `init` now decides between **ready** (local key present → publish it; flag `needsBackup` if the account has no server backup yet), **locked** (account has a backup but this device has no matching key → wait for the passphrase), and **ready (fresh)** (brand-new account → mint a key + prompt setup). A local key that **doesn't match** an existing account backup is treated as stale → **locked**, so every device converges on the one canonical account key. New actions: `unlockWithPassphrase`, `setupBackup`, `resetKeys`.
+- **Unlock + setup UI (`features/security/`):** `E2EEKeyGuard` (mounted in the authed shell) shows a **blocking unlock modal** on a locked device — enter the passphrase to restore the key (or deliberately **start fresh**, losing old history) — and a **dismissible "turn on multi-device" prompt** when ready-but-unbacked (dismissal remembered per-user). **Profile → Security** (`RecoveryCard`) is the canonical place to enable it later or **change the passphrase**.
+- **Why blocking on unlock:** while locked we have no usable key, so the modal is blocking to avoid silently **downgrading** new messages to in-transit-only. Once unlocked, cached "can't decrypt" results are dropped so bubbles re-decrypt with the restored key.
+- **Media note:** media was already **in-transit only** (not device-encrypted), so it has **always** been viewable on any logged-in device — Sprint D was about restoring **encrypted text** history. (E2EE media remains future work.)
+- **Crypto choices (per security guidance):** Argon2id KDF + authenticated `secretbox`; no banned/deprecated algorithms; passphrase never transmitted; backup is integrity-protected (a tampered/wrong blob fails the AEAD tag and returns "wrong passphrase").
+- **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (only the pre-existing chunk-size warning).
+
 ### Phase 2 — End-to-end encryption (text) 🔐
 The big one from the roadmap. **Text messages between humans are now end-to-end encrypted** with libsodium; the server stores ciphertext only and can never read them. Scope is **text-only** (media stays encrypted-in-transit for now) and the **dev bot stays plaintext** by design (see below).
 
@@ -147,7 +161,7 @@ The big one from the roadmap. **Text messages between humans are now end-to-end 
 - **No-E2EE-with-bot mode (as requested):** the client looks up a peer's public key before sending. The **dev bot has no browser, so it never publishes a key** → the client **automatically falls back to plaintext** (encrypted in transit only) so the bot can still read/echo. Same graceful fallback covers any not-yet-upgraded peer. The bot remains **force-disabled in production**.
 - **Honest, dynamic badge:** the conversation header badge now reflects reality per chat — a green **"End-to-end encrypted"** shield when the peer has a key, or **"Private chat / encrypted in transit"** otherwise (e.g. the bot). No more blanket "coming soon".
 - **Server stores ciphertext only:** `Message.encrypted` flags E2EE bodies; the server **never** builds a readable preview for them (notifications show a generic **"🔒 New message"**) and forwards/stores the envelope untouched. Media is **not** encrypted in Phase 2 (text-only), so the `encrypted` flag is ignored for media.
-- **Known limits (by design, MVP):** **single-device** — logging in on a new device (or clearing site data) generates a fresh key and **old messages become unreadable** (the accepted lost-key tradeoff); **multi-device key sync** and **E2EE media** are future work. On a transient key-fetch failure the client falls back to in-transit (never silently drops a message).
+- **Known limits (Phase 2 baseline — multi-device now solved in Sprint D):** Phase 2 alone was **single-device** (a new device minted a fresh key → old messages unreadable). **Sprint D adds account-level key backup + restore**, so a new device can decrypt history with the recovery passphrase. **E2EE media** is still future work. On a transient key-fetch failure the client falls back to in-transit (never silently drops a message).
 - **Verified green:** `tsc --noEmit` for shared + server + client, and the client production build (libsodium lands in its own chunk; only the pre-existing chunk-size warning).
 
 ### Phase 8 (kickoff) — Real SMS OTP (MSG91) + onboarding photo + input contrast
@@ -283,7 +297,8 @@ After deploying (Vercel client + Render server) and testing with a friend, a bat
 | **5.10** | Unread/badge sync (no phantom unread on the active chat), avatar cache-bust (versioned URL → updates without hard refresh), dev-bot delivered/blue-read ticks | ✅ |
 
 ### Post-MVP phases (named roadmap)
-- **Phase 2 — E2EE (text)** ✅ **Done** — libsodium sealed-box encryption for human↔human text; keys module live; bot stays plaintext by design. *Still open in this theme: E2EE media + multi-device key sync.*
+- **Phase 2 — E2EE (text)** ✅ **Done** — libsodium sealed-box encryption for human↔human text; keys module live; bot stays plaintext by design.
+- **Sprint D — Account-level E2EE / multi-device** ✅ **Done** — recovery-passphrase-encrypted key backup (`/api/keys/backup`) + unlock/restore on new devices; converges every device on one account keypair. *Still open in this theme: E2EE media; optional key-fingerprint verification.*
 - **Phase 3 — Realtime calling** — voice + video (WebRTC), screen share, TURN/coturn; wire the disabled header call buttons.
 - **Phase 4 — Chat UX & account controls** — mute, archive, share, message forward, report user, privacy-settings UI (API exists), account deletion.
 - **Phase 5 — Notifications++** — web push (Service Worker + VAPID) for background alerts (generic content to preserve E2EE).
@@ -359,8 +374,10 @@ After deploying (Vercel client + Render server) and testing with a friend, a bat
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness + mongo/redis status |
-| POST | `/api/keys` | Publish/rotate the caller's E2EE public key (Phase 2) |
+| POST | `/api/keys` | Publish/rotate the caller's E2EE public key (Phase 2); clears the key backup when the key changes (Sprint D) |
 | GET | `/api/keys/:userId` | Fetch a user's public key — self or accepted friends only (Phase 2) |
+| GET | `/api/keys/backup` | Fetch the caller's own encrypted account-key backup (Sprint D) |
+| PUT | `/api/keys/backup` | Store/replace the caller's account public key + encrypted key backup (Sprint D) |
 
 ### Socket.IO (JWT on connect)
 | Event | Purpose |
@@ -579,7 +596,7 @@ pnpm build        # production build
 
 | Item | Notes |
 |------|--------|
-| **E2EE** | ✅ **Text is end-to-end encrypted** (Phase 2) — libsodium sealed boxes, server stores ciphertext only, dynamic "End-to-end encrypted" badge. **Media is still in-transit only** (text-only scope); the **dev bot stays plaintext by design** (no published key → automatic fallback). **Single-device** only — new device / cleared storage = fresh key, old messages unreadable (accepted MVP tradeoff). Multi-device sync + E2EE media are future work |
+| **E2EE** | ✅ **Text is end-to-end encrypted** (Phase 2) — libsodium sealed boxes, server stores ciphertext only, dynamic "End-to-end encrypted" badge. **Media is still in-transit only** (text-only scope); the **dev bot stays plaintext by design** (no published key → automatic fallback). ✅ **Multi-device (Sprint D)** — a recovery-passphrase-encrypted key backup lets a new device restore your key and read history; **E2EE media** is the remaining gap |
 | **Calls** | Still disabled stubs in the header — **composer emoji picker is now wired** (Sprint 5.6) |
 | **Details pane Mute / Share** | Still stubs — **Block/Unblock is wired**; **Unfriend** lives in FriendActions + the sidebar ⋯ menu; **Add friend / Accept / Requested** now reachable from the details pane (Sprint 5.7) |
 | **Add friend after unblock/unfriend** | ✅ **Closed** (Sprint 5.7) — reachable from the chat's ⋯ menu, the details pane, and the composer; the composer now gates on **not-friends**, not only blocked |
@@ -595,7 +612,8 @@ pnpm build        # production build
 | **Click profile → details** | ✅ **Closed** (Sprint 5.8) — the header avatar + name is a button that opens the details aside (desktop) / sheet (mobile) |
 | **Redis** | Optional; single-instance sockets work without it |
 | **Account deletion** | Blueprint §4 — not implemented yet |
-| **keys module** | ✅ **Live** (Phase 2) — `POST /api/keys` publishes a public key, `GET /api/keys/:userId` returns it (self/friends only) |
+| **keys module** | ✅ **Live** (Phase 2 + Sprint D) — `POST /api/keys` publishes a public key, `GET /api/keys/:userId` returns it (self/friends only), and `GET`/`PUT /api/keys/backup` store the caller's recovery-passphrase-encrypted account-key backup |
+| **Multi-device / account-level E2EE** | ✅ **Closed** (Sprint D) — recovery-passphrase key backup + restore; new devices unlock history; key reset clears the stale backup. Recovery lives in **Profile → Security** |
 
 ---
 
@@ -606,7 +624,15 @@ pnpm build        # production build
 - ✅ Encrypt/decrypt text client-side (sealed box per member); server stores ciphertext only
 - ✅ Bot kept dev-only & plaintext **by design** (no key → automatic fallback) instead of retired
 - ✅ Badge is now a real, dynamic “End-to-end encrypted” when the peer has a key
-- ⏭️ Follow-ups: **E2EE media**, **multi-device key sync**, optional key-fingerprint verification UI
+- ✅ **Multi-device key sync — done in Sprint D** (recovery-passphrase-encrypted key backup + restore)
+- ⏭️ Follow-ups: **E2EE media**, optional key-fingerprint verification UI
+
+### Sprint D — Account-level E2EE / multi-device ✅ Done
+- ✅ Recovery-passphrase-encrypted key backup (Argon2id + secretbox) stored opaquely on the server (`/api/keys/backup`)
+- ✅ New-device **unlock** (restore the account key from the backup) + **start-fresh** escape hatch
+- ✅ One-time "turn on multi-device" prompt + **Profile → Security** card to enable/change the passphrase later
+- ✅ `POST /api/keys` clears a stale backup when the public key changes; devices converge on one account key
+- ⏭️ Follow-ups: **E2EE media**, optional key-fingerprint verification UI
 
 ### Sprint 5 — Media + notifications → MVP complete ✅
 - ✅ Media messages (images + files) → Cloudinary **or** local-disk dev fallback, encrypted in transit

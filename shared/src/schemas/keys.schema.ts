@@ -24,3 +24,37 @@ export const keyUserParamSchema = z.object({
 });
 
 export type PublishKeyInput = z.infer<typeof publishKeySchema>;
+
+/** A base64 blob (salt/nonce/ciphertext) in an encrypted key backup. Bounded to resist abuse. */
+const base64Blob = z
+  .string()
+  .trim()
+  .min(1)
+  .max(20000)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/, "Must be base64");
+
+/**
+ * The encrypted account-key backup (Sprint D). The server validates the envelope shape only — it can
+ * never decrypt it (no passphrase ever leaves the browser). memlimit is capped at 1 GiB as a sanity
+ * bound; opslimit is a small Argon2id iteration count.
+ */
+export const keyBackupSchema = z.object({
+  v: z.number().int().min(1).max(10),
+  salt: base64Blob,
+  nonce: base64Blob,
+  ciphertext: base64Blob,
+  opslimit: z.number().int().min(1).max(100),
+  memlimit: z
+    .number()
+    .int()
+    .min(1)
+    .max(1024 * 1024 * 1024),
+});
+
+/** PUT /api/keys/backup — store/replace the caller's account public key + encrypted backup. */
+export const uploadKeyBackupSchema = z.object({
+  publicKey: base64Key,
+  backup: keyBackupSchema,
+});
+
+export type UploadKeyBackupInput = z.infer<typeof uploadKeyBackupSchema>;

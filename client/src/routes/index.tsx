@@ -4,6 +4,7 @@ import { LoginPage } from "@/features/auth";
 import { SocketProvider } from "@/features/chat";
 import { OnboardingWizard } from "@/features/onboarding";
 import { ProfilePage } from "@/features/profile";
+import { E2EEKeyGuard } from "@/features/security";
 import { useAuthStore } from "@/lib/store";
 import { useE2EEInit } from "@/lib/crypto";
 import { PATHS } from "./paths";
@@ -16,11 +17,13 @@ function OnboardingGate() {
 }
 
 function AuthedShell({ children }: { children: React.ReactNode }) {
-  // Bootstrap the device E2EE keypair (Phase 2) once we're in the authenticated app.
+  // Bootstrap the account E2EE keypair (Phase 2 + Sprint D) once we're in the authenticated app.
   useE2EEInit();
   return (
     <SocketProvider>
       {children}
+      {/* Account-key unlock (new device) + multi-device setup prompt, overlaid above the shell. */}
+      <E2EEKeyGuard />
     </SocketProvider>
   );
 }

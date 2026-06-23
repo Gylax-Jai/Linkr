@@ -1,21 +1,28 @@
 import { create } from "zustand";
-import type { PublicKeyResponse } from "@linkr/shared";
+import type { KeyBackup, KeyBackupResponse, PublicKeyResponse } from "@linkr/shared";
 import { api } from "@/lib/api";
 import { getSodium, type Sodium } from "./sodium";
 import { loadKeypair, saveKeypair, type StoredKeypair } from "./storage";
+import { wrapKeypair, unwrapKeypair } from "./keyBackup";
 import { decryptEnvelope, encryptEnvelope, type Recipient } from "./messageCrypto";
 
 /**
- * E2EE runtime state (Phase 2, blueprint §9). Holds the device keypair (in memory after load from
+ * E2EE runtime state (Phase 2 + Sprint D). Holds the account keypair (in memory after load from
  * IndexedDB), a cache of peers' public keys, and a cache of decrypted plaintext keyed by message id
- * so the UI can render encrypted bodies. The server never sees any of this.
+ * so the UI can render encrypted bodies. The server never sees any private key or the passphrase.
+ *
+ * Sprint D — account-level keys: the keypair can be backed up to the server ENCRYPTED with a key
+ * derived from the user's recovery passphrase (`keyBackup.ts`). A new device with no local key but a
+ * server backup enters the "locked" state until the passphrase is provided, after which it restores
+ * the same account keypair and can read all history. `needsBackup` flags a ready device whose
+ * account has no backup yet (prompt the user to set a recovery passphrase to enable multi-device).
  *
  * Graceful degradation: if libsodium or IndexedDB is unavailable, status becomes "unsupported" and
  * the app falls back to plaintext (encrypted in transit only) — the same path used for the dev bot
  * and any peer who has not published a key.
  */
 
-export type E2EEStatus = "idle" | "initializing" | "ready" | "unsupported";
+export type E2EEStatus = "idle" | "initializing" | "ready" | "locked" | "unsupported";
 
 export interface EncryptResult {
   content: string;
@@ -34,6 +41,10 @@ interface CryptoState {
   myUserId: string | null;
   keypair: StoredKeypair | null;
   sodium: Sodium | null;
+  /** True when this device is "ready" but the account has no server key backup yet (prompt setup). */
+  needsBackup: boolean;
+  /** The server backup awaiting a passphrase while `status === "locked"`. */
+  pendingBackup: KeyBackup | null;
   /** userId -> base64 public key, or null when the peer has no key (e.g. the dev bot). */
   peerKeys: Record<string, string | null>;
   /** messageId -> decrypted plaintext, or null when it cannot be decrypted. */
@@ -44,6 +55,29 @@ interface CryptoState {
   fetchPeerKey: (userId: string) => Promise<string | null>;
   encryptText: (plaintext: string, recipientIds: string[]) => Promise<EncryptResult>;
   decryptInto: (id: string, content: string) => void;
+  /** Restore the account keypair from the pending server backup using the recovery passphrase. */
+  unlockWithPassphrase: (passphrase: string) => Promise<boolean>;
+  /** Encrypt the current device keypair under `passphrase` and upload it as the account backup. */
+  setupBackup: (passphrase: string) => Promise<boolean>;
+  /** Abandon a forgotten passphrase: mint a fresh keypair (old history becomes unreadable). */
+  resetKeys: () => Promise<void>;
+}
+
+/** Best-effort: publish our public key so friends can encrypt to us. Safe to call repeatedly. */
+async function publishPublicKey(publicKey: string): Promise<void> {
+  try {
+    await api.post("/keys", { publicKey });
+  } catch {
+    /* offline or transient — retried on next init */
+  }
+}
+
+function freshKeypair(sodium: Sodium): StoredKeypair {
+  const kp = sodium.crypto_box_keypair();
+  return {
+    publicKey: sodium.to_base64(kp.publicKey, sodium.base64_variants.ORIGINAL),
+    privateKey: sodium.to_base64(kp.privateKey, sodium.base64_variants.ORIGINAL),
+  };
 }
 
 export const useCryptoStore = create<CryptoState>((set, get) => ({
@@ -51,42 +85,62 @@ export const useCryptoStore = create<CryptoState>((set, get) => ({
   myUserId: null,
   keypair: null,
   sodium: null,
+  needsBackup: false,
+  pendingBackup: null,
   peerKeys: {},
   plaintext: {},
 
   /**
-   * Ensure this device has a keypair for `userId` and that the server holds the matching public key.
-   * Idempotent and safe to call on every authenticated mount. Generates a fresh keypair when none
-   * exists locally (e.g. new device / cleared storage), overwriting the server's key — old messages
-   * sealed to a previous key then become unreadable (accepted lost-key tradeoff).
+   * Bootstrap E2EE for `userId`. Idempotent and safe on every authenticated mount. Decides between:
+   *  - ready:  this device has a local keypair (publish it; flag `needsBackup` if the account has no
+   *            server backup yet so we can prompt the user to enable multi-device).
+   *  - locked: the account has a server backup but this device has no matching local key (new device
+   *            or a stale local key) — wait for the recovery passphrase to restore the account key.
+   *  - ready (fresh): brand-new account with no backup anywhere — mint a keypair and prompt setup.
    */
   init: async (userId) => {
-    if (get().status === "initializing") return;
-    if (get().status === "ready" && get().myUserId === userId) return;
+    const cur = get();
+    if (cur.status === "initializing") return;
+    if ((cur.status === "ready" || cur.status === "locked") && cur.myUserId === userId) return;
     set({ status: "initializing", myUserId: userId });
 
     try {
       const sodium = await getSodium();
-      let keypair = await loadKeypair(userId);
+      const localKp = await loadKeypair(userId);
 
-      if (!keypair) {
-        const kp = sodium.crypto_box_keypair();
-        keypair = {
-          publicKey: sodium.to_base64(kp.publicKey, sodium.base64_variants.ORIGINAL),
-          privateKey: sodium.to_base64(kp.privateKey, sodium.base64_variants.ORIGINAL),
-        };
-        await saveKeypair(userId, keypair);
-      }
-
-      set({ sodium, keypair, status: "ready" });
-
-      // Publish (or rotate to) our current public key so friends can encrypt to us. Best-effort —
-      // sending/receiving still works for peers who already have our key.
+      // Does this account already have an encrypted key backup on the server? (Sprint D)
+      let server: KeyBackupResponse = { hasBackup: false, backup: null, publicKey: null };
       try {
-        await api.post("/keys", { publicKey: keypair.publicKey });
+        const res = await api.get<KeyBackupResponse>("/keys/backup");
+        server = res.data;
       } catch {
-        /* offline or transient — retried on next init */
+        /* offline/transient — treat as "no backup info"; a local key still works locally */
       }
+
+      if (localKp) {
+        // A server backup for a DIFFERENT key means this local key is stale (created before the
+        // account backup existed). The backup is the source of truth → lock to adopt the real key.
+        if (server.hasBackup && server.backup && server.publicKey && server.publicKey !== localKp.publicKey) {
+          set({ sodium, keypair: null, pendingBackup: server.backup, status: "locked", needsBackup: false });
+          return;
+        }
+        set({ sodium, keypair: localKp, status: "ready", needsBackup: !server.hasBackup, pendingBackup: null });
+        await publishPublicKey(localKp.publicKey);
+        return;
+      }
+
+      // No local key on this device.
+      if (server.hasBackup && server.backup) {
+        // New device for an account that has a backup — need the passphrase to restore.
+        set({ sodium, keypair: null, pendingBackup: server.backup, status: "locked", needsBackup: false });
+        return;
+      }
+
+      // Brand-new account with no backup anywhere — mint a keypair, publish it, prompt for setup.
+      const keypair = freshKeypair(sodium);
+      await saveKeypair(userId, keypair);
+      set({ sodium, keypair, status: "ready", needsBackup: true, pendingBackup: null });
+      await publishPublicKey(keypair.publicKey);
     } catch {
       // No libsodium / IndexedDB — fall back to plaintext (encrypted in transit only).
       set({ status: "unsupported" });
@@ -99,9 +153,50 @@ export const useCryptoStore = create<CryptoState>((set, get) => ({
       myUserId: null,
       keypair: null,
       sodium: null,
+      needsBackup: false,
+      pendingBackup: null,
       peerKeys: {},
       plaintext: {},
     }),
+
+  unlockWithPassphrase: async (passphrase) => {
+    const { sodium, pendingBackup, myUserId } = get();
+    if (!sodium || !pendingBackup || !myUserId) return false;
+
+    const keypair = unwrapKeypair(sodium, pendingBackup, passphrase);
+    if (!keypair) return false;
+
+    await saveKeypair(myUserId, keypair);
+    // Drop any cached "can't decrypt" results so bubbles re-attempt with the restored key.
+    set({ keypair, status: "ready", needsBackup: false, pendingBackup: null, plaintext: {} });
+    await publishPublicKey(keypair.publicKey);
+    return true;
+  },
+
+  setupBackup: async (passphrase) => {
+    const { sodium, keypair, status } = get();
+    if (status !== "ready" || !sodium || !keypair) return false;
+
+    try {
+      const backup = wrapKeypair(sodium, keypair, passphrase);
+      await api.put("/keys/backup", { publicKey: keypair.publicKey, backup });
+      set({ needsBackup: false });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  resetKeys: async () => {
+    const { sodium, myUserId } = get();
+    if (!sodium || !myUserId) return;
+
+    const keypair = freshKeypair(sodium);
+    await saveKeypair(myUserId, keypair);
+    // Publishing a NEW key clears the stale server backup, so we immediately need a fresh one.
+    set({ keypair, status: "ready", needsBackup: true, pendingBackup: null, plaintext: {} });
+    await publishPublicKey(keypair.publicKey);
+  },
 
   /** Fetch + cache a peer's public key. Caches null when the peer has none (bot/legacy). */
   fetchPeerKey: async (userId) => {

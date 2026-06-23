@@ -11,8 +11,10 @@
 export { useCryptoStore, type Decryptable, type EncryptResult, type E2EEStatus } from "./cryptoStore";
 export {
   useE2EEInit,
+  useE2EEAccount,
   useDecryptedText,
   usePeerHasKey,
   type DecryptedText,
   type DecryptedState,
+  type E2EEAccount,
 } from "./useE2EE";
