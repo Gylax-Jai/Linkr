@@ -1726,7 +1726,7 @@ function Composer({
           placeholder={isEditing ? "Edit your message..." : stagedFile ? "Add a caption…" : "Type a message..."}
           rows={1}
           aria-label="Message input"
-          className="composer-input min-h-[2.25rem] min-w-0 flex-1 resize-none bg-transparent px-0 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none sm:px-1 sm:py-2"
+          className="composer-input min-h-8 min-w-0 flex-1 resize-none bg-transparent px-0 py-0 text-sm leading-8 text-text placeholder:text-text-muted focus:outline-none sm:min-h-[2.25rem] sm:px-1 sm:py-2 sm:leading-normal"
         />
         <Button
           type="submit"

@@ -148,6 +148,14 @@
   max-height: 8rem;
 }
 
+/* Mobile: strip browser textarea padding so text lines up with icon buttons (32px row). */
+@media (max-width: 639px) {
+  .composer-input {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+}
+
 /* Mobile pane slide */
 @media (max-width: 767px) {
   .pane-slide {
