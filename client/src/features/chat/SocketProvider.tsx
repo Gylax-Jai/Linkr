@@ -3,7 +3,7 @@ import type { ChatListItem, MessageDTO, NotificationDTO } from "@linkr/shared";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { connectSocket, disconnectSocket, getSocket, reconnectSocket } from "@/lib/socket/client";
-import { attachCallIncomingHandler } from "@/features/calls/callIncomingBridge";
+import { attachCallEarlyHandlers } from "@/features/calls/callEarlyHandlers";
 import { refreshPeerProfileInCaches } from "@/features/friends/profileCache";
 import { useAuthStore, useCallStore, useUIStore } from "@/lib/store";
 import { api } from "@/lib/api";
@@ -28,7 +28,16 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     }
 
     const socket = connectSocket(accessToken);
-    const detachCallIncoming = attachCallIncomingHandler(socket);
+
+    let detachCallEarly: (() => void) | undefined;
+    const bindCallEarly = () => {
+      detachCallEarly?.();
+      const s = getSocket();
+      if (!s) return;
+      detachCallEarly = attachCallEarlyHandlers(s);
+    };
+    bindCallEarly();
+    socket.on("connect", bindCallEarly);
 
     const onNewMessage = ({ message }: { message: MessageDTO }) => {
       queryClient.setQueryData<MessageDTO[]>(chatKeys.messages(message.chatId), (old) => {
@@ -188,7 +197,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     socket.on(SOCKET_EVENTS.USER_PROFILE_CHANGED, onProfileChanged);
 
     return () => {
-      detachCallIncoming();
+      socket.off("connect", bindCallEarly);
+      detachCallEarly?.();
       socket.off(SOCKET_EVENTS.MESSAGE_NEW, onNewMessage);
       socket.off(SOCKET_EVENTS.MESSAGE_DELIVERED, onDelivered);
       socket.off(SOCKET_EVENTS.MESSAGE_READ, onRead);

@@ -557,7 +557,13 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
 
         scheduleRingTimeout(io, callId, record);
 
-        logger.info("call:initiate", { callId, callerId: userId, peerId, peerOnline });
+        logger.info("call:initiate", {
+          callId,
+          callerId: userId,
+          peerId,
+          peerOnline,
+          callerSocketId: socket.id,
+        });
         // True "Ringing…" only after call:ringing (callee acked) — Phase 3.1.8.
         ack?.({ ok: true, ringing: false });
       } catch (err) {
@@ -658,6 +664,11 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
   });
 
   socket.on(SOCKET_EVENTS.WEBRTC_OFFER, async (payload: WebRtcSdpPayload) => {
+    logger.info("webrtc:offer received", {
+      callId: payload?.callId,
+      userId,
+      socketId: socket.id,
+    });
     if (payload?.callId) {
       const record = callsById.get(payload.callId);
       if (record) {

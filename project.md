@@ -54,6 +54,7 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Call delivery fix (fetchSockets, pending retry, sync poll) | ✅ Done (Sprint 3.1.8) |
 | Explicit incoming ack + early handler (no Socket.IO server ack) | ✅ Done (Sprint 3.1.9) |
 | Per-socket accept/WebRTC relay + reconnect replay | ✅ Done (Sprint 3.1.10) |
+| Caller handler bind fix + offer diagnostics (3.1.11) | ✅ Done (Sprint 3.1.11) |
 | Mute notifications + archive chats (per-user) | ✅ Done (Phase 4) |
 | Privacy settings UI (last seen / profile / requests) | ✅ Done (Phase 4) |
 | Forward message (friends only) + share contact | ✅ Done (Phase 4) |
@@ -227,6 +228,18 @@ Five self-contained sprints layering social/UX controls and account lifecycle on
   - **Rules:** `@username` always visible. **Picture → Everyone:** all see thumbnail, **only friends zoom**. **Picture → Friends:** strangers see no photo; friends see + zoom. **Picture → Nobody:** photo hidden. **Details → Everyone/Friends/Nobody:** gates name/status/bio independently (display name no longer tied to avatar visibility).
   - **Live sync:** `notifyProfileChanged()` emits **`user:profile-changed`** to friends + 1:1 chat partners on profile/privacy/avatar updates. Client `profileCache.ts` **merges** the refreshed `GET /users/:id/profile` into search, contact card, chat list, and friends caches (no invalidate → no flicker). **15s silent refetch** on `useUserSearch` / `useUserProfile` as fallback for strangers not in a chat.
 
+### Sprint 3.1.11 — Caller handler bind fix + offer diagnostics 📞🔧
+Fixes **accept relayed in Render logs but no `webrtc:offer`** — the caller never sent WebRTC because **`CallProvider` socket handlers were never registered** on first load (React runs child effects before parent `connectSocket()`).
+- **Re-bind on connect:** call handlers attach on socket `connect` + 50ms poll until socket exists.
+- **Early accept/ringing bridge (`callEarlyHandlers.ts`):** dispatches to CallProvider via signaling registry (works before bind completes).
+- **Registry stub:** registry wired at effect start so early `call:accept` never hits an empty handler.
+- **Offer guard + logs:** `[linkr:call]` client logs for accept → ICE → offer; server logs `webrtc:offer received` + `callerSocketId` on initiate.
+
+**Test matrix:**
+1. Place call → accept → Render shows `call:accept relayed` → **`webrtc:offer received`** → `webrtc:answer relayed`.
+2. Caller UI: **Calling… → Ringing… → Connecting… → timer**.
+3. Both sides hear audio (TURN required on cellular — see env).
+
 ### Sprint 3.1.10 — Per-socket accept/WebRTC relay + reconnect replay 📞🔧
 Fixes **incoming rings but accept leaves callee on Connecting / caller stuck on Calling/Ringing** — signaling after accept used `io.to(user:room).emit()` while duplicate/replaced sockets meant the **idle** socket got events and the **call-state** socket missed them.
 - **Per-socket relay:** `call:accept`, `call:reject`, `call:end`, `webrtc:offer`, `webrtc:answer`, and ICE now emit to every live **`fetchSockets()` id** for the peer (same pattern as 3.1.9 incoming).
@@ -247,7 +260,7 @@ Fixes production bug where Render logs showed **`call:delivery callback → acke
 - **Root cause:** `call:incoming` handlers lived in `CallProvider`'s `useEffect`, which mounts **after** `SocketProvider` connects — first emits could land before the listener existed. Server-side ack also failed cluster-wide with zero responses.
 - **`call:incoming-ack` event:** callee emits an explicit ack **after** updating the store (replaces Socket.IO callback ack). Server marks delivered and emits `call:ringing` to the caller.
 - **Per-socket delivery:** server emits to each **`fetchSockets()` id** directly (not room-only + timeout).
-- **Early handler (`callIncomingBridge.ts`):** `SocketProvider` registers `call:incoming` **immediately on connect** — before `CallProvider` mounts.
+- **Early handler (`callEarlyHandlers.ts`):** `SocketProvider` registers `call:incoming` / `call:accept` / `call:ringing` **immediately on connect** — before `CallProvider` binds WebRTC handlers.
 - **Reconnect debounce:** token refresh / visibility reconnect throttled to **30s** when the socket is still connected (updates `auth` in place instead of disconnecting).
 
 **Test matrix:**
