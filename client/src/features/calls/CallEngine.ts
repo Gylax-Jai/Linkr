@@ -1,6 +1,6 @@
 import type { CallMedia } from "@linkr/shared";
 import { applyAudioBitrate, mediaConstraints, tuneOpus } from "./callConfig";
-import { supportsSetSinkId } from "./audioRoute";
+import { isMobilePhone, supportsSetSinkId } from "./audioRoute";
 
 interface CallEngineCallbacks {
   onIceCandidate: (candidate: RTCIceCandidateInit) => void;
@@ -19,6 +19,9 @@ export class CallEngine {
   private localStream: MediaStream | null = null;
   private remoteStream = new MediaStream();
   private remoteAudio: HTMLAudioElement | null = null;
+  private speakerAudioCtx: AudioContext | null = null;
+  private speakerAudioSource: MediaStreamAudioSourceNode | null = null;
+  private mobileSpeakerMode = false;
   private sinkCandidates: string[] = [""];
   private activeSinkId = "";
   private readonly media: CallMedia;
@@ -108,6 +111,29 @@ export class CallEngine {
     return this.activeSinkId;
   }
 
+  /**
+   * Mobile Chrome cannot select earpiece/speaker with setSinkId. Best effort:
+   * normal `<audio>` lets Android route to BT/earpiece; Web Audio often routes via loudspeaker.
+   */
+  async setMobileSpeakerMode(enabled: boolean): Promise<boolean> {
+    if (!isMobilePhone()) return false;
+    this.mobileSpeakerMode = enabled;
+    this.ensureRemoteElement();
+    if (enabled) {
+      return this.playRemoteViaBestEffortSpeaker();
+    }
+    this.stopBestEffortSpeaker();
+    if (this.remoteAudio) {
+      this.remoteAudio.muted = false;
+      this.remoteAudio.volume = 1;
+      if (this.remoteStream.getTracks().length > 0) {
+        this.remoteAudio.srcObject = this.remoteStream;
+      }
+      await this.remoteAudio.play().catch(() => {});
+    }
+    return true;
+  }
+
   async getRoundTripMs(): Promise<number | null> {
     try {
       const stats = await this.pc.getStats();
@@ -171,15 +197,62 @@ export class CallEngine {
       this.remoteAudio.autoplay = true;
     }
     this.remoteAudio.srcObject = this.remoteStream;
-    void this.remoteAudio.play().catch(() => {});
+    if (this.mobileSpeakerMode && isMobilePhone()) {
+      void this.playRemoteViaBestEffortSpeaker();
+    } else {
+      this.remoteAudio.muted = false;
+      this.remoteAudio.volume = 1;
+      void this.remoteAudio.play().catch(() => {});
+    }
     if (supportsSetSinkId() && this.activeSinkId) {
       void this.trySetSink(this.activeSinkId);
+    }
+  }
+
+  private async playRemoteViaBestEffortSpeaker(): Promise<boolean> {
+    if (!this.remoteAudio || this.remoteStream.getTracks().length === 0) return false;
+
+    // Keep the media element attached so Chrome keeps the WebRTC stream flowing, but mute its
+    // direct output to avoid double playback while Web Audio tries the loudspeaker/media route.
+    this.remoteAudio.srcObject = this.remoteStream;
+    this.remoteAudio.muted = true;
+    await this.remoteAudio.play().catch(() => {});
+
+    if (!this.speakerAudioCtx) {
+      this.speakerAudioCtx = new AudioContext();
+    }
+    if (this.speakerAudioSource) {
+      try {
+        this.speakerAudioSource.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    this.speakerAudioSource = this.speakerAudioCtx.createMediaStreamSource(this.remoteStream);
+    this.speakerAudioSource.connect(this.speakerAudioCtx.destination);
+    await this.speakerAudioCtx.resume().catch(() => {});
+    return true;
+  }
+
+  private stopBestEffortSpeaker(): void {
+    if (this.speakerAudioSource) {
+      try {
+        this.speakerAudioSource.disconnect();
+      } catch {
+        /* ignore */
+      }
+      this.speakerAudioSource = null;
     }
   }
 
   close(): void {
     this.localStream?.getTracks().forEach((t) => t.stop());
     this.remoteStream.getTracks().forEach((t) => t.stop());
+    this.stopBestEffortSpeaker();
+    if (this.speakerAudioCtx) {
+      void this.speakerAudioCtx.close();
+      this.speakerAudioCtx = null;
+    }
     if (this.remoteAudio) {
       this.remoteAudio.srcObject = null;
       this.remoteAudio = null;

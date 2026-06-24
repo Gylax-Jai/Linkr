@@ -1,7 +1,6 @@
 /**
  * Audio output routing for calls.
- * Mobile (Sprint 3.1.8): OS routes call audio — BT when connected, earpiece otherwise.
- *   Indicator is read-only; no setSinkId on phone browsers.
+ * Mobile (Sprint 3.1.9): OS routes BT/earpiece; Speaker is a best-effort Web Audio mode.
  * Desktop (Sprint 3.1.7): every audiooutput listed; setSinkId switches for real.
  */
 
@@ -71,13 +70,16 @@ export function canSwitchAudioOutput(): boolean {
   return supportsSetSinkId();
 }
 
-/** Mobile indicator — single detected route (BT or earpiece); no fake Speaker menu. */
+/** Mobile: BT connected stays BT-only; without BT, offer earpiece + best-effort speaker. */
 function buildMobileRoutes(devices: MediaDeviceInfo[]): AudioRoute[] {
   const hasBt = detectBluetoothConnected(devices);
   if (hasBt) {
     return [{ kind: "bluetooth", deviceId: LOGICAL_ROUTE_ID.bluetooth, label: routeLabel("bluetooth") }];
   }
-  return [{ kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") }];
+  return [
+    { kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") },
+    { kind: "speaker", deviceId: LOGICAL_ROUTE_ID.speaker, label: "Speaker (best effort)" },
+  ];
 }
 
 function classifyDesktop(label: string): AudioRouteKind {
@@ -108,6 +110,7 @@ function buildDesktopRoutes(devices: MediaDeviceInfo[]): AudioRoute[] {
 export async function listAudioRoutes(): Promise<AudioRoute[]> {
   const fallbackMobile = [
     { kind: "earpiece" as const, deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") },
+    { kind: "speaker" as const, deviceId: LOGICAL_ROUTE_ID.speaker, label: "Speaker (best effort)" },
   ];
   if (!navigator.mediaDevices?.enumerateDevices) {
     return isMobilePhone() ? fallbackMobile : [{ kind: "speaker", deviceId: "", label: routeLabel("speaker") }];
@@ -210,7 +213,7 @@ export function routeLabel(kind: AudioRouteKind): string {
 
 /** Label shown in the picker — real OS name on desktop, generic kind label on mobile. */
 export function routeDisplayLabel(route: AudioRoute): string {
-  if (isMobilePhone()) return routeLabel(route.kind);
+  if (isMobilePhone()) return route.label || routeLabel(route.kind);
   return route.label || routeLabel(route.kind);
 }
 

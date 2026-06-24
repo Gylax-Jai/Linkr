@@ -17,6 +17,7 @@ import { fetchIceConfig } from "./useIceConfig";
 import { startCallTone, stopCallTone, playEndTone, setCallToneSink, resetCallToneSink } from "./callSounds";
 import { audioConstraints } from "./callConfig";
 import {
+  isMobilePhone,
   listAudioRoutes,
   nextRoute,
   pickPreferredRoute,
@@ -106,10 +107,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       endTimerRef.current = window.setTimeout(() => useCallStore.getState().reset(), 1400);
     };
 
-    /** Apply output route — desktop: setSinkId; mobile: update indicator only (OS routes audio). */
+    /** Apply output route — desktop: setSinkId; mobile: earpiece/BT OS route or best-effort speaker. */
     const applyRoute = (route: AudioRoute, opts?: { forceStore?: boolean; userInitiated?: boolean }) => {
       void (async () => {
         if (!canSwitchAudioOutput()) {
+          const engine = engineRef.current;
+          if (isMobilePhone() && engine) {
+            await engine.setMobileSpeakerMode(route.kind === "speaker");
+          }
           useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
           return;
         }
@@ -296,7 +301,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     };
 
     const cycleAudioRoute: CallActions["cycleAudioRoute"] = () => {
-      if (!canSwitchAudioOutput()) return;
       const routes = routesRef.current;
       if (routes.length <= 1) return;
       applyRoute(nextRoute(routes, useCallStore.getState().audioRoute), { userInitiated: true });
