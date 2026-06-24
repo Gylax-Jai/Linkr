@@ -14,9 +14,18 @@ import { useAuthStore, useCallStore } from "@/lib/store";
 import type { CallEndReason } from "@/lib/store";
 import { CallEngine } from "./CallEngine";
 import { fetchIceConfig } from "./useIceConfig";
-import { startCallTone, stopCallTone, playEndTone } from "./callSounds";
+import { startCallTone, stopCallTone, playEndTone, setCallToneSink, resetCallToneSink } from "./callSounds";
 import { audioConstraints } from "./callConfig";
-import { listAudioRoutes, nextRoute, pickPreferredRoute, findRoute, resolveSinkCandidates, type AudioRoute } from "./audioRoute";
+import {
+  listAudioRoutes,
+  nextRoute,
+  pickPreferredRoute,
+  findRoute,
+  resolveSinkCandidates,
+  supportsSetSinkId,
+  isLogicalRouteId,
+  type AudioRoute,
+} from "./audioRoute";
 import { CallOverlay } from "./CallOverlay";
 import { CallBar } from "./CallBar";
 import { IncomingCallModal } from "./IncomingCallModal";
@@ -67,11 +76,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   /** Lets socket/devicechange handlers call the latest route helpers from useMemo. */
   const routeHelpersRef = useRef<{
     refreshRoutes: (opts?: { initial?: boolean; deviceChange?: boolean }) => Promise<void>;
-    applyRoute: (route: AudioRoute) => void;
+    applyRoute: (route: AudioRoute, opts?: { forceStore?: boolean; userInitiated?: boolean }) => void;
   }>({
     refreshRoutes: async () => {},
     applyRoute: () => {},
   });
+
+  type MediaDevicesWithPicker = MediaDevices & {
+    selectAudioOutput?: (options?: { deviceId?: string }) => Promise<MediaDeviceInfo>;
+  };
 
   const actions = useMemo<CallActions>(() => {
     const emit = (event: string, payload: unknown) => getSocket()?.emit(event, payload);
@@ -82,6 +95,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       pendingOfferRef.current = null;
       pendingIceRef.current = [];
       routesRef.current = [];
+      resetCallToneSink();
       // Release the early mic stream if it was never adopted by an engine.
       earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
       earlyStreamRef.current = null;
@@ -91,12 +105,42 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       endTimerRef.current = window.setTimeout(() => useCallStore.getState().reset(), 1400);
     };
 
-    /** Apply a route to the store + engine (tries real sink ids until output switches). */
-    const applyRoute = (route: AudioRoute) => {
-      useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
+    /** Apply output route — store updates only after setSinkId succeeds (desktop). */
+    const applyRoute = (route: AudioRoute, opts?: { forceStore?: boolean; userInitiated?: boolean }) => {
       void (async () => {
+        let target = route;
         const candidates = await resolveSinkCandidates(route);
-        await engineRef.current?.applyOutputRoute(candidates);
+        let applied = false;
+
+        const engine = engineRef.current;
+        if (engine && supportsSetSinkId()) {
+          applied = await engine.applyOutputRoute(candidates);
+          if (!applied && opts?.userInitiated) {
+            const md = navigator.mediaDevices as MediaDevicesWithPicker;
+            if (typeof md.selectAudioOutput === "function") {
+              try {
+                const pickOpts = !isLogicalRouteId(route.deviceId) ? { deviceId: route.deviceId } : undefined;
+                const picked = await md.selectAudioOutput(pickOpts);
+                applied = await engine.applyOutputRoute([picked.deviceId]);
+                if (applied) target = { ...route, deviceId: picked.deviceId, label: picked.label || route.label };
+              } catch {
+                /* user dismissed browser picker */
+              }
+            }
+          }
+        }
+
+        const sinkForTones = engine?.getActiveSinkId() || candidates[0] || route.deviceId;
+        if (supportsSetSinkId() && sinkForTones && !isLogicalRouteId(sinkForTones)) {
+          const toneOk = await setCallToneSink(sinkForTones);
+          applied = applied || toneOk;
+        }
+
+        if (applied || opts?.forceStore || !supportsSetSinkId()) {
+          useCallStore.getState().setAudioRoute(target.kind, target.deviceId);
+        } else if (opts?.userInitiated) {
+          showNotice("Couldn't switch audio output. Try again or use the browser device picker.");
+        }
       })();
     };
 
@@ -121,15 +165,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       if (opts?.deviceChange && hasBt && !wasBt) {
         const bt = routes.find((r) => r.kind === "bluetooth");
-        if (bt) applyRoute(bt);
+        if (bt) applyRoute(bt, { forceStore: true });
         return;
       }
       if (opts?.deviceChange && !hasBt && wasBt) {
-        applyRoute(routes.find((r) => r.kind === "earpiece") ?? pickPreferredRoute(routes));
+        applyRoute(routes.find((r) => r.kind === "earpiece") ?? pickPreferredRoute(routes), { forceStore: true });
         return;
       }
       if (opts?.initial) {
-        applyRoute(pickPreferredRoute(routes));
+        applyRoute(pickPreferredRoute(routes), { forceStore: true });
         return;
       }
 
@@ -248,12 +292,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const cycleAudioRoute: CallActions["cycleAudioRoute"] = () => {
       const routes = routesRef.current;
       if (routes.length <= 1) return;
-      applyRoute(nextRoute(routes, useCallStore.getState().audioRoute));
+      applyRoute(nextRoute(routes, useCallStore.getState().audioRoute), { userInitiated: true });
     };
 
     const selectAudioRoute: CallActions["selectAudioRoute"] = (deviceIdOrKind) => {
       const route = findRoute(routesRef.current, deviceIdOrKind);
-      if (route) applyRoute(route);
+      if (route) applyRoute(route, { userInitiated: true });
     };
 
     const minimize: CallActions["minimize"] = () => useCallStore.getState().minimize();

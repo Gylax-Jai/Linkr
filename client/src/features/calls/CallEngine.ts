@@ -1,22 +1,18 @@
 import type { CallMedia } from "@linkr/shared";
 import { applyAudioBitrate, mediaConstraints, tuneOpus } from "./callConfig";
-import { isMobilePhone } from "./audioRoute";
+import { isMobilePhone, supportsSetSinkId } from "./audioRoute";
 
 interface CallEngineCallbacks {
-  /** A locally-gathered ICE candidate to relay to the peer (trickle ICE). */
   onIceCandidate: (candidate: RTCIceCandidateInit) => void;
-  /** The peer connection state changed (drives connected/failed transitions). */
   onConnectionStateChange: (state: RTCPeerConnectionState) => void;
-  /** The first remote track arrived (call is producing media). */
   onRemoteStream: (stream: MediaStream) => void;
 }
 
-type SinkCapable = { setSinkId?: (id: string) => Promise<void> };
+type SinkCapable = { setSinkId?: (id: string) => Promise<void>; sinkId?: string };
 
 /**
- * Thin, quality-tuned wrapper around RTCPeerConnection for 1:1 calls. Handles local capture,
- * Opus tuning, trickle ICE and remote playback. Signaling (who sends what to whom) lives in the
- * CallProvider; the engine is transport-only and has no knowledge of sockets.
+ * Thin WebRTC wrapper for 1:1 calls. Desktop output switching uses the Chromium detach →
+ * setSinkId → reattach pattern so BT → laptop speakers actually moves audio.
  */
 export class CallEngine {
   private pc: RTCPeerConnection;
@@ -27,6 +23,8 @@ export class CallEngine {
   private audioSource: MediaStreamAudioSourceNode | null = null;
   /** Ordered sink ids to try (from resolveSinkCandidates). */
   private sinkCandidates: string[] = [""];
+  /** Last sink id applied successfully — re-applied when the remote element is (re)created. */
+  private activeSinkId = "";
   private readonly useWebAudio = isMobilePhone();
   private readonly media: CallMedia;
   private readonly cb: CallEngineCallbacks;
@@ -36,7 +34,6 @@ export class CallEngine {
     this.cb = callbacks;
     this.pc = new RTCPeerConnection({
       iceServers,
-      // Bundle + rtcp-mux keep ports minimal and connect faster.
       bundlePolicy: "max-bundle",
       rtcpMuxPolicy: "require",
     });
@@ -54,12 +51,6 @@ export class CallEngine {
     };
   }
 
-  /**
-   * Capture the local mic (and camera for video) and attach tracks to the connection. An already-
-   * captured `preloaded` audio stream (e.g. the caller's early mic grab, which unlocks device labels
-   * while "Calling…") is reused for audio calls to avoid a second permission prompt; video always
-   * (re)captures so the camera is included.
-   */
   async startLocalMedia(preloaded?: MediaStream | null): Promise<void> {
     this.localStream =
       preloaded && this.media === "audio" && preloaded.getAudioTracks().length > 0
@@ -71,12 +62,10 @@ export class CallEngine {
     }
   }
 
-  /** Whether the local mic stream has been captured (so mute can apply pre-connect). */
   hasLocalMedia(): boolean {
     return this.localStream !== null;
   }
 
-  /** Caller: create + return a quality-tuned offer. */
   async createOffer(): Promise<RTCSessionDescriptionInit> {
     const offer = await this.pc.createOffer();
     offer.sdp = offer.sdp ? tuneOpus(offer.sdp) : offer.sdp;
@@ -84,7 +73,6 @@ export class CallEngine {
     return offer;
   }
 
-  /** Callee: create + return a quality-tuned answer (call after setting the remote offer). */
   async createAnswer(): Promise<RTCSessionDescriptionInit> {
     const answer = await this.pc.createAnswer();
     answer.sdp = answer.sdp ? tuneOpus(answer.sdp) : answer.sdp;
@@ -100,11 +88,10 @@ export class CallEngine {
     try {
       await this.pc.addIceCandidate(candidate);
     } catch {
-      // Candidates can arrive before the remote description; browsers buffer most, ignore races.
+      /* races with remote description */
     }
   }
 
-  /** Mute/unmute the local mic by toggling track enabled (keeps the connection up). */
   setMuted(muted: boolean): void {
     this.localStream?.getAudioTracks().forEach((t) => {
       t.enabled = !muted;
@@ -112,20 +99,23 @@ export class CallEngine {
   }
 
   /**
-   * Apply an ordered list of sink ids until one succeeds. On mobile we route through Web Audio
-   * (`AudioContext.setSinkId`) because Android Chrome often ignores `HTMLAudioElement.setSinkId`.
+   * Try each candidate sink id until one applies. Returns true if any candidate succeeded.
+   * Creates the playback element early on desktop so routing works before the remote track arrives.
    */
-  async applyOutputRoute(candidates: string[]): Promise<void> {
+  async applyOutputRoute(candidates: string[]): Promise<boolean> {
     this.sinkCandidates = candidates.length ? candidates : [""];
-    await this.applySinkCandidates();
+    this.ensureRemoteElement();
+    return this.applySinkCandidates();
   }
 
-  /** Single sink id — wraps applyOutputRoute for callers that only have one id. */
-  async setSinkId(deviceId: string): Promise<void> {
-    await this.applyOutputRoute([deviceId]);
+  async setSinkId(deviceId: string): Promise<boolean> {
+    return this.applyOutputRoute([deviceId]);
   }
 
-  /** A simple connection-quality read for the in-call indicator (RTT in ms, or null). */
+  getActiveSinkId(): string {
+    return this.activeSinkId;
+  }
+
   async getRoundTripMs(): Promise<number | null> {
     try {
       const stats = await this.pc.getStats();
@@ -141,39 +131,55 @@ export class CallEngine {
     }
   }
 
-  private async applySinkCandidates(): Promise<void> {
-    for (const id of this.sinkCandidates) {
-      if (await this.trySetSink(id)) return;
+  private ensureRemoteElement(): void {
+    if (this.useWebAudio || this.remoteAudio) return;
+    this.remoteAudio = new Audio();
+    this.remoteAudio.autoplay = true;
+    if (this.remoteStream.getTracks().length > 0) {
+      this.remoteAudio.srcObject = this.remoteStream;
     }
   }
 
+  private async applySinkCandidates(): Promise<boolean> {
+    for (const id of this.sinkCandidates) {
+      if (await this.trySetSink(id)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Chromium: detach srcObject → setSinkId → reattach → play.
+   * Without detach, switching away from Bluetooth often keeps audio on the BT device.
+   */
   private async trySetSink(deviceId: string): Promise<boolean> {
-    if (this.useWebAudio && this.audioCtx) {
-      const ctx = this.audioCtx as AudioContext & SinkCapable;
-      if (typeof ctx.setSinkId === "function") {
-        try {
-          await ctx.setSinkId(deviceId);
-          return true;
-        } catch {
-          /* try next candidate / fallback path */
-        }
-      }
+    if (this.useWebAudio) {
+      return false;
     }
 
     const el = this.remoteAudio as (HTMLAudioElement & SinkCapable) | null;
-    if (el) {
-      el.volume = 1;
-      if (typeof el.setSinkId === "function") {
-        try {
-          await el.setSinkId(deviceId);
-          return true;
-        } catch {
-          /* try next candidate */
-        }
-      }
+    if (!el || typeof el.setSinkId !== "function") {
+      return !supportsSetSinkId();
     }
 
-    return false;
+    el.volume = 1;
+    const stream = el.srcObject as MediaStream | null;
+
+    try {
+      if (stream) el.srcObject = null;
+      await el.setSinkId(deviceId);
+      if (stream) {
+        el.srcObject = stream;
+        await el.play();
+      }
+      this.activeSinkId = deviceId;
+      return true;
+    } catch {
+      if (stream && el.srcObject !== stream) {
+        el.srcObject = stream;
+        void el.play().catch(() => {});
+      }
+      return false;
+    }
   }
 
   private playRemote(): void {
@@ -186,6 +192,7 @@ export class CallEngine {
   }
 
   private playRemoteViaWebAudio(): void {
+    /* Mobile only — Web Audio lacks setSinkId on phone browsers; OS owns routing. */
     if (!this.audioCtx) {
       this.audioCtx = new AudioContext();
     }
@@ -207,12 +214,12 @@ export class CallEngine {
       this.remoteAudio.autoplay = true;
     }
     this.remoteAudio.srcObject = this.remoteStream;
-    void this.remoteAudio.play().catch(() => {
-      /* Autoplay may be blocked until a user gesture; the accept/start click satisfies it. */
-    });
+    void this.remoteAudio.play().catch(() => {});
+    if (this.activeSinkId) {
+      void this.trySetSink(this.activeSinkId);
+    }
   }
 
-  /** Tear everything down: stop local capture, stop playback, close the connection. */
   close(): void {
     this.localStream?.getTracks().forEach((t) => t.stop());
     this.remoteStream.getTracks().forEach((t) => t.stop());

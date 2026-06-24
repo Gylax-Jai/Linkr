@@ -3,7 +3,7 @@ import { Bluetooth, Check, ChevronDown, Headphones, Phone, Speaker, Volume2 } fr
 import type { LucideIcon } from "lucide-react";
 import { useCallStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { routeLabel, type AudioRouteKind } from "./audioRoute";
+import { routeLabel, routeDisplayLabel, type AudioRouteKind } from "./audioRoute";
 import { useCallActions } from "./CallProvider";
 
 const ROUTE_ICON: Record<AudioRouteKind, LucideIcon> = {
@@ -115,7 +115,7 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
                 )}
               >
                 <RIcon className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{routeLabel(r.kind)}</span>
+                <span className="min-w-0 flex-1 truncate">{routeDisplayLabel(r)}</span>
                 {active ? <Check className="h-4 w-4 shrink-0 text-primary" /> : null}
               </button>
             );

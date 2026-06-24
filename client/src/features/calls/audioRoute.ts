@@ -1,8 +1,7 @@
 /**
- * Audio output routing for calls. Mobile menu is intentionally simple:
- *   BT connected → Bluetooth (default) + Earpiece + Speaker
- *   BT off       → Earpiece (default) + Speaker
- * `resolveSinkCandidates` maps logical picks to real device ids; CallEngine tries each until one works.
+ * Audio output routing for calls.
+ * Mobile: logical menu (BT / Earpiece / Speaker) — switching is OS-controlled on phone browsers.
+ * Desktop: every `audiooutput` device listed; `setSinkId` uses the exact id from the menu.
  */
 
 export type AudioRouteKind = "bluetooth" | "headset" | "speaker" | "earpiece" | "default";
@@ -22,8 +21,9 @@ export const LOGICAL_ROUTE_ID = {
 
 const BLUETOOTH_RE =
   /bluetooth|airpod|buds|wireless|\bbt\b|\btws\b|handsfree|jabra|jbl|boat|sony wf|galaxy buds|wh-1000|qc35|qc45/;
-const SPEAKER_RE = /speaker|loud|speakerphone/;
+const SPEAKER_RE = /speaker|loud|speakerphone|realtek|display audio|monitor|hdmi/;
 const EARPIECE_RE = /earpiece|receiver|telephone|handset|phone call|in-call|communications/;
+const HEADSET_RE = /headphone|headset|earbud|earphone/i;
 
 /** Built-in mics — never treat as external BT/wired. */
 const BUILTIN_RE =
@@ -34,7 +34,11 @@ export function isMobilePhone(): boolean {
   return /Android|iPhone|iPod/i.test(navigator.userAgent);
 }
 
-/** Runtime check — Android Chrome may support setSinkId on instances without prototype entry. */
+export function isLogicalRouteId(deviceId: string): boolean {
+  return Object.values(LOGICAL_ROUTE_ID).includes(deviceId as (typeof LOGICAL_ROUTE_ID)[keyof typeof LOGICAL_ROUTE_ID]);
+}
+
+/** Runtime check — desktop Chromium supports setSinkId; mobile Chrome does not. */
 export function supportsSetSinkId(): boolean {
   if (typeof document === "undefined") return false;
   const el = document.createElement("audio");
@@ -61,11 +65,7 @@ function findBluetoothGroupId(devices: MediaDeviceInfo[]): string | null {
   return bt?.groupId ?? null;
 }
 
-/**
- * Mobile dropdown — never includes "Headset" unless we add wired support later.
- * BT on:  Bluetooth + Earpiece + Speaker
- * BT off: Earpiece + Speaker
- */
+/** Mobile dropdown — BT on: Bluetooth + Earpiece + Speaker; BT off: Earpiece + Speaker. */
 function buildMobileRoutes(devices: MediaDeviceInfo[]): AudioRoute[] {
   const hasBt = detectBluetoothConnected(devices);
   const routes: AudioRoute[] = [];
@@ -80,25 +80,26 @@ function buildMobileRoutes(devices: MediaDeviceInfo[]): AudioRoute[] {
 function classifyDesktop(label: string): AudioRouteKind {
   const l = label.toLowerCase();
   if (BLUETOOTH_RE.test(l)) return "bluetooth";
+  if (HEADSET_RE.test(l) && !SPEAKER_RE.test(l)) return "headset";
   if (SPEAKER_RE.test(l)) return "speaker";
   if (EARPIECE_RE.test(l)) return "earpiece";
   return "default";
 }
 
+/** Desktop: list every audio output with its real device id and OS label. */
 function buildDesktopRoutes(devices: MediaDeviceInfo[]): AudioRoute[] {
   const outputs = devices.filter((d) => d.kind === "audiooutput");
-  const byKind = new Map<AudioRouteKind, AudioRoute>();
-  for (const d of outputs) {
-    const kind = classifyDesktop(d.label);
-    if (kind === "default") continue;
-    const existing = byKind.get(kind);
-    if (!existing || (!existing.deviceId && d.deviceId)) {
-      byKind.set(kind, { kind, deviceId: d.deviceId, label: d.label || routeLabel(kind) });
-    }
+  if (outputs.length === 0) {
+    return [{ kind: "speaker", deviceId: "", label: routeLabel("speaker") }];
   }
-  const routes = [...byKind.values()];
-  if (routes.length === 0) routes.push({ kind: "speaker", deviceId: "", label: routeLabel("speaker") });
-  return routes;
+  return outputs.map((d) => {
+    const kind = classifyDesktop(d.label);
+    return {
+      kind,
+      deviceId: d.deviceId,
+      label: d.label.trim() || routeLabel(kind),
+    };
+  });
 }
 
 export async function listAudioRoutes(): Promise<AudioRoute[]> {
@@ -118,21 +119,29 @@ export async function listAudioRoutes(): Promise<AudioRoute[]> {
 }
 
 export function pickPreferredRoute(routes: AudioRoute[]): AudioRoute {
-  const order: AudioRouteKind[] = isMobilePhone()
-    ? ["bluetooth", "earpiece", "speaker"]
-    : ["bluetooth", "headset", "earpiece", "speaker", "default"];
-  for (const kind of order) {
-    const match = routes.find((r) => r.kind === kind);
-    if (match) return match;
+  if (isMobilePhone()) {
+    for (const kind of ["bluetooth", "earpiece", "speaker"] as AudioRouteKind[]) {
+      const match = routes.find((r) => r.kind === kind);
+      if (match) return match;
+    }
+    return routes[0] ?? { kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") };
   }
-  return routes[0] ?? { kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") };
+  const bt = routes.find((r) => r.kind === "bluetooth");
+  if (bt) return bt;
+  const speaker = routes.find((r) => r.kind === "speaker" || r.kind === "default");
+  return speaker ?? routes[0] ?? { kind: "default", deviceId: "", label: routeLabel("default") };
 }
 
 /**
- * Ordered sink ids to try for a logical route. CallEngine walks the list until `setSinkId` succeeds.
- * Works even when the browser exposes sparse output labels (common on Android).
+ * Sink ids to try for a route. Desktop uses the exact menu device id only (no "" fallback —
+ * on Windows "" = system default, which is often still the BT earbuds).
+ * Mobile uses logical resolution for sparse Android labels.
  */
 export async function resolveSinkCandidates(route: AudioRoute): Promise<string[]> {
+  if (route.deviceId && !isLogicalRouteId(route.deviceId)) {
+    return [route.deviceId];
+  }
+
   if (!navigator.mediaDevices?.enumerateDevices) {
     return route.kind === "speaker" ? [""] : ["default", ""];
   }
@@ -146,7 +155,6 @@ export async function resolveSinkCandidates(route: AudioRoute): Promise<string[]
         const ids = outputs
           .filter((d) => SPEAKER_RE.test(d.label.toLowerCase()))
           .map((d) => d.deviceId);
-        // Non-default, non-communications outputs are often the loudspeaker on Android.
         const alt = outputs
           .filter((d) => d.deviceId !== "default" && d.deviceId !== "communications" && !BLUETOOTH_RE.test(d.label))
           .map((d) => d.deviceId);
@@ -165,7 +173,6 @@ export async function resolveSinkCandidates(route: AudioRoute): Promise<string[]
               BLUETOOTH_RE.test(d.label.toLowerCase()) || (btGroup && d.groupId === btGroup),
           )
           .map((d) => d.deviceId);
-        // Fall back to default — OS routes to BT when connected.
         return [...new Set([...ids, "default", ""])];
       }
       default:
@@ -176,7 +183,7 @@ export async function resolveSinkCandidates(route: AudioRoute): Promise<string[]
   }
 }
 
-/** @deprecated Use resolveSinkCandidates — kept for compatibility. */
+/** Primary sink id for a route (first candidate). */
 export async function resolveSinkId(route: AudioRoute): Promise<string> {
   const candidates = await resolveSinkCandidates(route);
   return candidates[0] ?? "";
@@ -195,6 +202,12 @@ export function routeLabel(kind: AudioRouteKind): string {
     default:
       return "Default";
   }
+}
+
+/** Label shown in the picker — real OS name on desktop, generic kind label on mobile. */
+export function routeDisplayLabel(route: AudioRoute): string {
+  if (isMobilePhone()) return routeLabel(route.kind);
+  return route.label || routeLabel(route.kind);
 }
 
 export function findRoute(routes: AudioRoute[], deviceIdOrKind: string): AudioRoute | undefined {
