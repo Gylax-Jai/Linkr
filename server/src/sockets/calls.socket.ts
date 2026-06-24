@@ -25,12 +25,15 @@ import { requireSocketUser } from "./auth.socket.js";
 const RING_TIMEOUT_MS = 35_000;
 /** Safety TTL — clears ghost in-memory calls that never received CALL_END (Phase 4.2). */
 const MAX_CALL_MS = 3 * 60_000;
+/** Grace after ring timeout before pruning unanswered ghost sessions. */
+const STALE_RING_GRACE_MS = 5_000;
 
 interface CallRecord {
   caller: string;
   callee: string;
   chatId: string;
   media: CallMedia;
+  startedAt: number;
   acceptedAt?: number;
   ringTimeout?: ReturnType<typeof setTimeout>;
   maxTimeout?: ReturnType<typeof setTimeout>;
@@ -71,14 +74,32 @@ function untrackCall(callId: string): CallRecord | undefined {
   return parts;
 }
 
-function isBusy(userId: string): boolean {
-  const set = callsByUser.get(userId);
-  return !!set && set.size > 0;
-}
-
 function clearTimers(parts: CallRecord): void {
   if (parts.ringTimeout) clearTimeout(parts.ringTimeout);
   if (parts.maxTimeout) clearTimeout(parts.maxTimeout);
+}
+
+/** Drop ghost sessions that outlived their ring / safety window (fixes phantom BUSY). */
+function pruneStaleCalls(): void {
+  const now = Date.now();
+  for (const [callId, record] of callsById) {
+    const age = now - record.startedAt;
+    if (record.acceptedAt && age > MAX_CALL_MS + STALE_RING_GRACE_MS) {
+      clearTimers(record);
+      untrackCall(callId);
+      continue;
+    }
+    if (!record.acceptedAt && age > RING_TIMEOUT_MS + STALE_RING_GRACE_MS) {
+      clearTimers(record);
+      untrackCall(callId);
+    }
+  }
+}
+
+function isBusy(userId: string): boolean {
+  pruneStaleCalls();
+  const set = callsByUser.get(userId);
+  return !!set && set.size > 0;
 }
 
 function finalizeCall(callId: string | undefined, outcome: CallOutcome): void {
@@ -101,11 +122,22 @@ function finalizeCall(callId: string | undefined, outcome: CallOutcome): void {
 
 function scheduleSafetyTimeout(io: Server, callId: string, record: CallRecord): void {
   record.maxTimeout = setTimeout(() => {
-    if (!callsById.has(callId)) return;
-    io.to(`user:${record.caller}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: record.chatId });
-    io.to(`user:${record.callee}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: record.chatId });
-    finalizeCall(callId, record.acceptedAt ? "completed" : "missed");
+    const rec = callsById.get(callId);
+    if (!rec) return;
+    io.to(`user:${rec.caller}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: rec.chatId });
+    io.to(`user:${rec.callee}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: rec.chatId });
+    finalizeCall(callId, rec.acceptedAt ? "completed" : "missed");
   }, MAX_CALL_MS);
+}
+
+function scheduleRingTimeout(io: Server, callId: string, record: CallRecord): void {
+  record.ringTimeout = setTimeout(() => {
+    const rec = callsById.get(callId);
+    if (!rec || rec.acceptedAt) return;
+    io.to(`user:${rec.caller}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: rec.chatId });
+    io.to(`user:${rec.callee}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: rec.chatId });
+    finalizeCall(callId, "missed");
+  }, RING_TIMEOUT_MS);
 }
 
 /** Deliver a call that was initiated while the callee's socket was offline (Phase 4.2). */
@@ -169,7 +201,13 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
         const peerSockets = await io.in(`user:${peerId}`).fetchSockets();
         const peerOnline = peerSockets.length > 0;
 
-        const record: CallRecord = { caller: userId, callee: peerId, chatId, media };
+        const record: CallRecord = {
+          caller: userId,
+          callee: peerId,
+          chatId,
+          media,
+          startedAt: Date.now(),
+        };
         trackCall(callId, record);
         scheduleSafetyTimeout(io, callId, record);
 
@@ -191,11 +229,7 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
           });
         }
 
-        record.ringTimeout = setTimeout(() => {
-          io.to(`user:${record.caller}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
-          io.to(`user:${record.callee}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
-          finalizeCall(callId, "missed");
-        }, RING_TIMEOUT_MS);
+        scheduleRingTimeout(io, callId, record);
 
         ack?.({ ok: true, ringing: peerOnline });
       } catch (err) {
@@ -221,6 +255,7 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
       if (record && !record.acceptedAt) {
         record.acceptedAt = Date.now();
         if (record.ringTimeout) clearTimeout(record.ringTimeout);
+        record.ringTimeout = undefined;
         pendingIncoming.delete(payload.callId);
       }
       await relayToPeer(SOCKET_EVENTS.CALL_ACCEPT, payload);
@@ -236,9 +271,15 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
 
   socket.on(SOCKET_EVENTS.CALL_END, (payload: CallSignalPayload) => {
     void (async () => {
-      await relayToPeer(SOCKET_EVENTS.CALL_END, payload);
       const record = payload?.callId ? callsById.get(payload.callId) : undefined;
-      finalizeCall(payload?.callId, record?.acceptedAt ? "completed" : "cancelled");
+      await relayToPeer(SOCKET_EVENTS.CALL_END, payload);
+      if (!record) return;
+      const outcome: CallOutcome = record.acceptedAt
+        ? "completed"
+        : record.caller === userId
+          ? "cancelled"
+          : "declined";
+      finalizeCall(payload?.callId, outcome);
     })();
   });
 
@@ -270,7 +311,12 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
           callId,
           chatId: parts.chatId,
         } satisfies CallSignalPayload);
-        finalizeCall(callId, parts.acceptedAt ? "completed" : "missed");
+        const outcome: CallOutcome = parts.acceptedAt
+          ? "completed"
+          : parts.caller === userId
+            ? "cancelled"
+            : "missed";
+        finalizeCall(callId, outcome);
       }
     })();
   });

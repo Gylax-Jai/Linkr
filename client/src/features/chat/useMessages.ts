@@ -187,8 +187,12 @@ export function useDeleteMessageMutation(chatId: string | null) {
         );
       } else {
         patchCachedMessage(queryClient, chatId, message);
+        queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+          const next = patchListLastMessage(old, chatId, message);
+          if (next && next !== old) writeCachedChatList(next);
+          return next;
+        });
       }
-      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
     },
   });
 }

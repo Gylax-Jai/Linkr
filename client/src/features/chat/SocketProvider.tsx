@@ -7,7 +7,7 @@ import { useAuthStore, useUIStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { notificationKeys } from "@/features/notifications";
 import { chatKeys } from "./useChats";
-import { writeCachedChatList } from "./chatListCache";
+import { patchAndSortLastMessage, writeCachedChatList } from "./chatListCache";
 
 /**
  * Connects Socket.IO when authenticated and keeps React Query caches in sync with realtime events.
@@ -43,21 +43,25 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
       if (viewingThisChat) {
         queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
-          if (!old) return old;
-          const next = old.map((c) =>
-            c._id === message.chatId ? { ...c, lastMessage: message, unreadCount: 0 } : c,
-          );
-          writeCachedChatList(next);
-          return next;
+          const next = patchAndSortLastMessage(old, message.chatId, message);
+          if (next) {
+            const bumped = next.map((c) =>
+              c._id === message.chatId ? { ...c, unreadCount: 0 } : c,
+            );
+            writeCachedChatList(bumped);
+            return bumped;
+          }
+          return old;
         });
       } else {
         queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
-          if (!old) return old;
           const userId = useAuthStore.getState().user?._id;
-          const next = old.map((c) => {
+          const patched = patchAndSortLastMessage(old, message.chatId, message);
+          if (!patched) return old;
+          const next = patched.map((c) => {
             if (c._id !== message.chatId) return c;
             const unread = message.sender !== userId ? (c.unreadCount ?? 0) + 1 : c.unreadCount;
-            return { ...c, lastMessage: message, unreadCount: unread };
+            return { ...c, unreadCount: unread };
           });
           writeCachedChatList(next);
           return next;
@@ -99,14 +103,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         old?.map((m) => (m._id === message._id ? message : m)),
       );
       queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
-        if (!old) return old;
-        const next = old.map((c) =>
-          c._id === message.chatId && c.lastMessage?._id === message._id
-            ? { ...c, lastMessage: message }
-            : c,
-        );
-        writeCachedChatList(next);
-        return next;
+        const next = patchAndSortLastMessage(old, message.chatId, message);
+        if (next) writeCachedChatList(next);
+        return next ?? old;
       });
     };
 

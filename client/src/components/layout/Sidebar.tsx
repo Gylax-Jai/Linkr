@@ -42,34 +42,26 @@ import {
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { useDecryptedText } from "@/lib/crypto";
 import { formatChatListTime } from "@/lib/utils/formatTime";
+import { formatMessagePreview } from "@/lib/utils/messagePreview";
 import { showOnlineDot } from "@/lib/utils/privacy";
 import { cn } from "@/lib/utils";
 
 function ChatPreview({ chat, userId }: { chat: ChatListItem; userId: string }) {
   const last = chat.lastMessage;
-  // Decrypt the last-message preview when it's an E2EE body (Phase 2). Hook runs unconditionally.
-  const body = useDecryptedText(
-    last && last.content ? { id: last._id, content: last.content, encrypted: last.encrypted } : null,
-  );
   if (!last) return "No messages yet";
-  const prefix = last.sender === userId ? "You: " : "";
-  if (last.type === "call") {
-    const kind = last.call?.media === "video" ? "Video call" : "Voice call";
-    if (!last.call) return `${prefix}📞 ${kind}`;
-    if (last.call.outcome === "missed" || last.call.outcome === "cancelled") {
-      return last.sender === userId ? `📞 ${kind} (no answer)` : `📞 Missed ${kind.toLowerCase()}`;
-    }
-    if (last.call.outcome === "declined") return `📞 ${kind} declined`;
-    return `📞 ${kind}`;
-  }
-  if (last.content) {
-    if (body.state === "pending") return `${prefix}Decrypting…`;
-    if (body.state === "failed") return `${prefix}🔒 Encrypted message`;
-    return `${prefix}${body.text}`;
-  }
-  if (last.mediaType === "image") return `${prefix}📷 Photo`;
-  if (last.mediaUrl) return `${prefix}📎 ${last.mediaName ?? "File"}`;
-  return "No messages yet";
+  // Decrypt the last-message preview when it's an E2EE body (Phase 2). Skip deleted rows.
+  const body = useDecryptedText(
+    last.content && !last.deletedForEveryone
+      ? { id: last._id, content: last.content, encrypted: last.encrypted }
+      : null,
+  );
+  const decrypted =
+    body.state === "pending"
+      ? ({ state: "pending" } as const)
+      : body.state === "failed"
+        ? ({ state: "failed" } as const)
+        : ({ state: "plain", text: body.text } as const);
+  return formatMessagePreview(last, userId, decrypted);
 }
 
 function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean; userId: string }) {
