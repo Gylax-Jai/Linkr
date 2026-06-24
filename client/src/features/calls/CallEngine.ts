@@ -1,6 +1,6 @@
 import type { CallMedia } from "@linkr/shared";
 import { applyAudioBitrate, mediaConstraints, tuneOpus } from "./callConfig";
-import { isMobilePhone, supportsSetSinkId } from "./audioRoute";
+import { supportsSetSinkId } from "./audioRoute";
 
 interface CallEngineCallbacks {
   onIceCandidate: (candidate: RTCIceCandidateInit) => void;
@@ -11,21 +11,16 @@ interface CallEngineCallbacks {
 type SinkCapable = { setSinkId?: (id: string) => Promise<void>; sinkId?: string };
 
 /**
- * Thin WebRTC wrapper for 1:1 calls. Desktop output switching uses the Chromium detach →
- * setSinkId → reattach pattern so BT → laptop speakers actually moves audio.
+ * WebRTC wrapper for 1:1 calls. All platforms play remote audio through a plain `<audio>` element
+ * so mobile OS can route to Bluetooth / earpiece. Desktop switching uses setSinkId (Sprint 3.1.7).
  */
 export class CallEngine {
   private pc: RTCPeerConnection;
   private localStream: MediaStream | null = null;
   private remoteStream = new MediaStream();
   private remoteAudio: HTMLAudioElement | null = null;
-  private audioCtx: AudioContext | null = null;
-  private audioSource: MediaStreamAudioSourceNode | null = null;
-  /** Ordered sink ids to try (from resolveSinkCandidates). */
   private sinkCandidates: string[] = [""];
-  /** Last sink id applied successfully — re-applied when the remote element is (re)created. */
   private activeSinkId = "";
-  private readonly useWebAudio = isMobilePhone();
   private readonly media: CallMedia;
   private readonly cb: CallEngineCallbacks;
 
@@ -98,11 +93,8 @@ export class CallEngine {
     });
   }
 
-  /**
-   * Try each candidate sink id until one applies. Returns true if any candidate succeeded.
-   * Creates the playback element early on desktop so routing works before the remote track arrives.
-   */
   async applyOutputRoute(candidates: string[]): Promise<boolean> {
+    if (!supportsSetSinkId()) return false;
     this.sinkCandidates = candidates.length ? candidates : [""];
     this.ensureRemoteElement();
     return this.applySinkCandidates();
@@ -132,7 +124,7 @@ export class CallEngine {
   }
 
   private ensureRemoteElement(): void {
-    if (this.useWebAudio || this.remoteAudio) return;
+    if (this.remoteAudio) return;
     this.remoteAudio = new Audio();
     this.remoteAudio.autoplay = true;
     if (this.remoteStream.getTracks().length > 0) {
@@ -147,19 +139,10 @@ export class CallEngine {
     return false;
   }
 
-  /**
-   * Chromium: detach srcObject → setSinkId → reattach → play.
-   * Without detach, switching away from Bluetooth often keeps audio on the BT device.
-   */
+  /** Chromium desktop: detach srcObject → setSinkId → reattach → play. */
   private async trySetSink(deviceId: string): Promise<boolean> {
-    if (this.useWebAudio) {
-      return false;
-    }
-
     const el = this.remoteAudio as (HTMLAudioElement & SinkCapable) | null;
-    if (!el || typeof el.setSinkId !== "function") {
-      return !supportsSetSinkId();
-    }
+    if (!el || typeof el.setSinkId !== "function") return false;
 
     el.volume = 1;
     const stream = el.srcObject as MediaStream | null;
@@ -183,39 +166,13 @@ export class CallEngine {
   }
 
   private playRemote(): void {
-    if (this.useWebAudio) {
-      this.playRemoteViaWebAudio();
-    } else {
-      this.playRemoteViaElement();
-    }
-    void this.applySinkCandidates();
-  }
-
-  private playRemoteViaWebAudio(): void {
-    /* Mobile only — Web Audio lacks setSinkId on phone browsers; OS owns routing. */
-    if (!this.audioCtx) {
-      this.audioCtx = new AudioContext();
-    }
-    if (this.audioSource) {
-      try {
-        this.audioSource.disconnect();
-      } catch {
-        /* already disconnected */
-      }
-    }
-    this.audioSource = this.audioCtx.createMediaStreamSource(this.remoteStream);
-    this.audioSource.connect(this.audioCtx.destination);
-    void this.audioCtx.resume();
-  }
-
-  private playRemoteViaElement(): void {
     if (!this.remoteAudio) {
       this.remoteAudio = new Audio();
       this.remoteAudio.autoplay = true;
     }
     this.remoteAudio.srcObject = this.remoteStream;
     void this.remoteAudio.play().catch(() => {});
-    if (this.activeSinkId) {
+    if (supportsSetSinkId() && this.activeSinkId) {
       void this.trySetSink(this.activeSinkId);
     }
   }
@@ -223,18 +180,6 @@ export class CallEngine {
   close(): void {
     this.localStream?.getTracks().forEach((t) => t.stop());
     this.remoteStream.getTracks().forEach((t) => t.stop());
-    if (this.audioSource) {
-      try {
-        this.audioSource.disconnect();
-      } catch {
-        /* ignore */
-      }
-      this.audioSource = null;
-    }
-    if (this.audioCtx) {
-      void this.audioCtx.close();
-      this.audioCtx = null;
-    }
     if (this.remoteAudio) {
       this.remoteAudio.srcObject = null;
       this.remoteAudio = null;

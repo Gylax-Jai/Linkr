@@ -1,7 +1,8 @@
 /**
  * Audio output routing for calls.
- * Mobile: logical menu (BT / Earpiece / Speaker) — switching is OS-controlled on phone browsers.
- * Desktop: every `audiooutput` device listed; `setSinkId` uses the exact id from the menu.
+ * Mobile (Sprint 3.1.8): OS routes call audio — BT when connected, earpiece otherwise.
+ *   Indicator is read-only; no setSinkId on phone browsers.
+ * Desktop (Sprint 3.1.7): every audiooutput listed; setSinkId switches for real.
  */
 
 export type AudioRouteKind = "bluetooth" | "headset" | "speaker" | "earpiece" | "default";
@@ -65,16 +66,18 @@ function findBluetoothGroupId(devices: MediaDeviceInfo[]): string | null {
   return bt?.groupId ?? null;
 }
 
-/** Mobile dropdown — BT on: Bluetooth + Earpiece + Speaker; BT off: Earpiece + Speaker. */
+/** Whether the app can programmatically switch call audio (desktop Chromium only). */
+export function canSwitchAudioOutput(): boolean {
+  return supportsSetSinkId();
+}
+
+/** Mobile indicator — single detected route (BT or earpiece); no fake Speaker menu. */
 function buildMobileRoutes(devices: MediaDeviceInfo[]): AudioRoute[] {
   const hasBt = detectBluetoothConnected(devices);
-  const routes: AudioRoute[] = [];
   if (hasBt) {
-    routes.push({ kind: "bluetooth", deviceId: LOGICAL_ROUTE_ID.bluetooth, label: routeLabel("bluetooth") });
+    return [{ kind: "bluetooth", deviceId: LOGICAL_ROUTE_ID.bluetooth, label: routeLabel("bluetooth") }];
   }
-  routes.push({ kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") });
-  routes.push({ kind: "speaker", deviceId: LOGICAL_ROUTE_ID.speaker, label: routeLabel("speaker") });
-  return routes;
+  return [{ kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") }];
 }
 
 function classifyDesktop(label: string): AudioRouteKind {
@@ -105,7 +108,6 @@ function buildDesktopRoutes(devices: MediaDeviceInfo[]): AudioRoute[] {
 export async function listAudioRoutes(): Promise<AudioRoute[]> {
   const fallbackMobile = [
     { kind: "earpiece" as const, deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") },
-    { kind: "speaker" as const, deviceId: LOGICAL_ROUTE_ID.speaker, label: routeLabel("speaker") },
   ];
   if (!navigator.mediaDevices?.enumerateDevices) {
     return isMobilePhone() ? fallbackMobile : [{ kind: "speaker", deviceId: "", label: routeLabel("speaker") }];
@@ -120,11 +122,13 @@ export async function listAudioRoutes(): Promise<AudioRoute[]> {
 
 export function pickPreferredRoute(routes: AudioRoute[]): AudioRoute {
   if (isMobilePhone()) {
-    for (const kind of ["bluetooth", "earpiece", "speaker"] as AudioRouteKind[]) {
-      const match = routes.find((r) => r.kind === kind);
-      if (match) return match;
-    }
-    return routes[0] ?? { kind: "earpiece", deviceId: LOGICAL_ROUTE_ID.earpiece, label: routeLabel("earpiece") };
+    const bt = routes.find((r) => r.kind === "bluetooth");
+    if (bt) return bt;
+    return routes.find((r) => r.kind === "earpiece") ?? routes[0] ?? {
+      kind: "earpiece",
+      deviceId: LOGICAL_ROUTE_ID.earpiece,
+      label: routeLabel("earpiece"),
+    };
   }
   const bt = routes.find((r) => r.kind === "bluetooth");
   if (bt) return bt;

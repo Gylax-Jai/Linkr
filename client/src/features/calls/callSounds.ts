@@ -1,8 +1,9 @@
 /**
- * Call tones synthesized with the Web Audio API (Sprint 3.1.1) — no audio asset files to ship.
- * Sprint 3.1.7: ringback/ringtone follow the same output device as call audio on desktop
- * (`AudioContext.setSinkId`) so switching to laptop speakers also moves the "Calling…" tone.
+ * Call tones via Web Audio. Desktop: follows setSinkId (Sprint 3.1.7).
+ * Mobile: softer gain — ringback may use loudspeaker until connect; call audio uses OS routing.
  */
+
+import { isMobilePhone } from "./audioRoute";
 
 type Pattern = "ringback" | "ringtone" | null;
 
@@ -40,16 +41,17 @@ async function applyToneSink(): Promise<void> {
   await setCallToneSink(toneSinkId);
 }
 
-/** Play one short blended tone (two frequencies) with a soft attack/release envelope. */
+/** Play one short blended tone with a soft attack/release envelope. */
 function blip(freqs: number[], durationSec: number, gainPeak = 0.12): void {
   const audio = getCtx();
   if (!audio) return;
   void applyToneSink();
+  const peak = isMobilePhone() ? Math.min(gainPeak, 0.07) : gainPeak;
   const now = audio.currentTime;
   const gain = audio.createGain();
   gain.gain.setValueAtTime(0, now);
-  gain.gain.linearRampToValueAtTime(gainPeak, now + 0.04);
-  gain.gain.setValueAtTime(gainPeak, now + durationSec - 0.05);
+  gain.gain.linearRampToValueAtTime(peak, now + 0.04);
+  gain.gain.setValueAtTime(peak, now + durationSec - 0.05);
   gain.gain.linearRampToValueAtTime(0, now + durationSec);
   gain.connect(audio.destination);
 

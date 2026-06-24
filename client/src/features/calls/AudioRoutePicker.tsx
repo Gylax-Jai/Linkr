@@ -3,7 +3,7 @@ import { Bluetooth, Check, ChevronDown, Headphones, Phone, Speaker, Volume2 } fr
 import type { LucideIcon } from "lucide-react";
 import { useCallStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { routeLabel, routeDisplayLabel, type AudioRouteKind } from "./audioRoute";
+import { canSwitchAudioOutput, routeLabel, routeDisplayLabel, type AudioRouteKind } from "./audioRoute";
 import { useCallActions } from "./CallProvider";
 
 const ROUTE_ICON: Record<AudioRouteKind, LucideIcon> = {
@@ -14,9 +14,12 @@ const ROUTE_ICON: Record<AudioRouteKind, LucideIcon> = {
   default: Volume2,
 };
 
+const MOBILE_ROUTE_HINT =
+  "Your phone routes call audio automatically — Bluetooth when connected, earpiece otherwise.";
+
 /**
- * Audio-output route control. Always shows a dropdown on mobile (Earpiece + Speaker, + BT when
- * connected). The trigger reflects the *current* route; tap to pick another.
+ * Desktop: dropdown to switch outputs (setSinkId).
+ * Mobile (Sprint 3.1.8): read-only indicator — OS owns routing; no fake menu.
  */
 export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" | "bar" }) {
   const audioRoute = useCallStore((s) => s.audioRoute);
@@ -25,8 +28,9 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
   const { selectAudioRoute } = useCallActions();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const canSwitch = canSwitchAudioOutput();
+  const showMenu = canSwitch && routes.length >= 2;
 
-  // Close the menu on outside-click or Escape.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -44,12 +48,20 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
   }, [open]);
 
   const Icon = ROUTE_ICON[audioRoute];
-  // Mobile always has Earpiece + Speaker (≥2); desktop may have one — show menu whenever ≥2.
-  const showMenu = routes.length >= 2;
   const big = variant === "overlay";
-
   const triggerSize = big ? "h-14 w-14" : "h-8 w-8";
   const iconSize = big ? "h-6 w-6" : "h-4 w-4";
+  const label = routeLabel(audioRoute);
+  const title = canSwitch ? `Audio output: ${label}` : MOBILE_ROUTE_HINT;
+
+  const triggerClass = cn(
+    "relative grid place-items-center rounded-full",
+    triggerSize,
+    big ? "bg-surface-2 text-text shadow-soft" : "text-primary-foreground",
+    showMenu && "transition-transform active:scale-95 hover:scale-105",
+    !canSwitch && big && "cursor-default opacity-95",
+    !canSwitch && !big && "cursor-default",
+  );
 
   return (
     <div ref={ref} className="relative">
@@ -59,17 +71,11 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
           e.stopPropagation();
           if (showMenu) setOpen((v) => !v);
         }}
-        aria-haspopup="menu"
+        aria-haspopup={showMenu ? "menu" : undefined}
         aria-expanded={open}
-        aria-label={`Audio output: ${routeLabel(audioRoute)}`}
-        title={routeLabel(audioRoute)}
-        className={cn(
-          "relative grid place-items-center rounded-full transition-transform active:scale-95",
-          triggerSize,
-          big
-            ? "bg-surface-2 text-text shadow-soft hover:scale-105"
-            : "text-primary-foreground hover:bg-black/10",
-        )}
+        aria-label={canSwitch ? `Audio output: ${label}` : `Audio output: ${label} (${MOBILE_ROUTE_HINT})`}
+        title={title}
+        className={triggerClass}
       >
         <Icon className={iconSize} />
         {showMenu ? (
@@ -82,7 +88,7 @@ export function AudioRoutePicker({ variant = "overlay" }: { variant?: "overlay" 
         ) : null}
         {big ? (
           <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] text-text-muted">
-            {routeLabel(audioRoute)}
+            {label}
           </span>
         ) : null}
       </button>

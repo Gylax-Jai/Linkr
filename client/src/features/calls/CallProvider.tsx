@@ -23,6 +23,7 @@ import {
   findRoute,
   resolveSinkCandidates,
   supportsSetSinkId,
+  canSwitchAudioOutput,
   isLogicalRouteId,
   type AudioRoute,
 } from "./audioRoute";
@@ -105,9 +106,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       endTimerRef.current = window.setTimeout(() => useCallStore.getState().reset(), 1400);
     };
 
-    /** Apply output route — store updates only after setSinkId succeeds (desktop). */
+    /** Apply output route — desktop: setSinkId; mobile: update indicator only (OS routes audio). */
     const applyRoute = (route: AudioRoute, opts?: { forceStore?: boolean; userInitiated?: boolean }) => {
       void (async () => {
+        if (!canSwitchAudioOutput()) {
+          useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
+          return;
+        }
+
         let target = route;
         const candidates = await resolveSinkCandidates(route);
         let applied = false;
@@ -136,7 +142,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           applied = applied || toneOk;
         }
 
-        if (applied || opts?.forceStore || !supportsSetSinkId()) {
+        if (applied || opts?.forceStore) {
           useCallStore.getState().setAudioRoute(target.kind, target.deviceId);
         } else if (opts?.userInitiated) {
           showNotice("Couldn't switch audio output. Try again or use the browser device picker.");
@@ -290,6 +296,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     };
 
     const cycleAudioRoute: CallActions["cycleAudioRoute"] = () => {
+      if (!canSwitchAudioOutput()) return;
       const routes = routesRef.current;
       if (routes.length <= 1) return;
       applyRoute(nextRoute(routes, useCallStore.getState().audioRoute), { userInitiated: true });
