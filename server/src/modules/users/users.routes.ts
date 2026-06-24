@@ -16,6 +16,7 @@ import { singleFileUpload } from "../../middleware/upload.js";
 import {
   deleteAccount,
   getAvatar,
+  getUserProfile,
   onboarding,
   reportUser,
   searchUsers,
@@ -38,6 +39,12 @@ usersRouter.get(
   usernameAvailable,
 );
 usersRouter.get("/search", requireAuth, validate(userSearchQuerySchema, "query"), searchUsers);
+usersRouter.get(
+  "/:userId/profile",
+  requireAuth,
+  validate(userIdParamSchema, "params"),
+  getUserProfile,
+);
 usersRouter.post("/onboarding", requireAuth, validate(onboardingSchema), onboarding);
 usersRouter.patch("/me", requireAuth, validate(profileUpdateSchema), updateMe);
 usersRouter.patch("/me/privacy", requireAuth, validate(privacyUpdateSchema), updateUserPrivacy);

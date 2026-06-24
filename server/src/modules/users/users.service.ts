@@ -16,6 +16,11 @@ import {
   resolveLocalMediaPath,
 } from "../chat/chat.media.service.js";
 import { findFriendshipBetween } from "../friends/friendship.helpers.js";
+import {
+  canViewContactCard,
+  canViewLastSeen,
+  canViewProfileDetails,
+} from "./privacy.helpers.js";
 import { resolveAvatarUrl } from "./avatar.helpers.js";
 
 /** Users service: username availability + onboarding completion (blueprint §4). */
@@ -73,17 +78,79 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function toPublicUser(doc: {
+function activeStatus(status?: string | null, expiresAt?: Date | null): string | undefined {
+  const text = status?.trim();
+  if (!text) return undefined;
+  if (expiresAt && expiresAt.getTime() <= Date.now()) return undefined;
+  return text;
+}
+
+type UserProfileDoc = {
   _id: { toString(): string };
   username?: string | null;
   displayName: string;
   avatar?: string | null;
-}) {
+  bio?: string | null;
+  status?: string | null;
+  statusExpiresAt?: Date | null;
+  online?: boolean | null;
+  lastSeen?: Date | null;
+  privacy?: { lastSeen?: string | null; profile?: string | null; whoCanRequest?: string | null } | null;
+};
+
+function buildUserProfileView(
+  user: UserProfileDoc,
+  searcherId: string,
+  friendship: Awaited<ReturnType<typeof findFriendshipBetween>>,
+): UserSearchResult {
+  const viewerIsFriend = friendship?.status === "accepted";
+  const contactVisible = canViewContactCard(user.privacy, viewerIsFriend);
+  const profileVisible = canViewProfileDetails(user.privacy, viewerIsFriend);
+  const presenceVisible = canViewLastSeen(user.privacy, viewerIsFriend);
+
+  let friendshipMeta: UserSearchResult["friendship"];
+  if (friendship) {
+    const requesterId = friendship.requester.toString();
+    const direction = requesterId === searcherId ? "outgoing" : "incoming";
+    if (friendship.status === "blocked") {
+      const blockedByMe = friendship.actionBy.toString() === searcherId;
+      if (!blockedByMe) {
+        return {
+          _id: user._id.toString(),
+          displayName: "Linkr user",
+          presenceVisible: false,
+          profileDetailsVisible: false,
+          contactCardVisible: false,
+        };
+      }
+      friendshipMeta = {
+        id: friendship._id.toString(),
+        status: "blocked",
+        direction,
+        blockedByMe: true,
+      };
+    } else {
+      friendshipMeta = {
+        id: friendship._id.toString(),
+        status: friendship.status,
+        direction,
+      };
+    }
+  }
+
   return {
-    _id: doc._id.toString(),
-    username: doc.username ?? undefined,
-    displayName: doc.displayName,
-    avatar: resolveAvatarUrl(doc.avatar, doc._id.toString()),
+    _id: user._id.toString(),
+    username: contactVisible ? user.username ?? undefined : undefined,
+    displayName: contactVisible ? user.displayName : "Linkr user",
+    avatar: contactVisible ? resolveAvatarUrl(user.avatar, user._id.toString()) : undefined,
+    bio: profileVisible ? user.bio ?? undefined : undefined,
+    status: profileVisible ? activeStatus(user.status, user.statusExpiresAt) : undefined,
+    online: presenceVisible ? Boolean(user.online) : undefined,
+    lastSeen: presenceVisible ? user.lastSeen?.toISOString() : undefined,
+    presenceVisible,
+    profileDetailsVisible: profileVisible,
+    contactCardVisible: contactVisible,
+    ...(friendshipMeta ? { friendship: friendshipMeta } : {}),
   };
 }
 
@@ -102,45 +169,42 @@ export async function searchUsersByUsername(
     _id: { $ne: searcherId },
   })
     .limit(20)
-    .select("_id username displayName avatar");
+    .select(
+      "_id username displayName avatar bio status statusExpiresAt online lastSeen privacy",
+    );
 
   const results: UserSearchResult[] = [];
 
   for (const user of users) {
     const friendship = await findFriendshipBetween(searcherId, user.id);
-    const base = toPublicUser(user);
-
-    if (!friendship) {
-      results.push(base);
-      continue;
-    }
-
-    const requesterId = friendship.requester.toString();
-    const direction = requesterId === searcherId ? "outgoing" : "incoming";
-
-    if (friendship.status === "blocked") {
-      // If the OTHER user blocked the searcher, keep them hidden. If the searcher is the blocker,
-      // surface the row (flagged) so they can unblock from search.
-      const blockedByMe = friendship.actionBy.toString() === searcherId;
-      if (!blockedByMe) continue;
-      results.push({
-        ...base,
-        friendship: { id: friendship._id.toString(), status: "blocked", direction, blockedByMe: true },
-      });
-      continue;
-    }
-
-    results.push({
-      ...base,
-      friendship: {
-        id: friendship._id.toString(),
-        status: friendship.status,
-        direction,
-      },
-    });
+    const row = buildUserProfileView(user, searcherId, friendship);
+    if (friendship?.status === "blocked" && !row.friendship) continue;
+    results.push(row);
   }
 
   return results;
+}
+
+/** Privacy-gated profile for the contact card (refreshed on open / poll). */
+export async function getUserProfileForViewer(
+  targetUserId: string,
+  viewerId: string,
+): Promise<UserSearchResult> {
+  if (targetUserId === viewerId) {
+    throw ApiError.badRequest("Use your own profile settings");
+  }
+
+  const user = await UserModel.findOne({ _id: targetUserId, onboarded: true }).select(
+    "_id username displayName avatar bio status statusExpiresAt online lastSeen privacy",
+  );
+  if (!user) throw ApiError.notFound("User not found");
+
+  const friendship = await findFriendshipBetween(viewerId, user.id);
+  const row = buildUserProfileView(user, viewerId, friendship);
+  if (friendship?.status === "blocked" && !row.friendship) {
+    throw ApiError.notFound("User not found");
+  }
+  return row;
 }
 
 /** Update privacy settings for the authenticated user. */

@@ -4,6 +4,7 @@ import type {
   FriendsListResponse,
   PendingRequestsResponse,
   ReportUserInput,
+  UserProfileView,
   UserSearchResult,
 } from "@linkr/shared";
 import { api } from "@/lib/api";
@@ -22,7 +23,22 @@ export function useUserSearch(query: string) {
       return res.data.results;
     },
     enabled: trimmed.length >= 1,
-    staleTime: 5_000,
+    staleTime: 4_000,
+    refetchInterval: 5_000,
+  });
+}
+
+/** Fresh privacy-gated profile for the contact card (polls every 5s while open). */
+export function useUserProfile(userId: string | null) {
+  return useQuery({
+    queryKey: ["users", "profile", userId],
+    queryFn: async () => {
+      const res = await api.get<{ profile: UserProfileView }>(`/users/${userId}/profile`);
+      return res.data.profile;
+    },
+    enabled: Boolean(userId),
+    staleTime: 4_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -33,6 +49,8 @@ export function useFriends() {
       const res = await api.get<FriendsListResponse>("/friends");
       return res.data;
     },
+    staleTime: 4_000,
+    refetchInterval: 5_000,
   });
 }
 

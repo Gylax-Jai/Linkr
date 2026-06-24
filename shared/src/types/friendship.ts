@@ -32,6 +32,16 @@ export interface FriendshipListItem {
 
 /** A user in search results with optional friendship context for the searcher. */
 export interface UserSearchResult extends PublicUser {
+  /** Bio — present only when profile details are visible to the viewer. */
+  bio?: string;
+  /** Custom status chip — present only when profile details are visible. */
+  status?: string;
+  /** Live online flag — present only when last-seen/online is visible to the viewer. */
+  online?: boolean;
+  lastSeen?: Timestamp;
+  presenceVisible?: boolean;
+  profileDetailsVisible?: boolean;
+  contactCardVisible?: boolean;
   friendship?: {
     id: ID;
     status: FriendshipStatus;
@@ -40,6 +50,9 @@ export interface UserSearchResult extends PublicUser {
     blockedByMe?: boolean;
   };
 }
+
+/** Privacy-gated profile view (search row + contact card). */
+export type UserProfileView = UserSearchResult;
 
 export interface FriendsListResponse {
   friends: FriendshipListItem[];

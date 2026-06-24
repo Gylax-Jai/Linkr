@@ -7,6 +7,7 @@ export { FriendRequestDisabledModal } from "./FriendRequestDisabledModal";
 export { ReportUserModal } from "./ReportUserModal";
 export {
   useUserSearch,
+  useUserProfile,
   useFriends,
   usePendingRequests,
   useSendFriendRequestMutation,

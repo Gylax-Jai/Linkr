@@ -2,9 +2,11 @@ import { X } from "lucide-react";
 import type { UserSearchResult } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import { Portal } from "@/components/ui/Portal";
+import { formatLastSeen } from "@/lib/utils/formatTime";
 import { FriendActions } from "./FriendActions";
+import { useUserProfile } from "./useFriends";
 
-/** Contact card for a user found via search — avatar, name, @username, and friend actions. */
+/** Contact card for a user found via search — avatar, bio, presence, and friend actions. */
 export function UserContactCardModal({
   user,
   onClose,
@@ -12,9 +14,19 @@ export function UserContactCardModal({
   user: UserSearchResult | null;
   onClose: () => void;
 }) {
-  if (!user) return null;
+  const { data: profile } = useUserProfile(user?._id ?? null);
+  const view = profile ?? user;
+  if (!view) return null;
 
-  const handle = user.username ? `@${user.username}` : user.displayName;
+  const handle = view.username ? `@${view.username}` : view.displayName;
+  const showAvatar = view.contactCardVisible !== false;
+  const showBio = view.profileDetailsVisible && view.bio?.trim();
+  const showStatus = view.profileDetailsVisible && view.status?.trim();
+  const presenceLine = view.presenceVisible
+    ? view.online
+      ? "Online"
+      : formatLastSeen(view.lastSeen) ?? "Offline"
+    : null;
 
   return (
     <Portal>
@@ -32,18 +44,42 @@ export function UserContactCardModal({
             </button>
           </div>
           <div className="flex flex-col items-center gap-3 px-6 pb-6 pt-2 text-center">
-            <Avatar name={user.displayName} src={user.avatar} size="xl" ring zoomable />
+            <Avatar
+              name={view.displayName}
+              src={showAvatar ? view.avatar : undefined}
+              size="xl"
+              ring
+              zoomable={showAvatar}
+            />
             <div className="space-y-1">
-              <p className="text-lg font-semibold tracking-tight">{user.displayName}</p>
-              <p className="font-mono text-xs text-text-muted">{handle}</p>
+              <p className="text-lg font-semibold tracking-tight">{view.displayName}</p>
+              {view.username ? (
+                <p className="font-mono text-xs text-text-muted">{handle}</p>
+              ) : null}
+              {presenceLine ? (
+                <p className={`text-xs ${view.online ? "text-success" : "text-text-muted"}`}>
+                  {presenceLine}
+                </p>
+              ) : null}
             </div>
+            {showStatus ? (
+              <p className="rounded-full bg-surface-2 px-3 py-1 text-xs text-text">{view.status}</p>
+            ) : null}
+            {showBio ? (
+              <p className="max-w-xs text-sm leading-relaxed text-text-muted">{view.bio}</p>
+            ) : null}
+            {!showAvatar && view.contactCardVisible === false ? (
+              <p className="max-w-xs text-xs leading-relaxed text-text-muted">
+                This user keeps their profile private.
+              </p>
+            ) : null}
             <p className="max-w-xs text-xs leading-relaxed text-text-muted">
-              {user.friendship?.status === "accepted"
+              {view.friendship?.status === "accepted"
                 ? "You're friends — message or call anytime."
                 : "Send a friend request to start chatting on Linkr."}
             </p>
             <div className="pt-1">
-              <FriendActions user={user} onRequestBlocked={onClose} />
+              <FriendActions user={view} onRequestBlocked={onClose} />
             </div>
           </div>
         </div>

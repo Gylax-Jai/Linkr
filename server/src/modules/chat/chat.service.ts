@@ -739,6 +739,27 @@ export async function deleteChatForUser(chatId: string, userId: string): Promise
   }
 }
 
+export async function deliverAllPendingMessagesForUser(userId: string): Promise<MessageDTO[]> {
+  const chats = await ChatModel.find({ members: userId }).select("_id");
+  if (chats.length === 0) return [];
+
+  const chatIds = chats.map((c) => c._id);
+  const pending = await MessageModel.find({
+    chatId: { $in: chatIds },
+    sender: { $ne: userId },
+    status: "sent",
+  });
+
+  const updated: MessageDTO[] = [];
+  for (const msg of pending) {
+    msg.status = "delivered";
+    await msg.save();
+    updated.push(toMessageDTO(msg));
+  }
+
+  return updated;
+}
+
 export async function markMessageDelivered(messageId: string, userId: string): Promise<MessageDTO | null> {
   const message = await MessageModel.findById(messageId);
   if (!message) return null;

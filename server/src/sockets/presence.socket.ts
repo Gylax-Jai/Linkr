@@ -3,6 +3,7 @@ import { SOCKET_EVENTS } from "@linkr/shared";
 import { UserModel } from "../models/User.js";
 import { FriendshipModel } from "../models/Friendship.js";
 import { allowsPresenceBroadcast } from "../modules/users/privacy.helpers.js";
+import { deliverAllPendingMessagesForUser } from "../modules/chat/chat.service.js";
 import { deliverPendingCalls } from "./calls.socket.js";
 import { requireSocketUser } from "./auth.socket.js";
 import { registerTypingHandler } from "./chat.socket.js";
@@ -58,6 +59,11 @@ export function registerPresenceHandlers(io: Server, socket: Socket): void {
         await broadcastToFriends(io, userId, SOCKET_EVENTS.USER_ONLINE, { userId });
       }
       deliverPendingCalls(io, userId);
+
+      const delivered = await deliverAllPendingMessagesForUser(userId);
+      for (const message of delivered) {
+        io.to(`user:${message.sender}`).emit(SOCKET_EVENTS.MESSAGE_DELIVERED, { message });
+      }
     }
   })();
 

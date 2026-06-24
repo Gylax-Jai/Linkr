@@ -18,7 +18,9 @@ export function useChatList() {
       writeCachedChatList(res.data.chats);
       return res.data.chats;
     },
-    staleTime: 60_000,
+    staleTime: 4_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
     placeholderData: readCachedChatList,
   });
 }

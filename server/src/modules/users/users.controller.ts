@@ -17,6 +17,7 @@ import { deactivateAccount, purgeUser } from "./account.service.js";
 import {
   completeOnboarding,
   getLocalAvatar,
+  getUserProfileForViewer,
   isUsernameAvailable,
   reportUser as reportUserService,
   searchUsersByUsername,
@@ -50,6 +51,13 @@ export const searchUsers = asyncHandler(async (req, res) => {
   const { q } = req.query as { q: string };
   const results = await searchUsersByUsername(q, requireUser(req).id);
   res.status(200).json({ results });
+});
+
+/** GET /api/users/:userId/profile — privacy-gated profile for contact card. */
+export const getUserProfile = asyncHandler(async (req, res) => {
+  const { userId } = req.params as UserIdParam;
+  const profile = await getUserProfileForViewer(userId, requireUser(req).id);
+  res.status(200).json({ profile });
 });
 
 /** PATCH /api/users/me/privacy — update privacy settings. */

@@ -14,8 +14,8 @@ import { useAuthStore, useCallStore } from "@/lib/store";
 import type { CallEndReason } from "@/lib/store";
 import { CallEngine } from "./CallEngine";
 import { fetchIceConfig } from "./useIceConfig";
+import { micAccessMessage, requestMicAccess } from "./micPermission";
 import { startCallTone, stopCallTone, playEndTone, setCallToneSink, resetCallToneSink } from "./callSounds";
-import { audioConstraints } from "./callConfig";
 import {
   isMobilePhone,
   listAudioRoutes,
@@ -217,7 +217,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           if (state === "failed") teardown("failed");
         },
       });
-      await engine.startLocalMedia();
+      await engine.startLocalMedia(earlyStreamRef.current);
+      earlyStreamRef.current = null;
       engineRef.current = engine;
       // Apply mute, scan + apply the audio route, then flush any buffered remote signaling.
       engine.setMuted(useCallStore.getState().muted);
@@ -228,16 +229,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     };
 
     const startCall: CallActions["startCall"] = ({ chatId, peer, media = "audio" }) => {
+      const phase = useCallStore.getState().phase;
+      if (phase === "ended") useCallStore.getState().reset();
       if (useCallStore.getState().phase !== "idle") return;
 
       void (async () => {
-        // Mic permission MUST succeed before the call starts — no ringback/signaling until allowed.
-        try {
-          earlyStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
-        } catch {
-          showNotice("Microphone access is required to place a call.");
+        const mic = await requestMicAccess();
+        if (!mic.ok) {
+          showNotice(micAccessMessage(mic.reason));
           return;
         }
+        earlyStreamRef.current = mic.stream;
 
         const callId = crypto.randomUUID();
         useCallStore.getState().startOutgoing({ callId, chatId, media, peer });
@@ -266,10 +268,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const acceptCall: CallActions["acceptCall"] = () => {
       const { phase, callId, chatId, media } = useCallStore.getState();
       if (phase !== "incoming" || !callId || !chatId) return;
-      useCallStore.getState().setConnecting();
-      emit(SOCKET_EVENTS.CALL_ACCEPT, { callId, chatId } as CallSignalPayload);
 
       void (async () => {
+        const mic = await requestMicAccess();
+        if (!mic.ok) {
+          showNotice(micAccessMessage(mic.reason));
+          teardown("no-mic");
+          return;
+        }
+        earlyStreamRef.current = mic.stream;
+
+        useCallStore.getState().setConnecting();
+        emit(SOCKET_EVENTS.CALL_ACCEPT, { callId, chatId } as CallSignalPayload);
+
         try {
           const engine = await makeEngine(media);
           // The caller's offer may have already arrived while we set up — process it now.
@@ -343,11 +354,27 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const emit = (event: string, payload: unknown) => socket.emit(event, payload);
 
     const onIncoming = (payload: CallIncomingPayload) => {
-      // Ignore a second incoming call while busy — server already guards, this is belt-and-braces.
-      if (useCallStore.getState().phase !== "idle") {
-        emit(SOCKET_EVENTS.CALL_REJECT, { callId: payload.callId, chatId: payload.chatId });
-        return;
+      const state = useCallStore.getState();
+      const hasLiveEngine = Boolean(engineRef.current);
+
+      if (state.phase !== "idle") {
+        if (state.callId === payload.callId && state.phase === "incoming") return;
+
+        if (state.phase === "active" || (state.phase === "connecting" && hasLiveEngine)) {
+          emit(SOCKET_EVENTS.CALL_REJECT, { callId: payload.callId, chatId: payload.chatId });
+          return;
+        }
+
+        engineRef.current?.close();
+        engineRef.current = null;
+        earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
+        earlyStreamRef.current = null;
+        pendingOfferRef.current = null;
+        pendingIceRef.current = [];
+        if (endTimerRef.current) window.clearTimeout(endTimerRef.current);
+        useCallStore.getState().reset();
       }
+
       useCallStore.getState().receiveIncoming({
         callId: payload.callId,
         chatId: payload.chatId,
@@ -485,6 +512,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     };
     md.addEventListener("devicechange", onChange);
     return () => md.removeEventListener("devicechange", onChange);
+  }, []);
+
+  // Force-reset stale "ended" phase so the next incoming call is not auto-rejected.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (useCallStore.getState().phase === "ended") {
+        useCallStore.getState().reset();
+      }
+    }, 2_000);
+    return () => window.clearInterval(id);
   }, []);
 
   return (
