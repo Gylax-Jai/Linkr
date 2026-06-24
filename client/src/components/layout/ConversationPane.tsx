@@ -166,9 +166,7 @@ export function ConversationPane() {
         onForward={(m) => setForwardTarget(m)}
         onAtBottomChange={setStatusVisible}
       />
-      {!isSelf ? (
-        <TypingIndicator chatId={activeChatId} participantName={chat.participant.displayName} />
-      ) : null}
+      {!isSelf ? <TypingIndicator chatId={activeChatId} /> : null}
       <Composer
         chatId={activeChatId}
         participantId={chat.participant._id}
@@ -183,24 +181,30 @@ export function ConversationPane() {
   );
 }
 
+/** Shared "typing…" label with animated dots — used in the header and above the composer. */
+function TypingLabel({ className }: { className?: string }) {
+  return (
+    <span className={cn("inline-flex items-center", className)}>
+      typing
+      <span className="typing-dots" aria-hidden="true">
+        <span>.</span>
+        <span>.</span>
+        <span>.</span>
+      </span>
+    </span>
+  );
+}
+
 /**
- * Bottom-of-thread typing indicator (Sprint 3.2.2), WhatsApp-style. Sits just above the composer and
- * shows "<name> is typing" with animated dots while the peer is typing. Reads the shared typing flag
- * (driven by USER_TYPING in SocketProvider, which clears stale timers to avoid flicker).
+ * Bottom-of-thread typing indicator (Sprint 3.2.2), WhatsApp-style. Sits just above the composer.
  */
-function TypingIndicator({ chatId, participantName }: { chatId: string; participantName: string }) {
+function TypingIndicator({ chatId }: { chatId: string }) {
   const isTyping = useUIStore((s) => s.typingByChat[chatId]);
   if (!isTyping) return null;
   return (
     <div className="shrink-0 px-4 pb-1 sm:px-6">
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-xs text-text-muted shadow-soft">
-        <span className="font-medium text-primary">{participantName}</span>
-        <span>is typing</span>
-        <span className="typing-dots" aria-hidden="true">
-          <span>.</span>
-          <span>.</span>
-          <span>.</span>
-        </span>
+      <span className="inline-flex rounded-full bg-surface-2 px-3 py-1 text-xs text-primary shadow-soft">
+        <TypingLabel />
       </span>
     </div>
   );
@@ -249,6 +253,7 @@ function ConversationHeader({
   /** Scroll-linked visibility for the mobile status bubble (Sprint F/G). */
   statusVisible: boolean;
 }) {
+  const typingByChat = useUIStore((s) => s.typingByChat);
   const onlineOverrides = useUIStore((s) => s.onlineOverrides);
   const detailsOpen = useUIStore((s) => s.detailsOpen);
   const mobileDetailsOpen = useUIStore((s) => s.mobileDetailsOpen);
@@ -256,6 +261,7 @@ function ConversationHeader({
   const openMobileDetails = useUIStore((s) => s.openMobileDetails);
   const closeMobileDetails = useUIStore((s) => s.closeMobileDetails);
   const online = onlineOverrides[chat.participant._id] ?? chat.participant.online;
+  const isTyping = typingByChat[chat._id];
   const presenceLabel = getPresenceLabel(chat.participant, online);
   const showDot = showOnlineDot(chat.participant, online);
   const showStatus = canShowProfileDetails(chat.participant);
@@ -334,9 +340,11 @@ function ConversationHeader({
           <p className="truncate text-sm font-semibold">{title}</p>
           {isSelf ? (
             <p className="truncate text-xs text-text-muted">Message yourself</p>
+          ) : isTyping ? (
+            <p className="truncate text-xs text-primary">
+              <TypingLabel />
+            </p>
           ) : presenceLabel ? (
-            // Typing is shown at the bottom of the thread (WhatsApp-style), so the header keeps a
-            // stable presence line and never flips typing ↔ online (Sprint 3.2.2).
             <p className="truncate font-mono text-xs text-text-muted">{presenceLabel}</p>
           ) : null}
         </div>

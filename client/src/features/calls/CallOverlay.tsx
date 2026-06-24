@@ -5,7 +5,6 @@ import { useCallStore } from "@/lib/store";
 import type { CallEndReason } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { AudioRoutePicker } from "./AudioRoutePicker";
-import { isMobilePhone } from "./audioRoute";
 import { useCallActions } from "./CallProvider";
 
 const END_LABELS: Record<CallEndReason, string> = {
@@ -90,8 +89,6 @@ function CallControls() {
   const cameraOff = useCallStore((s) => s.cameraOff);
   const { hangUp, toggleMute, toggleCamera, switchCamera } = useCallActions();
   const live = phase !== "ended";
-  // Front/rear flip only makes sense on phones with two cameras (Sprint 3.2.2).
-  const canFlipCamera = media === "video" && isMobilePhone();
 
   return (
     <div className="flex items-center gap-5" onClick={(e) => e.stopPropagation()}>
@@ -125,14 +122,13 @@ function CallControls() {
         </button>
       ) : null}
 
-      {live && canFlipCamera ? (
+      {live && media === "video" ? (
         <button
           type="button"
-          onClick={switchCamera}
+          onClick={() => void switchCamera()}
           aria-label="Switch camera"
           title="Switch camera"
-          disabled={cameraOff}
-          className="grid h-14 w-14 place-items-center rounded-full bg-surface-2 text-text shadow-soft transition-transform hover:scale-105 active:scale-95 disabled:opacity-40"
+          className="grid h-14 w-14 place-items-center rounded-full bg-surface-2 text-text shadow-soft transition-transform hover:scale-105 active:scale-95"
         >
           <SwitchCamera className="h-6 w-6" />
         </button>

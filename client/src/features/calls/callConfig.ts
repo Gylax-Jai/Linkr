@@ -39,7 +39,13 @@ export const videoConstraints: MediaTrackConstraints = {
 
 /** Video constraints for a specific camera (front/rear), reusing the shared resolution targets (Sprint 3.2.2). */
 export function videoConstraintsForFacing(facing: CameraFacing): MediaTrackConstraints {
-  return { ...videoConstraints, facingMode: facing };
+  return {
+    width: { ideal: 1280, max: 1920 },
+    height: { ideal: 720, max: 1080 },
+    frameRate: { ideal: 30, max: 30 },
+    // `ideal` (not a bare string) so mobile browsers can fall back instead of failing outright.
+    facingMode: { ideal: facing },
+  };
 }
 
 /** Build the `getUserMedia` constraints for a given call type (optionally targeting a camera). */

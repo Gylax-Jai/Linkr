@@ -354,6 +354,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (!engine) return;
       void engine.switchCamera().then((facing) => {
         useCallStore.getState().setCameraFacing(facing);
+        engine.setCameraEnabled(!useCallStore.getState().cameraOff);
       });
     };
 

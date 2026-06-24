@@ -107,20 +107,58 @@ export class CallEngine {
     const next: CameraFacing = this.cameraFacing === "user" ? "environment" : "user";
     const oldTrack = this.localStream.getVideoTracks()[0];
     const wasEnabled = oldTrack?.enabled ?? true;
+    const previousDeviceId = oldTrack?.getSettings().deviceId;
 
-    let newStream: MediaStream;
+    // Mobile OSes (iOS/Android) usually cannot open a second camera while the first is active —
+    // stop the outgoing track *before* getUserMedia or the rear camera request fails silently.
+    if (oldTrack) {
+      this.localStream.removeTrack(oldTrack);
+      oldTrack.stop();
+    }
+
+    let newTrack: MediaStreamTrack | null = null;
     try {
-      newStream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: videoConstraintsForFacing(next),
         audio: false,
       });
+      newTrack = stream.getVideoTracks()[0] ?? null;
+      // Drop any extra tracks from the temporary stream (audio should be empty).
+      for (const t of stream.getTracks()) {
+        if (t !== newTrack) t.stop();
+      }
     } catch {
-      // Device likely has no second camera (or permission denied) — keep the current one.
+      newTrack = null;
+    }
+
+    // Fallback: pick a different videoinput by deviceId when facingMode is unsupported.
+    if (!newTrack) {
+      newTrack = await this.acquireAlternateVideoTrack(previousDeviceId);
+    }
+
+    if (!newTrack) {
+      // Could not switch — restore the previous camera so the call keeps sending video.
+      if (oldTrack) {
+        try {
+          const fallback = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraintsForFacing(this.cameraFacing),
+            audio: false,
+          });
+          const restored = fallback.getVideoTracks()[0];
+          if (restored) {
+            restored.enabled = wasEnabled;
+            this.localStream.addTrack(restored);
+            const sender = this.pc.getSenders().find((s) => s.track?.kind === "video");
+            if (sender) await sender.replaceTrack(restored);
+            this.cb.onLocalStream?.(this.localStream);
+          }
+        } catch {
+          /* no camera available */
+        }
+      }
       return this.cameraFacing;
     }
 
-    const newTrack = newStream.getVideoTracks()[0];
-    if (!newTrack) return this.cameraFacing;
     newTrack.enabled = wasEnabled;
 
     const sender = this.pc.getSenders().find((s) => s.track?.kind === "video");
@@ -129,15 +167,33 @@ export class CallEngine {
       void applyVideoBitrate(sender);
     }
 
-    if (oldTrack) {
-      this.localStream.removeTrack(oldTrack);
-      oldTrack.stop();
-    }
     this.localStream.addTrack(newTrack);
     this.cameraFacing = next;
-    // Re-emit the same stream object so the preview re-binds and picks up the new track.
     this.cb.onLocalStream?.(this.localStream);
     return next;
+  }
+
+  /** Pick a videoinput that is not the currently active device (deviceId fallback for camera flip). */
+  private async acquireAlternateVideoTrack(currentDeviceId?: string): Promise<MediaStreamTrack | null> {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videos = devices.filter((d) => d.kind === "videoinput" && d.deviceId);
+      const alternate = videos.find((d) => d.deviceId !== currentDeviceId) ?? videos.at(-1);
+      if (!alternate?.deviceId) return null;
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: { exact: alternate.deviceId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
+        audio: false,
+      });
+      return stream.getVideoTracks()[0] ?? null;
+    } catch {
+      return null;
+    }
   }
 
   hasLocalMedia(): boolean {
