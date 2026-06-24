@@ -236,7 +236,7 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
     .populate<{ lastMessage: MessageDocument | null }>({
       path: "lastMessage",
       select:
-        "content sender status readBy createdAt chatId type encrypted mediaUrl mediaName mediaSize mediaMime deletedForEveryone",
+        "content sender status readBy createdAt chatId type encrypted mediaUrl mediaName mediaSize mediaMime deletedForEveryone call",
     });
 
   // Batch participant + friendship lookups (Phase 4.2 — avoid N+1 per chat row).

@@ -7,6 +7,7 @@ import { useAuthStore, useUIStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { notificationKeys } from "@/features/notifications";
 import { chatKeys } from "./useChats";
+import { writeCachedChatList } from "./chatListCache";
 
 /**
  * Connects Socket.IO when authenticated and keeps React Query caches in sync with realtime events.
@@ -41,17 +42,26 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       const viewingThisChat = fromOther && message.chatId === useUIStore.getState().activeChatId;
 
       if (viewingThisChat) {
-        // The user is actively viewing this chat, so it must never show a phantom unread badge.
-        // Patch the row directly (new last message + zero unread) INSTEAD of invalidating the list:
-        // a refetch could momentarily re-show "1" before the server records the read. The
-        // MessageList read effect still tells the server, so other devices / later refetches agree.
-        queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) =>
-          old?.map((c) =>
+        queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+          if (!old) return old;
+          const next = old.map((c) =>
             c._id === message.chatId ? { ...c, lastMessage: message, unreadCount: 0 } : c,
-          ),
-        );
+          );
+          writeCachedChatList(next);
+          return next;
+        });
       } else {
-        void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+        queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+          if (!old) return old;
+          const userId = useAuthStore.getState().user?._id;
+          const next = old.map((c) => {
+            if (c._id !== message.chatId) return c;
+            const unread = message.sender !== userId ? (c.unreadCount ?? 0) + 1 : c.unreadCount;
+            return { ...c, lastMessage: message, unreadCount: unread };
+          });
+          writeCachedChatList(next);
+          return next;
+        });
       }
 
       if (fromOther) {
@@ -71,13 +81,16 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         const byId = new Map(messages.map((m) => [m._id, m]));
         return old.map((m) => byId.get(m._id) ?? m);
       });
-      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) =>
-        old?.map((c) => {
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+        if (!old) return old;
+        const next = old.map((c) => {
           if (c._id !== chatId) return c;
           const last = messages.at(-1);
           return { ...c, unreadCount: 0, ...(last ? { lastMessage: last } : {}) };
-        }),
-      );
+        });
+        writeCachedChatList(next);
+        return next;
+      });
     };
 
     // Edit / delete-for-everyone / react all return the updated message — patch it in place.
@@ -85,7 +98,16 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       queryClient.setQueryData<MessageDTO[]>(chatKeys.messages(message.chatId), (old) =>
         old?.map((m) => (m._id === message._id ? message : m)),
       );
-      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+        if (!old) return old;
+        const next = old.map((c) =>
+          c._id === message.chatId && c.lastMessage?._id === message._id
+            ? { ...c, lastMessage: message }
+            : c,
+        );
+        writeCachedChatList(next);
+        return next;
+      });
     };
 
     const onOnline = ({ userId }: { userId: string }) => {
@@ -93,7 +115,6 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       const row = list?.find((c) => c.participant._id === userId);
       if (row?.participant.presenceVisible === false) return;
       setParticipantOnline(userId, true);
-      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
     };
 
     const onOffline = ({ userId }: { userId: string }) => {
@@ -101,7 +122,6 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       const row = list?.find((c) => c.participant._id === userId);
       if (row?.participant.presenceVisible === false) return;
       setParticipantOnline(userId, false);
-      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
     };
 
     const onTyping = ({ chatId }: { chatId: string }) => {

@@ -5,9 +5,9 @@ type PrivacyDoc = {
   profile?: string | null;
 } | null | undefined;
 
-/** Map legacy `everyone` profile visibility to `friends` (Phase 4.2). */
 export function normalizeProfileVisibility(raw?: string | null): ProfileVisibility {
   if (raw === "nobody") return "nobody";
+  if (raw === "everyone") return "everyone";
   return "friends";
 }
 
@@ -18,19 +18,17 @@ export function canViewLastSeen(privacy: PrivacyDoc, viewerIsFriend: boolean): b
   return true;
 }
 
+/** Bio, status, avatar — everyone / friends-only / hidden. */
 export function canViewProfileDetails(privacy: PrivacyDoc, viewerIsFriend: boolean): boolean {
   const setting = normalizeProfileVisibility(privacy?.profile);
   if (setting === "nobody") return false;
-  return viewerIsFriend;
+  if (setting === "friends") return viewerIsFriend;
+  return true;
 }
 
-/**
- * Whether a non-friend may see the contact card (avatar, name, @username). Default profile privacy
- * ("friends") still allows strangers to discover basic contact info; only "nobody" hides it (Phase 4.2+).
- */
+/** Contact card uses the same rules as profile details (avatar, name in chat context). */
 export function canViewContactCard(privacy: PrivacyDoc, viewerIsFriend: boolean): boolean {
-  if (viewerIsFriend) return true;
-  return normalizeProfileVisibility(privacy?.profile) !== "nobody";
+  return canViewProfileDetails(privacy, viewerIsFriend);
 }
 
 /** Whether this user allows broadcasting online/offline to friends at all. */

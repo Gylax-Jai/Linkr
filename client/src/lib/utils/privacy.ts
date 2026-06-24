@@ -11,7 +11,7 @@ export function canShowProfileDetails(participant: ChatParticipant): boolean {
   return participant.profileDetailsVisible !== false;
 }
 
-/** Whether the viewer may see the contact card (avatar, name, @username). Default allows strangers. */
+/** Avatar + contact card — same visibility as profile details. */
 export function canShowContactCard(participant: ChatParticipant): boolean {
   return participant.contactCardVisible !== false;
 }

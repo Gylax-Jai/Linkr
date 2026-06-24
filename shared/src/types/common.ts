@@ -7,8 +7,8 @@ export type Timestamp = string;
 /** Who is allowed to see a given piece of profile data. */
 export type Visibility = "everyone" | "friends" | "nobody";
 
-/** Who can see bio and custom status (Phase 4.2). */
-export type ProfileVisibility = "friends" | "nobody";
+/** Who can see bio, custom status, avatar and contact card (Phase 4.2+). */
+export type ProfileVisibility = "everyone" | "friends" | "nobody";
 
 /** Who is allowed to send this user a friend request. */
 export type WhoCanRequest = "everyone" | "nobody";

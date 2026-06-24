@@ -187,7 +187,7 @@ function DetailsContent() {
                       ? participant.bio
                       : `You're connected with ${participant.displayName}. Only friends can message and call on Linkr.`
                     : showContactCard
-                      ? `${participant.displayName} keeps their bio private. Add them as a friend to see more.`
+                      ? `${participant.displayName} keeps their profile private. Add them as a friend to see more.`
                       : "This user has hidden their profile."
                   : (sessionUser?.bio ?? "Select a conversation to view contact details.")}
             </DetailSection>

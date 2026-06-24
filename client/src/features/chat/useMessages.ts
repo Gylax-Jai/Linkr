@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatListItem, MessageDTO } from "@linkr/shared";
 import { SOCKET_EVENTS } from "@linkr/shared";
@@ -6,6 +7,7 @@ import { getSocket } from "@/lib/socket/client";
 import { useAuthStore } from "@/lib/store";
 import { useCryptoStore } from "@/lib/crypto";
 import { chatKeys } from "./useChats";
+import { patchListLastMessage, writeCachedChatList } from "./chatListCache";
 
 /** Find the 1:1 chat's other member from the cached chat list (used to pick an encryption target). */
 function resolveRecipientId(
@@ -32,14 +34,29 @@ async function prepareOutgoing(
 }
 
 export function useMessages(chatId: string | null) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: chatKeys.messages(chatId ?? ""),
     enabled: Boolean(chatId),
     queryFn: async () => {
       const res = await api.get<{ messages: MessageDTO[] }>(`/chat/${chatId}/messages`);
       return res.data.messages;
     },
+    staleTime: 60_000,
   });
+
+  // Keep sidebar preview in sync when the thread loads (list API can lag or omit call meta).
+  useEffect(() => {
+    if (!chatId || !query.data?.length) return;
+    const last = query.data[query.data.length - 1];
+    queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+      const next = patchListLastMessage(old, chatId, last);
+      if (next && next !== old) writeCachedChatList(next);
+      return next;
+    });
+  }, [chatId, query.data, queryClient]);
+
+  return query;
 }
 
 /** Replace a message in the cache by id (used by edit/delete/react responses). */
@@ -265,15 +282,21 @@ export function useMarkReadMutation(chatId: string | null) {
     },
     onMutate: () => {
       if (!chatId) return;
-      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) =>
-        old?.map((c) => (c._id === chatId && c.unreadCount ? { ...c, unreadCount: 0 } : c)),
-      );
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+        if (!old) return old;
+        const next = old.map((c) => (c._id === chatId && c.unreadCount ? { ...c, unreadCount: 0 } : c));
+        writeCachedChatList(next);
+        return next;
+      });
     },
     onSuccess: () => {
       if (!chatId) return;
-      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) =>
-        old?.map((c) => (c._id === chatId ? { ...c, unreadCount: 0 } : c)),
-      );
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+        if (!old) return old;
+        const next = old.map((c) => (c._id === chatId ? { ...c, unreadCount: 0 } : c));
+        writeCachedChatList(next);
+        return next;
+      });
     },
   });
 }

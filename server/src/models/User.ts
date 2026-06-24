@@ -90,7 +90,7 @@ const userSchema = new Schema(
     },
     privacy: {
       lastSeen: { type: String, enum: VISIBILITY_VALUES, default: "friends" },
-      profile: { type: String, enum: [...PROFILE_VISIBILITY_VALUES, "everyone"], default: "friends" },
+      profile: { type: String, enum: PROFILE_VISIBILITY_VALUES, default: "friends" },
       whoCanRequest: { type: String, enum: ["everyone", "nobody"], default: "everyone" },
     },
 

@@ -123,13 +123,14 @@ export function PrivacyCard() {
         <PrivacyRow
           icon={<Eye className="h-4 w-4" />}
           title="Profile details"
-          hint="Who can see your bio and status. Your name, @username and photo stay visible to others unless you choose Nobody."
+          hint="Who can see your photo, bio and status. Everyone = anyone can view; Friends = only friends; Nobody = hidden."
         >
           <Segmented
             value={privacy.profile}
             disabled={saving}
             onChange={(v) => save({ profile: v as PrivacyUpdateInput["profile"] })}
             options={[
+              { value: "everyone", label: "Everyone" },
               { value: "friends", label: "Friends" },
               { value: "nobody", label: "Nobody" },
             ]}

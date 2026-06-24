@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatListItem } from "@linkr/shared";
 import { api } from "@/lib/api";
 import { useUIStore } from "@/lib/store";
+import { readCachedChatList, writeCachedChatList } from "./chatListCache";
 
 export const chatKeys = {
   all: ["chats"] as const,
@@ -14,8 +15,11 @@ export function useChatList() {
     queryKey: chatKeys.list(),
     queryFn: async () => {
       const res = await api.get<{ chats: ChatListItem[] }>("/chat");
+      writeCachedChatList(res.data.chats);
       return res.data.chats;
     },
+    staleTime: 60_000,
+    placeholderData: readCachedChatList,
   });
 }
 
