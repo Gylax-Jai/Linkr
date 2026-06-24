@@ -23,7 +23,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   // One pending "stop typing" timer per chat. Each USER_TYPING event resets its chat's timer instead
   // of stacking a new one — otherwise an earlier timer fires mid-typing and the header flips
   // typing → online → typing (visible flicker). Fixed in Sprint 3.2.2.
-  const typingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const typingTimeoutsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     if (status !== "authed" || !accessToken) {
