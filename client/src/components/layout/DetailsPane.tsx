@@ -32,7 +32,7 @@ import { MessageMedia, useArchiveChatMutation, useChatById, useMessages, useMute
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { shareContact } from "@/lib/utils/share";
-import { canShowContactCard, canShowProfileDetails, getPresenceLabel, showOnlineDot } from "@/lib/utils/privacy";
+import { canShowContactCard, canShowProfileDetails, canZoomAvatar, getPresenceLabel, showOnlineDot } from "@/lib/utils/privacy";
 import { cn } from "@/lib/utils";
 
 type TabId = "profile" | "media" | "files";
@@ -110,8 +110,9 @@ function DetailsContent() {
   // Self chat: own space, no presence/relationship/block actions (Sprint C.2).
   const isSelf = chat?.type === "self";
   const showProfileDetails = participant ? canShowProfileDetails(participant) : true;
-  const showContactCard = participant ? canShowContactCard(participant) : true;
-  const headerName = isSelf ? "Self chat" : showContactCard ? participant?.displayName : "Linkr user";
+  const showAvatar = participant ? canShowContactCard(participant) : true;
+  const avatarZoomable = participant ? canZoomAvatar(participant) : true;
+  const headerName = isSelf ? "Self chat" : showAvatar ? participant?.displayName : "Linkr user";
   const displayName = headerName;
   const online = !isSelf && participant ? (onlineOverrides[participant._id] ?? participant.online) : false;
   const presenceLabel = participant && !isSelf ? getPresenceLabel(participant, online) : null;
@@ -131,18 +132,18 @@ function DetailsContent() {
       <div className="flex flex-col items-center gap-3 border-b border-border px-6 py-8 text-center">
         <Avatar
           name={isSelf ? (sessionUser?.displayName ?? "You") : (headerName ?? "Linkr")}
-          src={showContactCard ? participant?.avatar : undefined}
+          src={showAvatar ? participant?.avatar : undefined}
           size="xl"
           ring
           online={showDot}
           pulseRing={showDot}
-          zoomable
+          zoomable={avatarZoomable}
           icon={isSelf ? <Bookmark className="h-7 w-7" /> : undefined}
         />
         <div className="space-y-1">
           <p className="text-lg font-semibold tracking-tight">{displayName ?? "Select a chat"}</p>
           <p className="font-mono text-xs text-text-muted">
-            {isSelf ? "Only you" : showContactCard && participant?.username ? `@${participant.username}` : "—"}
+            {isSelf ? "Only you" : participant?.username ? `@${participant.username}` : "—"}
           </p>
           {/* Presence under the name (Sprint F): on phones this replaces the "Private chat" badge
               (which is hidden < sm) so the contact's last seen is visible where it matters most. */}
@@ -186,8 +187,8 @@ function DetailsContent() {
                     ? participant.bio?.trim()
                       ? participant.bio
                       : `You're connected with ${participant.displayName}. Only friends can message and call on Linkr.`
-                    : showContactCard
-                      ? `${participant.displayName} keeps their profile private. Add them as a friend to see more.`
+                    : showAvatar
+                      ? `${participant.displayName} keeps their bio private. Add them as a friend to see more.`
                       : "This user has hidden their profile."
                   : (sessionUser?.bio ?? "Select a conversation to view contact details.")}
             </DetailSection>

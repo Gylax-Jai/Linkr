@@ -123,7 +123,7 @@ export function PrivacyCard() {
         <PrivacyRow
           icon={<Eye className="h-4 w-4" />}
           title="Profile details"
-          hint="Who can see your photo, bio and status. Everyone = anyone can view; Friends = only friends; Nobody = hidden."
+          hint="Who can see your bio and status. Your display name and @username are always visible; photo thumbnail follows this setting (Friends = thumbnail without zoom for non-friends)."
         >
           <Segmented
             value={privacy.profile}

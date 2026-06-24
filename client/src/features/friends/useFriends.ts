@@ -23,12 +23,11 @@ export function useUserSearch(query: string) {
       return res.data.results;
     },
     enabled: trimmed.length >= 1,
-    staleTime: 4_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
   });
 }
 
-/** Fresh privacy-gated profile for the contact card (polls every 5s while open). */
+/** Profile for the contact card — fetch once on open (no polling; avoids modal flicker). */
 export function useUserProfile(userId: string | null) {
   return useQuery({
     queryKey: ["users", "profile", userId],
@@ -37,8 +36,7 @@ export function useUserProfile(userId: string | null) {
       return res.data.profile;
     },
     enabled: Boolean(userId),
-    staleTime: 4_000,
-    refetchInterval: 5_000,
+    staleTime: 60_000,
   });
 }
 

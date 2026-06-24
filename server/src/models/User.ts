@@ -26,6 +26,8 @@ const userSchema = new Schema(
      */
     statusExpiresAt: { type: Date },
     onboarded: { type: Boolean, default: false },
+    /** One-time E2EE recovery-passphrase prompt after first onboarding (cleared on dismiss or backup). */
+    e2eeSetupPromptPending: { type: Boolean, default: false },
 
     // Encrypted phone storage — never serialized to clients.
     phoneEnc: { type: String, select: false },

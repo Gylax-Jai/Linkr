@@ -41,7 +41,10 @@ export interface UserSearchResult extends PublicUser {
   lastSeen?: Timestamp;
   presenceVisible?: boolean;
   profileDetailsVisible?: boolean;
+  /** Thumbnail avatar visible (Friends/Everyone); false when profile privacy is Nobody. */
   contactCardVisible?: boolean;
+  /** Full-screen avatar zoom allowed for the viewer (friends-only when profile is Friends). */
+  avatarZoomable?: boolean;
   friendship?: {
     id: ID;
     status: FriendshipStatus;

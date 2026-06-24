@@ -15,6 +15,7 @@ import { validate } from "../../middleware/validate.js";
 import { singleFileUpload } from "../../middleware/upload.js";
 import {
   deleteAccount,
+  dismissE2EEPrompt,
   getAvatar,
   getUserProfile,
   onboarding,
@@ -48,6 +49,7 @@ usersRouter.get(
 usersRouter.post("/onboarding", requireAuth, validate(onboardingSchema), onboarding);
 usersRouter.patch("/me", requireAuth, validate(profileUpdateSchema), updateMe);
 usersRouter.patch("/me/privacy", requireAuth, validate(privacyUpdateSchema), updateUserPrivacy);
+usersRouter.patch("/me/e2ee-prompt-dismiss", requireAuth, dismissE2EEPrompt);
 usersRouter.post("/me/delete", requireAuth, validate(deleteAccountSchema), deleteAccount);
 
 // Profile photo: upload (multipart) + authenticated stream of locally-stored avatars (Sprint 5.5).

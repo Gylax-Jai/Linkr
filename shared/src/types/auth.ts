@@ -16,6 +16,8 @@ export interface SessionUser {
   statusExpiresAt?: Timestamp;
   onboarded: boolean;
   phoneVerified: boolean;
+  /** True until the user dismisses or completes the post-onboarding E2EE setup prompt. */
+  e2eeSetupPromptPending?: boolean;
   privacy: PrivacySettings;
   createdAt: Timestamp;
 }

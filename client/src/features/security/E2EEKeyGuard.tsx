@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { KeyRound, Loader2, ShieldCheck, X } from "lucide-react";
+import type { SessionUser } from "@linkr/shared";
 import { isMsg91Enabled, sendMsg91Otp, verifyMsg91Otp } from "@/lib/msg91";
 import { api } from "@/lib/api";
 import { useCryptoStore, useE2EEAccount } from "@/lib/crypto";
@@ -433,6 +434,10 @@ export function useRecoverySetup() {
       setError(result.error ?? "Couldn't save your recovery passphrase. Please try again.");
       return false;
     }
+    const user = useAuthStore.getState().user;
+    if (user) {
+      useAuthStore.getState().setUser({ ...user, e2eeSetupPromptPending: false });
+    }
     setPassphrase("");
     setConfirm("");
     setCodes(result.codes);
@@ -487,52 +492,31 @@ export function RecoverySetupFields({
   );
 }
 
-const ONBOARDING_PROMPT_KEY = "linkr.e2ee.promptAfterOnboarding";
-
-function setupPromptDismissKey(userId: string | null): string {
-  return `linkr.e2ee.setupPromptDismissed.${userId ?? "anon"}`;
-}
 
 /**
- * One-time prompt for brand-new users (right after onboarding): E2EE is on, but without a recovery
- * passphrase they won't be able to read old chats on another device. Shown once until dismissed or
- * the user opens Settings to set a passphrase.
+ * One-time prompt for brand-new accounts: E2EE is on, but without a recovery passphrase they
+ * won't be able to read old chats on another device. Driven by the server `e2eeSetupPromptPending`
+ * flag (set on onboarding complete, cleared on dismiss or backup).
  */
 export function E2EESecurityPrompt() {
-  const userId = useAuthStore((s) => s.user?._id ?? null);
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const { needsBackup, locked, status } = useE2EEAccount();
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      if (localStorage.getItem(setupPromptDismissKey(userId)) === "1") return true;
-      return sessionStorage.getItem(ONBOARDING_PROMPT_KEY) !== "1";
-    } catch {
-      return true;
-    }
-  });
+  const [busy, setBusy] = useState(false);
 
   const shouldShow =
-    !dismissed &&
-    !locked &&
-    needsBackup &&
-    status === "ready" &&
-    (() => {
-      try {
-        return sessionStorage.getItem(ONBOARDING_PROMPT_KEY) === "1";
-      } catch {
-        return false;
-      }
-    })();
+    Boolean(user?.e2eeSetupPromptPending) && !locked && needsBackup && status === "ready";
 
   if (!shouldShow) return null;
 
   const finish = () => {
-    try {
-      sessionStorage.removeItem(ONBOARDING_PROMPT_KEY);
-      localStorage.setItem(setupPromptDismissKey(userId), "1");
-    } catch {
-      /* storage unavailable */
-    }
-    setDismissed(true);
+    if (busy || !user) return;
+    setBusy(true);
+    void api
+      .patch<{ user: SessionUser }>("/users/me/e2ee-prompt-dismiss")
+      .then((res) => setUser(res.data.user))
+      .catch(() => setUser({ ...user, e2eeSetupPromptPending: false }))
+      .finally(() => setBusy(false));
   };
 
   return (
@@ -556,13 +540,14 @@ export function E2EESecurityPrompt() {
           type="button"
           aria-label="Close"
           onClick={finish}
-          className="ml-auto -mr-1 -mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text"
+          disabled={busy}
+          className="ml-auto -mr-1 -mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Button type="button" variant="ghost" size="sm" className="flex-1" onClick={finish}>
+        <Button type="button" variant="ghost" size="sm" className="flex-1" onClick={finish} disabled={busy}>
           Maybe later
         </Button>
         <Link

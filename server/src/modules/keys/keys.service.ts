@@ -95,7 +95,7 @@ export async function saveKeyBackup(
   backup: KeyBackup,
   recoveryCodes?: RecoveryCodeEnvelope[],
 ): Promise<void> {
-  const set: Record<string, unknown> = { publicKey, keyBackup: backup };
+  const set: Record<string, unknown> = { publicKey, keyBackup: backup, e2eeSetupPromptPending: false };
   if (recoveryCodes) {
     set.recoveryCodes = recoveryCodes.map((c) => ({
       idHash: c.idHash,

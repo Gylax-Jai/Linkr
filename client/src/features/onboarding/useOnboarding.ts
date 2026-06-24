@@ -152,11 +152,6 @@ export function useCompleteOnboardingMutation() {
     },
     onSuccess: (user) => {
       setUser(user);
-      try {
-        sessionStorage.setItem("linkr.e2ee.promptAfterOnboarding", "1");
-      } catch {
-        /* storage unavailable */
-      }
     },
   });
 }

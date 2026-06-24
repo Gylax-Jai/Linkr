@@ -20,9 +20,10 @@ import { areFriends } from "../friends/friendship.helpers.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import { resolveAvatarUrl } from "../users/avatar.helpers.js";
 import {
-  canViewContactCard,
+  canViewAvatarThumbnail,
   canViewLastSeen,
   canViewProfileDetails,
+  canZoomAvatar,
 } from "../users/privacy.helpers.js";
 import { LOCAL_MEDIA_PREFIX } from "./chat.media.service.js";
 
@@ -314,24 +315,26 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
     const presenceVisible = selfChat || canViewLastSeen(participant.privacy, viewerIsFriend);
     const profileDetailsVisible =
       selfChat || canViewProfileDetails(participant.privacy, viewerIsFriend);
-    const contactCardVisible =
-      selfChat || canViewContactCard(participant.privacy, viewerIsFriend);
+    const avatarVisible =
+      selfChat || canViewAvatarThumbnail(participant.privacy, viewerIsFriend);
+    const avatarZoomable = selfChat || canZoomAvatar(participant.privacy, viewerIsFriend);
 
     items.push({
       _id: chat._id.toString(),
       type: selfChat ? "self" : "1:1",
       participant: {
         _id: participant.id,
-        username: contactCardVisible ? participant.username ?? undefined : undefined,
-        displayName: contactCardVisible ? participant.displayName : "Linkr user",
-        avatar: contactCardVisible
+        username: participant.username ?? undefined,
+        displayName: avatarVisible ? participant.displayName : "Linkr user",
+        avatar: avatarVisible
           ? resolveAvatarUrl(participant.avatar, participant.id)
           : undefined,
         online: presenceVisible ? Boolean(participant.online) : false,
         lastSeen: presenceVisible ? participant.lastSeen?.toISOString() : undefined,
         presenceVisible,
         profileDetailsVisible,
-        contactCardVisible,
+        contactCardVisible: avatarVisible,
+        avatarZoomable,
         bio: profileDetailsVisible ? participant.bio ?? undefined : undefined,
         status: profileDetailsVisible
           ? activeStatus(participant.status, participant.statusExpiresAt)

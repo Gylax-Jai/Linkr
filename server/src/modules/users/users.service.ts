@@ -17,9 +17,10 @@ import {
 } from "../chat/chat.media.service.js";
 import { findFriendshipBetween } from "../friends/friendship.helpers.js";
 import {
-  canViewContactCard,
+  canViewAvatarThumbnail,
   canViewLastSeen,
   canViewProfileDetails,
+  canZoomAvatar,
 } from "./privacy.helpers.js";
 import { resolveAvatarUrl } from "./avatar.helpers.js";
 
@@ -61,6 +62,7 @@ export async function completeOnboarding(user: UserDocument, input: OnboardingIn
     user.avatar = input.avatar;
   }
   user.onboarded = true;
+  user.e2eeSetupPromptPending = true;
 
   try {
     await user.save();
@@ -104,7 +106,8 @@ function buildUserProfileView(
   friendship: Awaited<ReturnType<typeof findFriendshipBetween>>,
 ): UserSearchResult {
   const viewerIsFriend = friendship?.status === "accepted";
-  const contactVisible = canViewContactCard(user.privacy, viewerIsFriend);
+  const avatarVisible = canViewAvatarThumbnail(user.privacy, viewerIsFriend);
+  const avatarZoomable = canZoomAvatar(user.privacy, viewerIsFriend);
   const profileVisible = canViewProfileDetails(user.privacy, viewerIsFriend);
   const presenceVisible = canViewLastSeen(user.privacy, viewerIsFriend);
 
@@ -140,16 +143,17 @@ function buildUserProfileView(
 
   return {
     _id: user._id.toString(),
-    username: contactVisible ? user.username ?? undefined : undefined,
-    displayName: contactVisible ? user.displayName : "Linkr user",
-    avatar: contactVisible ? resolveAvatarUrl(user.avatar, user._id.toString()) : undefined,
+    username: user.username ?? undefined,
+    displayName: avatarVisible ? user.displayName : "Linkr user",
+    avatar: avatarVisible ? resolveAvatarUrl(user.avatar, user._id.toString()) : undefined,
     bio: profileVisible ? user.bio ?? undefined : undefined,
     status: profileVisible ? activeStatus(user.status, user.statusExpiresAt) : undefined,
     online: presenceVisible ? Boolean(user.online) : undefined,
     lastSeen: presenceVisible ? user.lastSeen?.toISOString() : undefined,
     presenceVisible,
     profileDetailsVisible: profileVisible,
-    contactCardVisible: contactVisible,
+    contactCardVisible: avatarVisible,
+    avatarZoomable,
     ...(friendshipMeta ? { friendship: friendshipMeta } : {}),
   };
 }
@@ -205,6 +209,13 @@ export async function getUserProfileForViewer(
     throw ApiError.notFound("User not found");
   }
   return row;
+}
+
+/** Dismiss the one-time E2EE setup prompt without creating a backup yet. */
+export async function dismissE2EESetupPrompt(user: UserDocument): Promise<UserDocument> {
+  user.e2eeSetupPromptPending = false;
+  await user.save();
+  return user;
 }
 
 /** Update privacy settings for the authenticated user. */

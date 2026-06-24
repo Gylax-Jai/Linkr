@@ -16,6 +16,7 @@ import { storeMedia, validateAvatarUpload } from "../chat/chat.media.service.js"
 import { deactivateAccount, purgeUser } from "./account.service.js";
 import {
   completeOnboarding,
+  dismissE2EESetupPrompt,
   getLocalAvatar,
   getUserProfileForViewer,
   isUsernameAvailable,
@@ -58,6 +59,12 @@ export const getUserProfile = asyncHandler(async (req, res) => {
   const { userId } = req.params as UserIdParam;
   const profile = await getUserProfileForViewer(userId, requireUser(req).id);
   res.status(200).json({ profile });
+});
+
+/** PATCH /api/users/me/e2ee-prompt-dismiss — hide the one-time E2EE setup prompt. */
+export const dismissE2EEPrompt = asyncHandler(async (req, res) => {
+  const user = await dismissE2EESetupPrompt(requireUser(req));
+  res.status(200).json({ user: toSessionUser(user) });
 });
 
 /** PATCH /api/users/me/privacy — update privacy settings. */

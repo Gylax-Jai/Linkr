@@ -29,8 +29,10 @@ export interface ChatParticipant {
   presenceVisible?: boolean;
   /** False when bio/status are hidden by the participant's profile privacy (Phase 4.2). */
   profileDetailsVisible?: boolean;
-  /** False when the participant hid their contact card from non-friends (profile → Nobody). */
+  /** False when the participant hid their avatar from the viewer (profile → Nobody). */
   contactCardVisible?: boolean;
+  /** Full-screen avatar zoom allowed for the viewer (friends-only when profile is Friends). */
+  avatarZoomable?: boolean;
   /** Profile bio shown in the contact details "About" section (Sprint C.1). */
   bio?: string;
   /** Free-text custom status (e.g. "At the gym"); shown under the name in the chat header (Sprint C.1). */

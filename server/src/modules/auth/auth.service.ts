@@ -113,6 +113,7 @@ export function toSessionUser(user: UserDocument): SessionUser {
     statusExpiresAt: statusExpired ? undefined : statusExpiresAt?.toISOString(),
     onboarded: Boolean(user.onboarded),
     phoneVerified: Boolean(user.phoneVerified),
+    e2eeSetupPromptPending: Boolean(user.e2eeSetupPromptPending),
     privacy: {
       lastSeen: user.privacy?.lastSeen ?? "friends",
       profile: normalizeProfileVisibility(user.privacy?.profile),

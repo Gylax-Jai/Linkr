@@ -11,9 +11,14 @@ export function canShowProfileDetails(participant: ChatParticipant): boolean {
   return participant.profileDetailsVisible !== false;
 }
 
-/** Avatar + contact card — same visibility as profile details. */
+/** Avatar thumbnail visible (Friends/Everyone profile privacy). */
 export function canShowContactCard(participant: ChatParticipant): boolean {
   return participant.contactCardVisible !== false;
+}
+
+/** Full-screen avatar zoom — friends-only when profile privacy is Friends. */
+export function canZoomAvatar(participant: ChatParticipant): boolean {
+  return participant.avatarZoomable === true && canShowContactCard(participant);
 }
 
 /**

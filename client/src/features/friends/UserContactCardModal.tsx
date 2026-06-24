@@ -18,7 +18,6 @@ export function UserContactCardModal({
   const view = profile ?? user;
   if (!view) return null;
 
-  const handle = view.username ? `@${view.username}` : view.displayName;
   const showAvatar = view.contactCardVisible !== false;
   const showBio = view.profileDetailsVisible && view.bio?.trim();
   const showStatus = view.profileDetailsVisible && view.status?.trim();
@@ -49,12 +48,12 @@ export function UserContactCardModal({
               src={showAvatar ? view.avatar : undefined}
               size="xl"
               ring
-              zoomable={showAvatar}
+              zoomable={view.avatarZoomable === true}
             />
             <div className="space-y-1">
               <p className="text-lg font-semibold tracking-tight">{view.displayName}</p>
               {view.username ? (
-                <p className="font-mono text-xs text-text-muted">{handle}</p>
+                <p className="font-mono text-xs text-text-muted">@{view.username}</p>
               ) : null}
               {presenceLine ? (
                 <p className={`text-xs ${view.online ? "text-success" : "text-text-muted"}`}>
@@ -68,9 +67,9 @@ export function UserContactCardModal({
             {showBio ? (
               <p className="max-w-xs text-sm leading-relaxed text-text-muted">{view.bio}</p>
             ) : null}
-            {!showAvatar && view.contactCardVisible === false ? (
+            {!showAvatar ? (
               <p className="max-w-xs text-xs leading-relaxed text-text-muted">
-                This user keeps their profile private.
+                This user keeps their profile photo private.
               </p>
             ) : null}
             <p className="max-w-xs text-xs leading-relaxed text-text-muted">
