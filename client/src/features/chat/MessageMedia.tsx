@@ -1,11 +1,44 @@
 import { Download, FileText } from "lucide-react";
 import type { MessageDTO } from "@linkr/shared";
+import { api } from "@/lib/api";
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
+import { useUIStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 /** Absolute URLs (Cloudinary) are public; relative ones hit the authenticated download route. */
 function isAbsolute(url: string): boolean {
   return /^https?:\/\//i.test(url);
+}
+
+/** Trigger a browser download for a resolved media src (blob URL for authed media, or public URL). */
+function triggerDownload(src: string, name?: string): void {
+  const a = document.createElement("a");
+  a.href = src;
+  a.download = name ?? "download";
+  a.rel = "noopener noreferrer";
+  if (isAbsolute(src)) a.target = "_blank";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/**
+ * Download a message's attachment on demand (Sprint 3.2.2). Absolute URLs download directly; relative
+ * URLs are fetched through the authenticated axios client first (an `<a href>` can't attach the Bearer
+ * token). Used by the message ⋮ menu so images get a Download action instead of "Copy text".
+ */
+export async function downloadMessageMedia(message: MessageDTO): Promise<void> {
+  const url = message.mediaUrl;
+  if (!url) return;
+  if (isAbsolute(url)) {
+    triggerDownload(url, message.mediaName);
+    return;
+  }
+  const res = await api.get(url, { responseType: "blob" });
+  const objectUrl = URL.createObjectURL(res.data as Blob);
+  triggerDownload(objectUrl, message.mediaName);
+  // Revoke after the click has been dispatched so the browser can start the download.
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
 }
 
 function formatBytes(bytes?: number): string {
@@ -18,6 +51,7 @@ function formatBytes(bytes?: number): string {
 
 function ImageMessage({ message }: { message: MessageDTO }) {
   const { src, loading, error } = useAuthedObjectUrl(message.mediaUrl);
+  const openLightbox = useUIStore((s) => s.openLightbox);
 
   if (error) {
     return <div className="rounded-xl bg-black/10 px-3 py-2 text-xs opacity-80">Image unavailable</div>;
@@ -29,7 +63,8 @@ function ImageMessage({ message }: { message: MessageDTO }) {
   return (
     <button
       type="button"
-      onClick={() => window.open(src, "_blank", "noopener,noreferrer")}
+      // Open inside LINKr's full-frame viewer instead of a new browser tab (Sprint 3.2.2).
+      onClick={() => openLightbox(src, message.mediaName ?? "Image", "chat")}
       className="block overflow-hidden rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       title={message.mediaName ?? "Open image"}
     >
@@ -48,14 +83,7 @@ function FileMessage({ message, mine }: { message: MessageDTO; mine: boolean }) 
 
   const handleDownload = () => {
     if (!src) return;
-    const a = document.createElement("a");
-    a.href = src;
-    a.download = message.mediaName ?? "download";
-    a.rel = "noopener noreferrer";
-    if (isAbsolute(src)) a.target = "_blank";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    triggerDownload(src, message.mediaName);
   };
 
   return (

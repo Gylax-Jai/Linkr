@@ -11,6 +11,7 @@ import {
   CheckCheck,
   Copy,
   CornerUpLeft,
+  Download,
   FileText,
   Flag,
   Forward,
@@ -42,6 +43,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
 import { EncryptedBadge } from "@/components/ui/EncryptedBadge";
 import {
+  downloadMessageMedia,
   emitTyping,
   ForwardMessageModal,
   MessageMedia,
@@ -164,6 +166,9 @@ export function ConversationPane() {
         onForward={(m) => setForwardTarget(m)}
         onAtBottomChange={setStatusVisible}
       />
+      {!isSelf ? (
+        <TypingIndicator chatId={activeChatId} participantName={chat.participant.displayName} />
+      ) : null}
       <Composer
         chatId={activeChatId}
         participantId={chat.participant._id}
@@ -175,6 +180,29 @@ export function ConversationPane() {
       />
       <ForwardMessageModal message={forwardTarget} onClose={() => setForwardTarget(null)} />
     </section>
+  );
+}
+
+/**
+ * Bottom-of-thread typing indicator (Sprint 3.2.2), WhatsApp-style. Sits just above the composer and
+ * shows "<name> is typing" with animated dots while the peer is typing. Reads the shared typing flag
+ * (driven by USER_TYPING in SocketProvider, which clears stale timers to avoid flicker).
+ */
+function TypingIndicator({ chatId, participantName }: { chatId: string; participantName: string }) {
+  const isTyping = useUIStore((s) => s.typingByChat[chatId]);
+  if (!isTyping) return null;
+  return (
+    <div className="shrink-0 px-4 pb-1 sm:px-6">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-xs text-text-muted shadow-soft">
+        <span className="font-medium text-primary">{participantName}</span>
+        <span>is typing</span>
+        <span className="typing-dots" aria-hidden="true">
+          <span>.</span>
+          <span>.</span>
+          <span>.</span>
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -221,14 +249,12 @@ function ConversationHeader({
   /** Scroll-linked visibility for the mobile status bubble (Sprint F/G). */
   statusVisible: boolean;
 }) {
-  const typingByChat = useUIStore((s) => s.typingByChat);
   const onlineOverrides = useUIStore((s) => s.onlineOverrides);
   const detailsOpen = useUIStore((s) => s.detailsOpen);
   const mobileDetailsOpen = useUIStore((s) => s.mobileDetailsOpen);
   const setDetailsOpen = useUIStore((s) => s.setDetailsOpen);
   const openMobileDetails = useUIStore((s) => s.openMobileDetails);
   const closeMobileDetails = useUIStore((s) => s.closeMobileDetails);
-  const isTyping = typingByChat[chat._id];
   const online = onlineOverrides[chat.participant._id] ?? chat.participant.online;
   const presenceLabel = getPresenceLabel(chat.participant, online);
   const showDot = showOnlineDot(chat.participant, online);
@@ -308,16 +334,9 @@ function ConversationHeader({
           <p className="truncate text-sm font-semibold">{title}</p>
           {isSelf ? (
             <p className="truncate text-xs text-text-muted">Message yourself</p>
-          ) : isTyping ? (
-            <p className="truncate text-xs text-primary">
-              typing
-              <span className="typing-dots" aria-hidden="true">
-                <span>.</span>
-                <span>.</span>
-                <span>.</span>
-              </span>
-            </p>
           ) : presenceLabel ? (
+            // Typing is shown at the bottom of the thread (WhatsApp-style), so the header keeps a
+            // stable presence line and never flips typing ↔ online (Sprint 3.2.2).
             <p className="truncate font-mono text-xs text-text-muted">{presenceLabel}</p>
           ) : null}
         </div>
@@ -791,19 +810,27 @@ function ReactionPills({
 function MessageActions({
   mine,
   deleted,
+  canCopy,
+  canDownload,
   onReply,
   onEdit,
   onForward,
   onCopy,
+  onDownload,
   onDelete,
   onReact,
 }: {
   mine: boolean;
   deleted: boolean;
+  /** Whether the message has copyable text (hides "Copy text" for image-only messages). */
+  canCopy: boolean;
+  /** Whether the message has a downloadable image (replaces "Copy text" with "Download"). */
+  canDownload: boolean;
   onReply: () => void;
   onEdit: () => void;
   onForward: () => void;
   onCopy: () => void;
+  onDownload: () => void;
   onDelete: (scope: "me" | "everyone") => void;
   onReact: (emoji: string) => void;
 }) {
@@ -859,9 +886,16 @@ function MessageActions({
 
       {menu === "more" ? (
         <div className="absolute bottom-full right-0 z-30 mb-1 w-44 rounded-xl border border-border bg-surface p-1 shadow-elevated">
-          <MenuItem icon={<Copy className="h-4 w-4" />} onClick={() => { onCopy(); setMenu(null); }}>
-            Copy text
-          </MenuItem>
+          {canCopy ? (
+            <MenuItem icon={<Copy className="h-4 w-4" />} onClick={() => { onCopy(); setMenu(null); }}>
+              Copy text
+            </MenuItem>
+          ) : null}
+          {canDownload ? (
+            <MenuItem icon={<Download className="h-4 w-4" />} onClick={() => { onDownload(); setMenu(null); }}>
+              Download
+            </MenuItem>
+          ) : null}
           <MenuItem icon={<Forward className="h-4 w-4" />} onClick={() => { onForward(); setMenu(null); }}>
             Forward
           </MenuItem>
@@ -1016,6 +1050,14 @@ function MessageBubble({
     if (body.text) void navigator.clipboard?.writeText(body.text);
   };
 
+  // Image-only messages get a "Download" action instead of "Copy text"; an image with a caption gets
+  // both (Sprint 3.2.2).
+  const isImage = message.mediaType === "image" && !!message.mediaUrl;
+  const canCopy = !!body.text?.trim();
+  const handleDownload = () => {
+    void downloadMessageMedia(message).catch(() => {});
+  };
+
   return (
     <div
       className={cn(
@@ -1028,10 +1070,13 @@ function MessageBubble({
         <MessageActions
           mine={mine}
           deleted={deleted}
+          canCopy={canCopy}
+          canDownload={isImage}
           onReply={onReply}
           onEdit={onEdit}
           onForward={onForward}
           onCopy={handleCopy}
+          onDownload={handleDownload}
           onDelete={onDelete}
           onReact={onReact}
         />
@@ -1106,10 +1151,13 @@ function MessageBubble({
         <MessageActions
           mine={mine}
           deleted={deleted}
+          canCopy={canCopy}
+          canDownload={isImage}
           onReply={onReply}
           onEdit={onEdit}
           onForward={onForward}
           onCopy={handleCopy}
+          onDownload={handleDownload}
           onDelete={onDelete}
           onReact={onReact}
         />

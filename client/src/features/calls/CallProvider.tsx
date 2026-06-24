@@ -43,6 +43,8 @@ interface CallActions {
   toggleMute: () => void;
   /** Toggle the local camera on/off (video calls). No-op for voice calls. */
   toggleCamera: () => void;
+  /** Flip between front and rear cameras (video calls, mobile). No-op for voice calls. */
+  switchCamera: () => void;
   /** Cycle call audio through the available outputs (bluetooth → headset → speaker → …). */
   cycleAudioRoute: () => void;
   /** Switch call audio to a specific output device (from the route dropdown). */
@@ -346,6 +348,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       engineRef.current?.setCameraEnabled(!useCallStore.getState().cameraOff);
     };
 
+    const switchCamera: CallActions["switchCamera"] = () => {
+      if (useCallStore.getState().media !== "video") return;
+      const engine = engineRef.current;
+      if (!engine) return;
+      void engine.switchCamera().then((facing) => {
+        useCallStore.getState().setCameraFacing(facing);
+      });
+    };
+
     const cycleAudioRoute: CallActions["cycleAudioRoute"] = () => {
       const routes = routesRef.current;
       if (routes.length <= 1) return;
@@ -369,6 +380,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       hangUp,
       toggleMute,
       toggleCamera,
+      switchCamera,
       cycleAudioRoute,
       selectAudioRoute,
       minimize,

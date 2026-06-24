@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Mic, MicOff, PhoneOff, Video, VideoOff } from "lucide-react";
+import { ChevronDown, Mic, MicOff, PhoneOff, SwitchCamera, Video, VideoOff } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useCallStore } from "@/lib/store";
 import type { CallEndReason } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { AudioRoutePicker } from "./AudioRoutePicker";
+import { isMobilePhone } from "./audioRoute";
 import { useCallActions } from "./CallProvider";
 
 const END_LABELS: Record<CallEndReason, string> = {
@@ -87,8 +88,10 @@ function CallControls() {
   const muted = useCallStore((s) => s.muted);
   const media = useCallStore((s) => s.media);
   const cameraOff = useCallStore((s) => s.cameraOff);
-  const { hangUp, toggleMute, toggleCamera } = useCallActions();
+  const { hangUp, toggleMute, toggleCamera, switchCamera } = useCallActions();
   const live = phase !== "ended";
+  // Front/rear flip only makes sense on phones with two cameras (Sprint 3.2.2).
+  const canFlipCamera = media === "video" && isMobilePhone();
 
   return (
     <div className="flex items-center gap-5" onClick={(e) => e.stopPropagation()}>
@@ -122,6 +125,19 @@ function CallControls() {
         </button>
       ) : null}
 
+      {live && canFlipCamera ? (
+        <button
+          type="button"
+          onClick={switchCamera}
+          aria-label="Switch camera"
+          title="Switch camera"
+          disabled={cameraOff}
+          className="grid h-14 w-14 place-items-center rounded-full bg-surface-2 text-text shadow-soft transition-transform hover:scale-105 active:scale-95 disabled:opacity-40"
+        >
+          <SwitchCamera className="h-6 w-6" />
+        </button>
+      ) : null}
+
       {live ? <AudioRoutePicker variant="overlay" /> : null}
 
       <button
@@ -141,6 +157,7 @@ function VideoCallSurface({ name, avatar }: { name: string; avatar?: string }) {
   const phase = useCallStore((s) => s.phase);
   const connectedAt = useCallStore((s) => s.connectedAt);
   const cameraOff = useCallStore((s) => s.cameraOff);
+  const cameraFacing = useCallStore((s) => s.cameraFacing);
   const localStream = useCallStore((s) => s.localStream);
   const remoteStream = useCallStore((s) => s.remoteStream);
   const { minimize } = useCallActions();
@@ -207,7 +224,7 @@ function VideoCallSurface({ name, avatar }: { name: string; avatar?: string }) {
       {/* Local preview PiP (mirrored). Shows an avatar placeholder while the camera is off. */}
       <div className="absolute right-4 top-20 h-40 w-28 overflow-hidden rounded-2xl border border-white/15 bg-surface-2 shadow-elevated sm:h-48 sm:w-36">
         {localStream && !cameraOff ? (
-          <VideoStream stream={localStream} muted mirrored />
+          <VideoStream stream={localStream} muted mirrored={cameraFacing === "user"} />
         ) : (
           <div className="grid h-full w-full place-items-center bg-gradient-to-b from-surface-2 to-surface">
             <VideoOff className="h-6 w-6 text-text-muted" aria-hidden="true" />

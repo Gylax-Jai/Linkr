@@ -1,5 +1,6 @@
 import type { CallMedia } from "@linkr/shared";
-import { applyAudioBitrate, applyVideoBitrate, mediaConstraints, tuneOpus } from "./callConfig";
+import type { CameraFacing } from "./callConfig";
+import { applyVideoBitrate, applyAudioBitrate, mediaConstraints, tuneOpus, videoConstraintsForFacing } from "./callConfig";
 import { isMobilePhone, supportsSetSinkId } from "./audioRoute";
 
 interface CallEngineCallbacks {
@@ -29,6 +30,8 @@ export class CallEngine {
   private activeSinkId = "";
   private readonly media: CallMedia;
   private readonly cb: CallEngineCallbacks;
+  /** Camera currently captured for video calls (front by default). Toggled by `switchCamera`. */
+  private cameraFacing: CameraFacing = "user";
 
   constructor(iceServers: RTCIceServer[], media: CallMedia, callbacks: CallEngineCallbacks) {
     this.media = media;
@@ -86,6 +89,55 @@ export class CallEngine {
     this.localStream?.getVideoTracks().forEach((t) => {
       t.enabled = enabled;
     });
+  }
+
+  /** Which camera is currently captured (front/rear). Drives the local-preview mirror (Sprint 3.2.2). */
+  getCameraFacing(): CameraFacing {
+    return this.cameraFacing;
+  }
+
+  /**
+   * Flip between front and rear cameras on mobile (Sprint 3.2.2). Captures the other camera, swaps the
+   * track on the existing RTCRtpSender via `replaceTrack` (no renegotiation), and updates the local
+   * preview in place. Returns the new facing, or the unchanged facing if the device has one camera.
+   */
+  async switchCamera(): Promise<CameraFacing> {
+    if (this.media !== "video" || !this.localStream) return this.cameraFacing;
+
+    const next: CameraFacing = this.cameraFacing === "user" ? "environment" : "user";
+    const oldTrack = this.localStream.getVideoTracks()[0];
+    const wasEnabled = oldTrack?.enabled ?? true;
+
+    let newStream: MediaStream;
+    try {
+      newStream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraintsForFacing(next),
+        audio: false,
+      });
+    } catch {
+      // Device likely has no second camera (or permission denied) — keep the current one.
+      return this.cameraFacing;
+    }
+
+    const newTrack = newStream.getVideoTracks()[0];
+    if (!newTrack) return this.cameraFacing;
+    newTrack.enabled = wasEnabled;
+
+    const sender = this.pc.getSenders().find((s) => s.track?.kind === "video");
+    if (sender) {
+      await sender.replaceTrack(newTrack);
+      void applyVideoBitrate(sender);
+    }
+
+    if (oldTrack) {
+      this.localStream.removeTrack(oldTrack);
+      oldTrack.stop();
+    }
+    this.localStream.addTrack(newTrack);
+    this.cameraFacing = next;
+    // Re-emit the same stream object so the preview re-binds and picks up the new track.
+    this.cb.onLocalStream?.(this.localStream);
+    return next;
   }
 
   hasLocalMedia(): boolean {

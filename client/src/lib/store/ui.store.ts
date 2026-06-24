@@ -15,8 +15,12 @@ interface UIState {
   friendSearchOpen: boolean;
   /** Which list the left sidebar shows: conversations ("chats") or the friends directory ("friends"). */
   sidebarView: "chats" | "friends";
-  /** Full-screen avatar/photo viewer. `null` when closed. */
-  lightbox: { src: string; name: string } | null;
+  /**
+   * Full-screen photo viewer. `null` when closed. `variant` selects the layout: "avatar" is the
+   * circular profile-photo viewer; "chat" is a full-frame image viewer for shared chat images
+   * (rectangular, with an optional download action) — Sprint 3.2.2.
+   */
+  lightbox: { src: string; name: string; variant: "avatar" | "chat" } | null;
   typingByChat: Record<string, boolean>;
   onlineOverrides: Record<string, boolean>;
   setActiveChat: (id: string | null) => void;
@@ -27,7 +31,7 @@ interface UIState {
   openFriendSearch: () => void;
   closeFriendSearch: () => void;
   setSidebarView: (view: "chats" | "friends") => void;
-  openLightbox: (src: string, name: string) => void;
+  openLightbox: (src: string, name: string, variant?: "avatar" | "chat") => void;
   closeLightbox: () => void;
   setTyping: (chatId: string, typing: boolean) => void;
   setParticipantOnline: (userId: string, online: boolean) => void;
@@ -54,7 +58,7 @@ export const useUIStore = create<UIState>((set) => ({
   openFriendSearch: () => set({ friendSearchOpen: true }),
   closeFriendSearch: () => set({ friendSearchOpen: false }),
   setSidebarView: (view) => set({ sidebarView: view }),
-  openLightbox: (src, name) => set({ lightbox: { src, name } }),
+  openLightbox: (src, name, variant = "avatar") => set({ lightbox: { src, name, variant } }),
   closeLightbox: () => set({ lightbox: null }),
   setTyping: (chatId, typing) =>
     set((state) => ({

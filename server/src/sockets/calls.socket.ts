@@ -25,9 +25,13 @@ import { requireSocketUser } from "./auth.socket.js";
 import { userHasLiveSockets } from "./socket-registry.js";
 
 /** How long an unanswered call rings before it's marked missed (WhatsApp-like). */
-const RING_TIMEOUT_MS = 35_000;
-/** Safety TTL — clears ghost in-memory calls that never received CALL_END (Phase 4.2). */
-const MAX_CALL_MS = 3 * 60_000;
+const RING_TIMEOUT_MS = 30_000;
+/**
+ * Hard cap on a *connected* call (Sprint 3.2.2). The timer starts on CALL_ACCEPT, not on initiate,
+ * so ring/setup time never eats into talk time. Real conversations run until someone hangs up; this
+ * is only a safety ceiling to clear truly stuck sessions.
+ */
+const MAX_ACTIVE_CALL_MS = 2 * 60 * 60_000; // 2 hours
 /** Grace after ring timeout before pruning unanswered ghost sessions. */
 const STALE_RING_GRACE_MS = 5_000;
 /** Wait for reconnect before ending calls on last-socket disconnect (Phase 3.1.6). */
@@ -111,13 +115,16 @@ function cancelDisconnectGrace(userId: string): void {
 function pruneStaleCalls(): void {
   const now = Date.now();
   for (const [callId, record] of callsById) {
-    const age = now - record.startedAt;
-    if (record.acceptedAt && age > MAX_CALL_MS + STALE_RING_GRACE_MS) {
-      clearTimers(record);
-      untrackCall(callId);
+    // Accepted calls are measured from acceptedAt (talk time), not from initiate, so a long ring
+    // never shortens the active cap (Sprint 3.2.2).
+    if (record.acceptedAt) {
+      if (now - record.acceptedAt > MAX_ACTIVE_CALL_MS + STALE_RING_GRACE_MS) {
+        clearTimers(record);
+        untrackCall(callId);
+      }
       continue;
     }
-    if (!record.acceptedAt && age > RING_TIMEOUT_MS + STALE_RING_GRACE_MS) {
+    if (now - record.startedAt > RING_TIMEOUT_MS + STALE_RING_GRACE_MS) {
       clearTimers(record);
       untrackCall(callId);
     }
@@ -253,15 +260,20 @@ export function onUserSocketDisconnected(io: Server, userId: string): void {
   disconnectGraceByUser.set(userId, timer);
 }
 
-function scheduleSafetyTimeout(io: Server, callId: string, record: CallRecord): void {
+/**
+ * Safety ceiling for a *connected* call (Sprint 3.2.2). Started on CALL_ACCEPT — never on initiate —
+ * so ring/setup time is excluded and normal calls run until someone hangs up.
+ */
+function scheduleActiveCallTimeout(io: Server, callId: string, record: CallRecord): void {
+  if (record.maxTimeout) clearTimeout(record.maxTimeout);
   record.maxTimeout = setTimeout(() => {
     const rec = callsById.get(callId);
     if (!rec) return;
     const payload = { callId, chatId: rec.chatId } satisfies CallSignalPayload;
     void emitToUser(io, rec.caller, SOCKET_EVENTS.CALL_END, payload);
     void emitToUser(io, rec.callee, SOCKET_EVENTS.CALL_END, payload);
-    finalizeCall(callId, rec.acceptedAt ? "completed" : "missed");
-  }, MAX_CALL_MS);
+    finalizeCall(callId, "completed");
+  }, MAX_ACTIVE_CALL_MS);
 }
 
 function scheduleRingTimeout(io: Server, callId: string, record: CallRecord): void {
@@ -535,7 +547,8 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
           callerSocketId: socket.id,
         };
         trackCall(callId, record);
-        scheduleSafetyTimeout(io, callId, record);
+        // No active-call cap yet — that starts on CALL_ACCEPT. Until then the ring timeout
+        // (scheduleRingTimeout below) governs unanswered calls (Sprint 3.2.2).
 
         const from: PublicUser = {
           _id: userId,
@@ -632,6 +645,8 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
         if (record.ringTimeout) clearTimeout(record.ringTimeout);
         record.ringTimeout = undefined;
         pendingIncoming.delete(payload.callId);
+        // Start the active-call safety ceiling now (talk time), not from initiate (Sprint 3.2.2).
+        scheduleActiveCallTimeout(io, payload.callId, record);
       }
       logger.info("call:accept received", {
         callId: payload?.callId,

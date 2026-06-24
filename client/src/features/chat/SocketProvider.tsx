@@ -20,6 +20,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const setParticipantOnline = useUIStore((s) => s.setParticipantOnline);
   const setTyping = useUIStore((s) => s.setTyping);
+  // One pending "stop typing" timer per chat. Each USER_TYPING event resets its chat's timer instead
+  // of stacking a new one — otherwise an earlier timer fires mid-typing and the header flips
+  // typing → online → typing (visible flicker). Fixed in Sprint 3.2.2.
+  const typingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     if (status !== "authed" || !accessToken) {
@@ -135,9 +139,17 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setParticipantOnline(userId, false);
     };
 
+    const typingTimeouts = typingTimeoutsRef.current;
     const onTyping = ({ chatId }: { chatId: string }) => {
       setTyping(chatId, true);
-      window.setTimeout(() => setTyping(chatId, false), 3000);
+      const existing = typingTimeouts.get(chatId);
+      if (existing) clearTimeout(existing);
+      // Slightly longer than the composer's ~2s typing debounce so continuous typing never lapses.
+      const t = window.setTimeout(() => {
+        setTyping(chatId, false);
+        typingTimeouts.delete(chatId);
+      }, 4000);
+      typingTimeouts.set(chatId, t);
     };
 
     // Any friendship change involving us (unfriended / request received / request accepted) should
@@ -213,6 +225,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       socket.off(SOCKET_EVENTS.FRIEND_ACCEPTED, onFriendChanged);
       socket.off(SOCKET_EVENTS.NOTIFICATION_NEW, onNotification);
       socket.off(SOCKET_EVENTS.USER_PROFILE_CHANGED, onProfileChanged);
+      for (const t of typingTimeouts.values()) clearTimeout(t);
+      typingTimeouts.clear();
     };
   }, [accessToken, status, queryClient, setParticipantOnline, setTyping]);
 

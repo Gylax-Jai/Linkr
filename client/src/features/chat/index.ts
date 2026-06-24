@@ -19,6 +19,6 @@ export {
   useMarkReadMutation,
   type SendMessageArgs,
 } from "./useMessages";
-export { MessageMedia } from "./MessageMedia";
+export { MessageMedia, downloadMessageMedia } from "./MessageMedia";
 export { ForwardMessageModal } from "./ForwardMessageModal";
 export { SocketProvider, emitTyping } from "./SocketProvider";

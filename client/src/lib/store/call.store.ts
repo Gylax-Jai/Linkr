@@ -55,6 +55,8 @@ interface CallState {
   callNotice: string | null;
   /** Video calls (Sprint 3.2): true when the local camera track is disabled. */
   cameraOff: boolean;
+  /** Which camera is captured (front/rear) — mirrors the local preview only for the front camera (Sprint 3.2.2). */
+  cameraFacing: "user" | "environment";
   /** Local capture stream — drives the local video preview (video calls). */
   localStream: MediaStream | null;
   /** Remote media stream — drives the full-screen remote video (video calls). */
@@ -80,6 +82,7 @@ interface CallState {
   setMuted: (muted: boolean) => void;
   toggleCamera: () => void;
   setCameraOff: (cameraOff: boolean) => void;
+  setCameraFacing: (facing: "user" | "environment") => void;
   setLocalStream: (stream: MediaStream | null) => void;
   setRemoteStream: (stream: MediaStream | null) => void;
   setAudioRoute: (route: AudioRouteKind, deviceId: string) => void;
@@ -111,6 +114,7 @@ const initial = {
   endReason: null,
   callNotice: null,
   cameraOff: false,
+  cameraFacing: "user" as "user" | "environment",
   localStream: null as MediaStream | null,
   remoteStream: null as MediaStream | null,
 };
@@ -148,6 +152,7 @@ export const useCallStore = create<CallState>((set) => ({
 
   toggleCamera: () => set((s) => ({ cameraOff: !s.cameraOff })),
   setCameraOff: (cameraOff) => set({ cameraOff }),
+  setCameraFacing: (cameraFacing) => set({ cameraFacing }),
   setLocalStream: (localStream) => set({ localStream }),
   setRemoteStream: (remoteStream) => set({ remoteStream }),
 

@@ -26,6 +26,9 @@ export const audioConstraints: MediaTrackConstraints = {
   sampleSize: 16,
 };
 
+/** Which camera to capture on mobile: front ("user") or rear ("environment"). */
+export type CameraFacing = "user" | "environment";
+
 /** HD video capture constraints (Sprint 3.2). 720p@30 with a 1080p ceiling. */
 export const videoConstraints: MediaTrackConstraints = {
   width: { ideal: 1280, max: 1920 },
@@ -34,11 +37,16 @@ export const videoConstraints: MediaTrackConstraints = {
   facingMode: "user",
 };
 
-/** Build the `getUserMedia` constraints for a given call type. */
-export function mediaConstraints(media: CallMedia): MediaStreamConstraints {
+/** Video constraints for a specific camera (front/rear), reusing the shared resolution targets (Sprint 3.2.2). */
+export function videoConstraintsForFacing(facing: CameraFacing): MediaTrackConstraints {
+  return { ...videoConstraints, facingMode: facing };
+}
+
+/** Build the `getUserMedia` constraints for a given call type (optionally targeting a camera). */
+export function mediaConstraints(media: CallMedia, facing: CameraFacing = "user"): MediaStreamConstraints {
   return {
     audio: audioConstraints,
-    video: media === "video" ? videoConstraints : false,
+    video: media === "video" ? videoConstraintsForFacing(facing) : false,
   };
 }
 
