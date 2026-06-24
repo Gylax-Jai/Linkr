@@ -53,6 +53,12 @@ interface CallState {
   endReason: CallEndReason | null;
   /** Brief user-visible message (e.g. mic denied) — cleared automatically by CallProvider. */
   callNotice: string | null;
+  /** Video calls (Sprint 3.2): true when the local camera track is disabled. */
+  cameraOff: boolean;
+  /** Local capture stream — drives the local video preview (video calls). */
+  localStream: MediaStream | null;
+  /** Remote media stream — drives the full-screen remote video (video calls). */
+  remoteStream: MediaStream | null;
 
   startOutgoing: (args: { callId: string; chatId: string; media: CallMedia; peer: PublicUser }) => void;
   receiveIncoming: (args: { callId: string; chatId: string; media: CallMedia; peer: PublicUser }) => void;
@@ -72,6 +78,10 @@ interface CallState {
   setRinging: (ringing: boolean) => void;
   toggleMute: () => void;
   setMuted: (muted: boolean) => void;
+  toggleCamera: () => void;
+  setCameraOff: (cameraOff: boolean) => void;
+  setLocalStream: (stream: MediaStream | null) => void;
+  setRemoteStream: (stream: MediaStream | null) => void;
   setAudioRoute: (route: AudioRouteKind, deviceId: string) => void;
   setAvailableRoutes: (routes: AudioRoute[]) => void;
   setCallNotice: (callNotice: string | null) => void;
@@ -100,6 +110,9 @@ const initial = {
   connection: "new" as RTCPeerConnectionState,
   endReason: null,
   callNotice: null,
+  cameraOff: false,
+  localStream: null as MediaStream | null,
+  remoteStream: null as MediaStream | null,
 };
 
 export const useCallStore = create<CallState>((set) => ({
@@ -132,6 +145,11 @@ export const useCallStore = create<CallState>((set) => ({
 
   toggleMute: () => set((s) => ({ muted: !s.muted })),
   setMuted: (muted) => set({ muted }),
+
+  toggleCamera: () => set((s) => ({ cameraOff: !s.cameraOff })),
+  setCameraOff: (cameraOff) => set({ cameraOff }),
+  setLocalStream: (localStream) => set({ localStream }),
+  setRemoteStream: (remoteStream) => set({ remoteStream }),
 
   setAudioRoute: (audioRoute, audioDeviceId) => set({ audioRoute, audioDeviceId }),
   setAvailableRoutes: (availableRoutes) => set({ availableRoutes }),

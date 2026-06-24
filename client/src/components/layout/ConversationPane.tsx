@@ -242,17 +242,14 @@ function ConversationHeader({
   // Calling (Sprint 3.1): only between accepted friends in a 1:1 chat (never self / strangers).
   const { startCall } = useCallActions();
   const canCall = !isSelf && chat.participant.friendship?.status === "accepted";
-  const startVoiceCall = () =>
-    startCall({
-      chatId: chat._id,
-      peer: {
-        _id: chat.participant._id,
-        username: chat.participant.username,
-        displayName: chat.participant.displayName,
-        avatar: chat.participant.avatar,
-      },
-      media: "audio",
-    });
+  const callPeer = {
+    _id: chat.participant._id,
+    username: chat.participant.username,
+    displayName: chat.participant.displayName,
+    avatar: chat.participant.avatar,
+  };
+  const startVoiceCall = () => startCall({ chatId: chat._id, peer: callPeer, media: "audio" });
+  const startVideoCall = () => startCall({ chatId: chat._id, peer: callPeer, media: "video" });
 
   // Clicking the name/avatar always reveals the profile (desktop aside + mobile/tablet sheet).
   const openDetails = () => {
@@ -330,7 +327,7 @@ function ConversationHeader({
       ) : null}
       <EncryptedBadge iconOnly e2ee={e2ee} />
       <div className="flex shrink-0 items-center gap-0.5">
-        {/* Voice call is live (Sprint 3.1) for accepted friends; video lands in 3.2. Compact on
+        {/* Voice + video calls are live (Sprint 3.1 / 3.2) for accepted friends. Compact on
             phones (see CallButton) so the name + last seen stay readable. */}
         <CallButton
           label="Voice call"
@@ -338,7 +335,12 @@ function ConversationHeader({
           disabled={!canCall}
           onClick={canCall ? startVoiceCall : undefined}
         />
-        <CallButton label="Video call" icon={<Video className="h-4 w-4" />} comingSoon />
+        <CallButton
+          label="Video call"
+          icon={<Video className="h-4 w-4" />}
+          disabled={!canCall}
+          onClick={canCall ? startVideoCall : undefined}
+        />
         <HeaderMenu chat={chat} onViewInfo={toggleDetails} />
         <button
           type="button"

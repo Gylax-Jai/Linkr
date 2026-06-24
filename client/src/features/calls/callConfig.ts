@@ -71,17 +71,27 @@ export function tuneOpus(sdp: string): string {
   return lines.join("\r\n");
 }
 
-/** Apply the target max bitrate to an audio sender's encoding parameters. */
-export async function applyAudioBitrate(sender: RTCRtpSender): Promise<void> {
+/** Apply a target max bitrate to a sender's encoding parameters (audio or video). */
+async function applyMaxBitrate(sender: RTCRtpSender, maxBitrate: number): Promise<void> {
   try {
     const params = sender.getParameters();
     if (!params.encodings || params.encodings.length === 0) {
       params.encodings = [{}];
     }
     const encoding = params.encodings[0];
-    if (encoding) encoding.maxBitrate = BITRATE.audio;
+    if (encoding) encoding.maxBitrate = maxBitrate;
     await sender.setParameters(params);
   } catch {
     // Some browsers reject setParameters before negotiation; the SDP fmtp still applies.
   }
+}
+
+/** Apply the target max bitrate to an audio sender's encoding parameters. */
+export async function applyAudioBitrate(sender: RTCRtpSender): Promise<void> {
+  await applyMaxBitrate(sender, BITRATE.audio);
+}
+
+/** Apply the 720p target max bitrate to a video sender's encoding parameters (Sprint 3.2). */
+export async function applyVideoBitrate(sender: RTCRtpSender): Promise<void> {
+  await applyMaxBitrate(sender, BITRATE.video);
 }

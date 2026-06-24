@@ -1,4 +1,4 @@
-import { Mic, MicOff, Phone, PhoneOff } from "lucide-react";
+import { Mic, MicOff, Phone, PhoneOff, Video } from "lucide-react";
 import { useCallStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { AudioRoutePicker } from "./AudioRoutePicker";
@@ -15,6 +15,7 @@ export function CallBar() {
   const uiMode = useCallStore((s) => s.uiMode);
   const peer = useCallStore((s) => s.peer);
   const muted = useCallStore((s) => s.muted);
+  const media = useCallStore((s) => s.media);
   const connectedAt = useCallStore((s) => s.connectedAt);
   const { hangUp, toggleMute, expand } = useCallActions();
   const statusText = useCallStatusText();
@@ -24,6 +25,7 @@ export function CallBar() {
 
   const name = peer.displayName || peer.username || "Unknown";
   const live = phase !== "ended";
+  const isVideo = media === "video";
 
   return (
     <div className="fixed inset-x-0 top-0 z-[120] h-11 bg-primary text-primary-foreground shadow-soft">
@@ -35,7 +37,11 @@ export function CallBar() {
           className="flex h-full min-w-0 flex-1 items-center gap-2 text-left"
           aria-label="Return to call"
         >
-          <Phone className="h-4 w-4 shrink-0 animate-pulse" aria-hidden="true" />
+          {isVideo ? (
+            <Video className="h-4 w-4 shrink-0 animate-pulse" aria-hidden="true" />
+          ) : (
+            <Phone className="h-4 w-4 shrink-0 animate-pulse" aria-hidden="true" />
+          )}
           <span className="min-w-0 truncate text-sm font-medium">
             {phase === "active" && connectedAt ? (
               <>

@@ -17,7 +17,7 @@ import { CallEngine } from "./CallEngine";
 import { fetchIceConfig } from "./useIceConfig";
 import { callLog } from "./callLog";
 import { clearCallSignalingHandlers, setCallSignalingHandlers } from "./callSignalingRegistry";
-import { micAccessMessage, requestMicAccess } from "./micPermission";
+import { mediaAccessMessage, requestCallMediaAccess } from "./micPermission";
 import { startCallTone, stopCallTone, playEndTone, setCallToneSink, resetCallToneSink } from "./callSounds";
 import {
   isMobilePhone,
@@ -41,6 +41,8 @@ interface CallActions {
   rejectCall: () => void;
   hangUp: () => void;
   toggleMute: () => void;
+  /** Toggle the local camera on/off (video calls). No-op for voice calls. */
+  toggleCamera: () => void;
   /** Cycle call audio through the available outputs (bluetooth → headset → speaker → …). */
   cycleAudioRoute: () => void;
   /** Switch call audio to a specific output device (from the route dropdown). */
@@ -123,6 +125,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       // Release the early mic stream if it was never adopted by an engine.
       earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
       earlyStreamRef.current = null;
+      useCallStore.getState().setLocalStream(null);
+      useCallStore.getState().setRemoteStream(null);
       useCallStore.getState().endCall(reason);
       if (endTimerRef.current) window.clearTimeout(endTimerRef.current);
       // Briefly show the end state, then return to idle.
@@ -228,12 +232,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           if (state === "connected") useCallStore.getState().setActive();
           if (state === "failed") teardown("failed");
         },
+        onRemoteStream: (stream) => useCallStore.getState().setRemoteStream(stream),
       });
       await engine.startLocalMedia(earlyStreamRef.current);
       earlyStreamRef.current = null;
       engineRef.current = engine;
-      // Apply mute, scan + apply the audio route, then flush any buffered remote signaling.
+      useCallStore.getState().setLocalStream(engine.getLocalStream());
+      // Apply mute/camera, scan + apply the audio route, then flush any buffered remote signaling.
       engine.setMuted(useCallStore.getState().muted);
+      engine.setCameraEnabled(!useCallStore.getState().cameraOff);
       void refreshRoutes({ initial: !useCallStore.getState().audioDeviceId });
       for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
       pendingIceRef.current = [];
@@ -246,15 +253,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (useCallStore.getState().phase !== "idle") return;
 
       void (async () => {
-        const mic = await requestMicAccess();
-        if (!mic.ok) {
-          showNotice(micAccessMessage(mic.reason));
+        const cap = await requestCallMediaAccess(media);
+        if (!cap.ok) {
+          showNotice(mediaAccessMessage(cap.reason, media));
           return;
         }
-        earlyStreamRef.current = mic.stream;
+        earlyStreamRef.current = cap.stream;
 
         const callId = crypto.randomUUID();
         useCallStore.getState().startOutgoing({ callId, chatId, media, peer });
+        // Show the local camera preview immediately while we wait for the callee (video calls).
+        useCallStore.getState().setLocalStream(cap.stream);
         await refreshRoutes({ initial: true });
 
         getSocket()?.emit(
@@ -283,15 +292,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (phase !== "incoming" || !callId || !chatId) return;
 
       void (async () => {
-        const mic = await requestMicAccess();
-        if (!mic.ok) {
-          showNotice(micAccessMessage(mic.reason));
+        const cap = await requestCallMediaAccess(media);
+        if (!cap.ok) {
+          showNotice(mediaAccessMessage(cap.reason, media));
           teardown("no-mic");
           return;
         }
-        earlyStreamRef.current = mic.stream;
+        earlyStreamRef.current = cap.stream;
 
         useCallStore.getState().setConnecting();
+        // Show the local camera preview immediately while connecting (video calls).
+        useCallStore.getState().setLocalStream(cap.stream);
         emit(SOCKET_EVENTS.CALL_ACCEPT, { callId, chatId } as CallSignalPayload);
 
         try {
@@ -329,6 +340,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       engineRef.current?.setMuted(useCallStore.getState().muted);
     };
 
+    const toggleCamera: CallActions["toggleCamera"] = () => {
+      if (useCallStore.getState().media !== "video") return;
+      useCallStore.getState().toggleCamera();
+      engineRef.current?.setCameraEnabled(!useCallStore.getState().cameraOff);
+    };
+
     const cycleAudioRoute: CallActions["cycleAudioRoute"] = () => {
       const routes = routesRef.current;
       if (routes.length <= 1) return;
@@ -351,6 +368,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       rejectCall,
       hangUp,
       toggleMute,
+      toggleCamera,
       cycleAudioRoute,
       selectAudioRoute,
       minimize,
@@ -420,16 +438,21 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   pendingIceRef.current = [];
                   pendingAnswerAfterOfferRef.current = null;
                   callerOfferStartedRef.current.delete(callId);
+                  useCallStore.getState().setLocalStream(null);
+                  useCallStore.getState().setRemoteStream(null);
                   useCallStore.getState().endCall("failed");
                   emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
                   window.setTimeout(() => useCallStore.getState().reset(), 1400);
                 }
               },
+              onRemoteStream: (stream) => useCallStore.getState().setRemoteStream(stream),
             });
             await engine.startLocalMedia(earlyStreamRef.current);
             earlyStreamRef.current = null;
             engine.setMuted(useCallStore.getState().muted);
+            engine.setCameraEnabled(!useCallStore.getState().cameraOff);
             engineRef.current = engine;
+            useCallStore.getState().setLocalStream(engine.getLocalStream());
             await routeHelpersRef.current.refreshRoutes();
             for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
             pendingIceRef.current = [];
@@ -485,14 +508,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (!callId || !chatId) return;
 
       void (async () => {
-        const mic = await requestMicAccess();
-        if (!mic.ok) {
+        const cap = await requestCallMediaAccess(media);
+        if (!cap.ok) {
           emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
           useCallStore.getState().endCall("no-mic");
           window.setTimeout(() => useCallStore.getState().reset(), 1400);
           return;
         }
-        earlyStreamRef.current = mic.stream;
+        earlyStreamRef.current = cap.stream;
+        useCallStore.getState().setLocalStream(cap.stream);
         if (replay?.offer) pendingOfferRef.current = replay.offer;
 
         try {
@@ -510,16 +534,21 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 earlyStreamRef.current = null;
                 pendingOfferRef.current = null;
                 pendingIceRef.current = [];
+                useCallStore.getState().setLocalStream(null);
+                useCallStore.getState().setRemoteStream(null);
                 useCallStore.getState().endCall("failed");
                 emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
                 window.setTimeout(() => useCallStore.getState().reset(), 1400);
               }
             },
+            onRemoteStream: (stream) => useCallStore.getState().setRemoteStream(stream),
           });
           await engine.startLocalMedia(earlyStreamRef.current);
           earlyStreamRef.current = null;
           engine.setMuted(useCallStore.getState().muted);
+          engine.setCameraEnabled(!useCallStore.getState().cameraOff);
           engineRef.current = engine;
+          useCallStore.getState().setLocalStream(engine.getLocalStream());
           await routeHelpersRef.current.refreshRoutes();
           for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
           pendingIceRef.current = [];
@@ -583,14 +612,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (syncCall.role === "caller" && syncCall.phase === "connecting" && replay?.accepted) {
         if (replay.answer) pendingAnswerAfterOfferRef.current = replay.answer;
         void (async () => {
-          const mic = await requestMicAccess();
-          if (!mic.ok) {
+          const cap = await requestCallMediaAccess(syncCall.media);
+          if (!cap.ok) {
             emit(SOCKET_EVENTS.CALL_END, { callId: syncCall.callId, chatId: syncCall.chatId });
             useCallStore.getState().endCall("no-mic");
             window.setTimeout(() => useCallStore.getState().reset(), 1400);
             return;
           }
-          earlyStreamRef.current = mic.stream;
+          earlyStreamRef.current = cap.stream;
+          useCallStore.getState().setLocalStream(cap.stream);
           beginCallerConnect();
         })();
         return;
@@ -660,6 +690,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         engineRef.current = null;
         pendingOfferRef.current = null;
         pendingIceRef.current = [];
+        useCallStore.getState().setLocalStream(null);
+        useCallStore.getState().setRemoteStream(null);
         useCallStore.getState().endCall(reason);
         window.setTimeout(() => useCallStore.getState().reset(), 1400);
       };

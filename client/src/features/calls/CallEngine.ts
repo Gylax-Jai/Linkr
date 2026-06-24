@@ -1,5 +1,5 @@
 import type { CallMedia } from "@linkr/shared";
-import { applyAudioBitrate, mediaConstraints, tuneOpus } from "./callConfig";
+import { applyAudioBitrate, applyVideoBitrate, mediaConstraints, tuneOpus } from "./callConfig";
 import { isMobilePhone, supportsSetSinkId } from "./audioRoute";
 
 interface CallEngineCallbacks {
@@ -7,6 +7,8 @@ interface CallEngineCallbacks {
   onConnectionStateChange: (state: RTCPeerConnectionState) => void;
   /** Optional — UI should prefer `onConnectionStateChange("connected")` for the active phase. */
   onRemoteStream?: (stream: MediaStream) => void;
+  /** Fired once local capture is ready (drives the local video preview for video calls). */
+  onLocalStream?: (stream: MediaStream) => void;
 }
 
 type SinkCapable = { setSinkId?: (id: string) => Promise<void>; sinkId?: string };
@@ -51,14 +53,39 @@ export class CallEngine {
   }
 
   async startLocalMedia(preloaded?: MediaStream | null): Promise<void> {
-    this.localStream =
-      preloaded && this.media === "audio" && preloaded.getAudioTracks().length > 0
-        ? preloaded
-        : await navigator.mediaDevices.getUserMedia(mediaConstraints(this.media));
+    // Reuse the early-captured stream when it satisfies the call's media needs (audio always; for
+    // video it must also carry a camera track), otherwise capture fresh per `mediaConstraints`.
+    const needsVideo = this.media === "video";
+    const canReuse =
+      !!preloaded &&
+      preloaded.getAudioTracks().length > 0 &&
+      (!needsVideo || preloaded.getVideoTracks().length > 0);
+    this.localStream = canReuse
+      ? (preloaded as MediaStream)
+      : await navigator.mediaDevices.getUserMedia(mediaConstraints(this.media));
     for (const track of this.localStream.getTracks()) {
       const sender = this.pc.addTrack(track, this.localStream);
       if (track.kind === "audio") void applyAudioBitrate(sender);
+      else if (track.kind === "video") void applyVideoBitrate(sender);
     }
+    this.cb.onLocalStream?.(this.localStream);
+  }
+
+  /** Local capture stream (drives the local video preview). Null until `startLocalMedia` runs. */
+  getLocalStream(): MediaStream | null {
+    return this.localStream;
+  }
+
+  /** Remote media stream (accumulates the peer's audio + video tracks). */
+  getRemoteStream(): MediaStream {
+    return this.remoteStream;
+  }
+
+  /** Enable/disable the outgoing camera track (video calls). Audio is controlled by `setMuted`. */
+  setCameraEnabled(enabled: boolean): void {
+    this.localStream?.getVideoTracks().forEach((t) => {
+      t.enabled = enabled;
+    });
   }
 
   hasLocalMedia(): boolean {
