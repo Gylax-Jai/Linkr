@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { Server as SocketIOServer } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { createApp } from "./app.js";
-import { env } from "./config/env.js";
+import { env, features } from "./config/env.js";
 import { connectMongo, disconnectMongo } from "./config/db.js";
 import { connectRedis, disconnectRedis } from "./config/redis.js";
 import { registerSocketHandlers } from "./sockets/index.js";
@@ -12,6 +12,14 @@ import { startAccountPurgeJob } from "./modules/users/account.service.js";
 import { logger } from "./utils/logger.js";
 
 async function bootstrap(): Promise<void> {
+  if (features.turnStatic) {
+    logger.info("WebRTC TURN enabled (managed static credentials)");
+  } else if (features.turnCoturn) {
+    logger.info("WebRTC TURN enabled (coturn REST credential mint)");
+  } else {
+    logger.warn("WebRTC TURN disabled — STUN-only; cross-network calls may fail");
+  }
+
   // External connections degrade gracefully in Sprint 0 (warn instead of crash).
   await connectMongo();
   const redis = await connectRedis();

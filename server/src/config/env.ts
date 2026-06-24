@@ -52,17 +52,24 @@ const envSchema = z.object({
 
   /**
    * Phase 3 calls — WebRTC ICE servers. STUN is enough on most networks; TURN relays media when
-   * peers are behind strict NAT/firewalls. TURN credentials are NEVER hardcoded or shipped to the
-   * client: the server mints short-lived, per-user credentials from the shared secret below
-   * (coturn `use-auth-secret` / TURN REST API) and serves them via GET /api/calls/ice-config.
+   * peers are behind strict NAT/firewalls. Credentials are NEVER hardcoded — supply via env only
+   * and serve them via GET /api/calls/ice-config (Cache-Control: no-store).
+   *
+   * Two TURN modes (pick one):
+   * - **Static** (Metered / Open Relay): TURN_URLS + TURN_USERNAME + TURN_CREDENTIAL
+   * - **coturn REST**: TURN_URLS + TURN_SECRET (HMAC-minted per-user credentials)
    */
   /** Comma-separated STUN urls. Defaults to Google's public STUN when unset. */
   STUN_URLS: z.string().optional(),
-  /** Comma-separated TURN urls, e.g. "turn:turn.example.com:3478,turns:turn.example.com:5349". */
+  /** Comma-separated TURN urls, e.g. turn:global.relay.metered.ca:443,turns:global.relay.metered.ca:443?transport=tcp */
   TURN_URLS: z.string().optional(),
+  /** Managed TURN (Metered etc.): fixed username from the provider dashboard. Server-only. */
+  TURN_USERNAME: z.string().optional(),
+  /** Managed TURN (Metered etc.): fixed password/credential from the provider dashboard. Server-only. */
+  TURN_CREDENTIAL: z.string().optional(),
   /** coturn static-auth-secret used to derive time-limited TURN credentials. Server-only. */
   TURN_SECRET: z.string().optional(),
-  /** Lifetime (seconds) of minted TURN credentials. Default 1 hour. */
+  /** Lifetime (seconds) of minted TURN credentials (coturn mode). Default 1 hour. */
   TURN_TTL: z.coerce.number().int().positive().default(3600),
 });
 
@@ -81,6 +88,10 @@ function has(value: string | undefined): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+const turnCoturn = has(env.TURN_URLS) && has(env.TURN_SECRET);
+const turnStatic =
+  has(env.TURN_URLS) && has(env.TURN_USERNAME) && has(env.TURN_CREDENTIAL);
+
 export const features = {
   mongo: has(env.MONGODB_URI),
   redis: has(env.REDIS_URL),
@@ -93,6 +104,10 @@ export const features = {
   testBot: env.NODE_ENV !== "production" && env.ENABLE_TEST_BOT !== "false",
   /** MSG91 OTP widget verification — server re-verifies the widget's access token when set. */
   msg91: has(env.MSG91_AUTH_KEY),
-  /** TURN relay available only when both a URL list and the shared secret are configured. */
-  turn: has(env.TURN_URLS) && has(env.TURN_SECRET),
+  /** Self-hosted coturn with REST API credential minting. */
+  turnCoturn,
+  /** Managed TURN with fixed username/password (e.g. Metered Open Relay). */
+  turnStatic,
+  /** TURN relay enabled in either mode. */
+  turn: turnCoturn || turnStatic,
 };

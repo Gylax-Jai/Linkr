@@ -13,6 +13,16 @@ function splitUrls(value: string | undefined): string[] {
 }
 
 /**
+ * Managed TURN (Metered Open Relay, etc.): fixed username + credential from the provider dashboard.
+ * The server forwards them to authenticated clients only — never commit these to source control.
+ */
+function buildStaticTurnServers(): IceServerConfig[] {
+  const urls = splitUrls(env.TURN_URLS);
+  if (urls.length === 0 || !env.TURN_USERNAME || !env.TURN_CREDENTIAL) return [];
+  return [{ urls, username: env.TURN_USERNAME, credential: env.TURN_CREDENTIAL }];
+}
+
+/**
  * Mint short-lived TURN credentials for a user using coturn's "use-auth-secret" (TURN REST API)
  * scheme: username = "<unixExpiry>:<userId>", credential = base64(HMAC-SHA1(secret, username)).
  *
@@ -20,7 +30,7 @@ function splitUrls(value: string | undefined): string[] {
  * deriving the long-term-credential password, not a security control over our own data. The shared
  * TURN_SECRET never leaves the server; only the derived, expiring credential is sent to the client.
  */
-function buildTurnServers(userId: string, expiry: number): IceServerConfig[] {
+function buildCoturnTurnServers(userId: string, expiry: number): IceServerConfig[] {
   const urls = splitUrls(env.TURN_URLS);
   if (urls.length === 0 || !env.TURN_SECRET) return [];
 
@@ -35,7 +45,7 @@ function buildTurnServers(userId: string, expiry: number): IceServerConfig[] {
 
 /**
  * Build the ICE server list a client uses to establish a WebRTC call. STUN is always present;
- * TURN entries (with expiring per-user credentials) are added only when TURN is configured.
+ * TURN entries are added when configured (static managed creds take precedence over coturn mint).
  */
 export function buildIceConfig(userId: string): IceConfigResponse {
   const stunUrls = splitUrls(env.STUN_URLS);
@@ -46,8 +56,10 @@ export function buildIceConfig(userId: string): IceConfigResponse {
     { urls: stunUrls.length > 0 ? stunUrls : DEFAULT_STUN },
   ];
 
-  if (features.turn) {
-    iceServers.push(...buildTurnServers(userId, expiry));
+  if (features.turnStatic) {
+    iceServers.push(...buildStaticTurnServers());
+  } else if (features.turnCoturn) {
+    iceServers.push(...buildCoturnTurnServers(userId, expiry));
   }
 
   return { iceServers, ttl: expiry };
