@@ -110,7 +110,7 @@ export function registerTypingHandler(io: Server, socket: Socket): void {
   const userId = requireSocketUser(socket);
   if (!userId) return;
 
-  socket.on(SOCKET_EVENTS.USER_TYPING, async (payload: TypingPayload) => {
+  const relayTyping = async (payload: TypingPayload, event: typeof SOCKET_EVENTS.USER_TYPING | typeof SOCKET_EVENTS.USER_TYPING_STOP) => {
     try {
       if (!payload?.chatId) return;
       const chat = await getChatForUser(payload.chatId, userId);
@@ -118,12 +118,20 @@ export function registerTypingHandler(io: Server, socket: Socket): void {
 
       if (!(await areFriends(userId, otherId))) return;
 
-      io.to(`user:${otherId}`).emit(SOCKET_EVENTS.USER_TYPING, {
+      io.to(`user:${otherId}`).emit(event, {
         chatId: payload.chatId,
         userId,
       });
     } catch {
       /* ignore */
     }
+  };
+
+  socket.on(SOCKET_EVENTS.USER_TYPING, (payload: TypingPayload) => {
+    void relayTyping(payload, SOCKET_EVENTS.USER_TYPING);
+  });
+
+  socket.on(SOCKET_EVENTS.USER_TYPING_STOP, (payload: TypingPayload) => {
+    void relayTyping(payload, SOCKET_EVENTS.USER_TYPING_STOP);
   });
 }

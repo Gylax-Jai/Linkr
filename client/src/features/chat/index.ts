@@ -21,4 +21,4 @@ export {
 } from "./useMessages";
 export { MessageMedia, downloadMessageMedia } from "./MessageMedia";
 export { ForwardMessageModal } from "./ForwardMessageModal";
-export { SocketProvider, emitTyping } from "./SocketProvider";
+export { SocketProvider, emitTyping, emitTypingStop } from "./SocketProvider";

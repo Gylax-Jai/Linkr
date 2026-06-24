@@ -525,7 +525,7 @@ export function Sidebar() {
             </div>
           </div>
 
-          <nav className="flex-1 space-y-3 overflow-y-auto pb-3">
+          <nav className="scroll-pane flex-1 space-y-3 overflow-y-auto pb-3">
             {isLoading ? (
               <p className="px-4 text-sm text-text-muted">Loading chats…</p>
             ) : filtered.length === 0 ? (

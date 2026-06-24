@@ -45,6 +45,7 @@ import { EncryptedBadge } from "@/components/ui/EncryptedBadge";
 import {
   downloadMessageMedia,
   emitTyping,
+  emitTypingStop,
   ForwardMessageModal,
   MessageMedia,
   useArchiveChatMutation,
@@ -308,7 +309,7 @@ function ConversationHeader({
         // Fixed 64px bar; the status bubble (mobile) is an OVERLAY that hangs below via overflow-visible
         // so it never reserves space or pushes messages down (Sprint H). z-30 keeps it above the thread.
         // sticky top-0 keeps it pinned if the soft keyboard tries to scroll the column (Sprint I).
-        "sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 overflow-visible border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm sm:gap-3 sm:px-4",
+        "sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 overflow-visible border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm safe-top sm:gap-3 sm:px-4",
       )}
     >
       <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onBack} aria-label="Back to chat list">
@@ -691,7 +692,7 @@ function MessageList({
     <div
       ref={scrollRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto px-4 py-6 sm:px-6"
+      className="scroll-pane flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6"
       style={{ gap: "var(--space-bubble-gap)" }}
     >
       {grouped.map((message, index) => {
@@ -1090,7 +1091,7 @@ function MessageBubble({
         />
       ) : null}
 
-      <div className={cn("flex max-w-[78%] flex-col sm:max-w-[65%]", mine ? "items-end" : "items-start")}>
+      <div className={cn("flex max-w-[88%] flex-col sm:max-w-[65%]", mine ? "items-end" : "items-start")}>
         <div
           className={cn(
             "px-4 py-2.5 text-sm leading-relaxed",
@@ -1320,6 +1321,17 @@ function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
 
+  const stopTyping = () => {
+    if (typingRef.current) {
+      window.clearTimeout(typingRef.current);
+      typingRef.current = null;
+    }
+    emitTypingStop(chatId);
+  };
+
+  // Stop typing when leaving the chat or unmounting so the peer never sees a stale indicator.
+  useEffect(() => () => stopTyping(), [chatId]);
+
   const isEditing = Boolean(target.editing);
 
   // Outside-click / Escape closes the emoji popover. The toggle (+ desktop floating popover) lives in
@@ -1472,6 +1484,7 @@ function Composer({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (busy) return;
+    stopTyping();
     const content = text.trim();
 
     // A staged file always sends as a media message (the text becomes its caption). Editing never
@@ -1522,10 +1535,16 @@ function Composer({
   const handleChange = (value: string) => {
     setText(value);
     if (typingRef.current) window.clearTimeout(typingRef.current);
+    if (!value.trim()) {
+      stopTyping();
+      return;
+    }
     emitTyping(chatId);
+    // Idle stop — peer sees typing only while keys are moving; cleared instantly on send.
     typingRef.current = window.setTimeout(() => {
       typingRef.current = null;
-    }, 2000);
+      emitTypingStop(chatId);
+    }, 1500);
   };
 
   const replyWho = target.replyTo ? (target.replyTo.sender === userId ? "yourself" : participantName) : "";
@@ -1619,7 +1638,7 @@ function Composer({
           title={upload.isPending ? "Uploading…" : "Attach a photo or file"}
           disabled={upload.isPending || isEditing}
           onClick={() => fileInputRef.current?.click()}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface hover:text-text disabled:opacity-50"
+          className="touch-target grid h-10 w-10 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface hover:text-text disabled:opacity-50 sm:h-9 sm:w-9"
         >
           {upload.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
         </button>
@@ -1631,7 +1650,7 @@ function Composer({
             aria-expanded={emojiOpen}
             onClick={() => toggleEmoji()}
             className={cn(
-              "grid h-9 w-9 place-items-center rounded-full transition-colors hover:bg-surface hover:text-text",
+              "touch-target grid h-10 w-10 place-items-center rounded-full transition-colors hover:bg-surface hover:text-text sm:h-9 sm:w-9",
               emojiOpen ? "text-primary" : "text-text-muted",
             )}
           >
@@ -1666,7 +1685,7 @@ function Composer({
           size="icon"
           disabled={!canSend}
           aria-label={isEditing ? "Save edit" : "Send message"}
-          className="h-9 w-9 shrink-0"
+          className="touch-target h-10 w-10 shrink-0 sm:h-9 sm:w-9"
         >
           {isEditing ? <Check className="h-4 w-4" /> : <Send className="h-4 w-4" />}
         </Button>

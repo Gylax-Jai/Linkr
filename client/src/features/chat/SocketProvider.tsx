@@ -43,6 +43,15 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     bindCallEarly();
     socket.on("connect", bindCallEarly);
 
+    const typingTimeouts = typingTimeoutsRef.current;
+
+    const clearTyping = (chatId: string) => {
+      const existing = typingTimeouts.get(chatId);
+      if (existing) clearTimeout(existing);
+      typingTimeouts.delete(chatId);
+      setTyping(chatId, false);
+    };
+
     const onNewMessage = ({ message }: { message: MessageDTO }) => {
       queryClient.setQueryData<MessageDTO[]>(chatKeys.messages(message.chatId), (old) => {
         if (!old) return [message];
@@ -85,6 +94,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (fromOther) {
+        clearTyping(message.chatId);
         socket.emit(SOCKET_EVENTS.MESSAGE_DELIVERED, { messageId: message._id });
       }
     };
@@ -139,22 +149,20 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setParticipantOnline(userId, false);
     };
 
-    const typingTimeouts = typingTimeoutsRef.current;
     const onTyping = ({ chatId }: { chatId: string }) => {
       setTyping(chatId, true);
       const existing = typingTimeouts.get(chatId);
       if (existing) clearTimeout(existing);
-      // Slightly longer than the composer's ~2s typing debounce so continuous typing never lapses.
-      const t = window.setTimeout(() => {
-        setTyping(chatId, false);
-        typingTimeouts.delete(chatId);
-      }, 4000);
+      // Safety net only — explicit USER_TYPING_STOP or MESSAGE_NEW clears typing immediately.
+      const t = window.setTimeout(() => clearTyping(chatId), 2500);
       typingTimeouts.set(chatId, t);
     };
 
-    // Any friendship change involving us (unfriended / request received / request accepted) should
-    // refresh friends, requests, search and the chat list — the chat's participant friendship drives
-    // the Add/Accept/Requested controls and the composer gate, so the UI flips without a reload.
+    const onTypingStop = ({ chatId }: { chatId: string }) => {
+      clearTyping(chatId);
+    };
+
+    // Any friendship change involving us
     const onFriendChanged = () => {
       void queryClient.invalidateQueries({ queryKey: ["friends"] });
       void queryClient.invalidateQueries({ queryKey: ["users", "search"] });
@@ -202,6 +210,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     socket.on(SOCKET_EVENTS.USER_ONLINE, onOnline);
     socket.on(SOCKET_EVENTS.USER_OFFLINE, onOffline);
     socket.on(SOCKET_EVENTS.USER_TYPING, onTyping);
+    socket.on(SOCKET_EVENTS.USER_TYPING_STOP, onTypingStop);
     socket.on(SOCKET_EVENTS.FRIEND_REMOVED, onFriendChanged);
     socket.on(SOCKET_EVENTS.FRIEND_REQUEST, onFriendChanged);
     socket.on(SOCKET_EVENTS.FRIEND_ACCEPTED, onFriendChanged);
@@ -220,6 +229,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       socket.off(SOCKET_EVENTS.USER_ONLINE, onOnline);
       socket.off(SOCKET_EVENTS.USER_OFFLINE, onOffline);
       socket.off(SOCKET_EVENTS.USER_TYPING, onTyping);
+      socket.off(SOCKET_EVENTS.USER_TYPING_STOP, onTypingStop);
       socket.off(SOCKET_EVENTS.FRIEND_REMOVED, onFriendChanged);
       socket.off(SOCKET_EVENTS.FRIEND_REQUEST, onFriendChanged);
       socket.off(SOCKET_EVENTS.FRIEND_ACCEPTED, onFriendChanged);
@@ -279,4 +289,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 /** Emit typing indicator (debounced by caller). */
 export function emitTyping(chatId: string): void {
   getSocket()?.emit(SOCKET_EVENTS.USER_TYPING, { chatId });
+}
+
+/** Tell the peer typing stopped — call on send, clear, or idle so the indicator vanishes instantly. */
+export function emitTypingStop(chatId: string): void {
+  getSocket()?.emit(SOCKET_EVENTS.USER_TYPING_STOP, { chatId });
 }

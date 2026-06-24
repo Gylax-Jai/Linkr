@@ -13,7 +13,7 @@ export function Header({ className }: { className?: string }) {
   return (
     <header
       className={cn(
-        "relative z-50 flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface/80 px-4 shadow-soft backdrop-blur-sm",
+        "relative z-50 flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface/80 px-4 shadow-soft backdrop-blur-sm safe-top",
         className,
       )}
     >
