@@ -4,7 +4,7 @@ import {
   ArchiveRestore,
   Ban,
   Bell,
-  Bookmark,
+  NotepadText,
   Check,
   Clock,
   Image,
@@ -139,7 +139,7 @@ function DetailsContent() {
           online={showDot}
           pulseRing={showDot}
           zoomable={avatarZoomable}
-          icon={isSelf ? <Bookmark className="h-7 w-7" /> : undefined}
+          icon={isSelf ? <NotepadText className="h-7 w-7" /> : undefined}
         />
         <div className="space-y-1">
           <p className="text-lg font-semibold tracking-tight">{displayName ?? "Select a chat"}</p>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -6,7 +6,6 @@ import {
   Ban,
   Bell,
   BellOff,
-  Bookmark,
   Check,
   CheckCheck,
   Copy,
@@ -18,6 +17,7 @@ import {
   Info,
   Loader2,
   MoreVertical,
+  NotepadText,
   Paperclip,
   Pencil,
   Phone,
@@ -127,6 +127,7 @@ export function ConversationPane() {
   // WhatsApp-style status strip (Sprint F): visible while viewing the latest messages, slides away as
   // you scroll up through history, and returns when you're back at the bottom.
   const [statusVisible, setStatusVisible] = useState(true);
+  const scrollChatToBottomRef = useRef<() => void>(() => {});
 
   // Reset per-chat UI (reply/edit target + status strip) whenever the active chat changes.
   useEffect(() => {
@@ -161,13 +162,16 @@ export function ConversationPane() {
       />
       <MessageList
         chatId={activeChatId}
+        isSelf={isSelf}
         participant={chat.participant}
         onReply={(m) => setTarget({ replyTo: m, editing: null })}
         onEdit={(m) => setTarget({ replyTo: null, editing: m })}
         onForward={(m) => setForwardTarget(m)}
         onAtBottomChange={setStatusVisible}
+        onRegisterScrollToBottom={(fn) => {
+          scrollChatToBottomRef.current = fn;
+        }}
       />
-      {!isSelf ? <TypingIndicator chatId={activeChatId} /> : null}
       <Composer
         chatId={activeChatId}
         participantId={chat.participant._id}
@@ -176,6 +180,7 @@ export function ConversationPane() {
         isSelf={isSelf}
         target={target}
         onClearTarget={() => setTarget({ replyTo: null, editing: null })}
+        scrollToBottom={() => scrollChatToBottomRef.current()}
       />
       <ForwardMessageModal message={forwardTarget} onClose={() => setForwardTarget(null)} />
     </section>
@@ -197,14 +202,13 @@ function TypingLabel({ className }: { className?: string }) {
 }
 
 /**
- * Bottom-of-thread typing indicator (Sprint 3.2.2), WhatsApp-style. Sits just above the composer.
+ * Bottom-of-thread typing row — rendered inside the scroll area so it sits below timestamps
+ * (never overlapping "4:42 am") and scrolls with the message list.
  */
-function TypingIndicator({ chatId }: { chatId: string }) {
-  const isTyping = useUIStore((s) => s.typingByChat[chatId]);
-  if (!isTyping) return null;
+function TypingRow() {
   return (
-    <div className="shrink-0 px-4 pb-1 sm:px-6">
-      <span className="inline-flex rounded-full bg-surface-2 px-3 py-1 text-xs text-primary shadow-soft">
+    <div className="mt-7 mb-2 pl-0.5">
+      <span className="inline-flex rounded-full bg-surface-2 px-2.5 py-0.5 text-xs text-primary shadow-soft">
         <TypingLabel />
       </span>
     </div>
@@ -328,7 +332,7 @@ function ConversationHeader({
             src={chat.participant.avatar}
             size="sm"
             online={isSelf ? false : showDot}
-            icon={isSelf ? <Bookmark className="h-4 w-4" /> : undefined}
+            icon={isSelf ? <NotepadText className="h-4 w-4" /> : undefined}
           />
           {/* WhatsApp-style status hanging under the avatar (mobile only). */}
           {status ? (
@@ -639,27 +643,42 @@ function CallButton({
 
 function MessageList({
   chatId,
+  isSelf = false,
   participant,
   onReply,
   onEdit,
   onForward,
   onAtBottomChange,
+  onRegisterScrollToBottom,
 }: {
   chatId: string;
+  isSelf?: boolean;
   participant: ChatListItem["participant"];
   onReply: (m: MessageDTO) => void;
   onEdit: (m: MessageDTO) => void;
   onForward: (m: MessageDTO) => void;
   /** Reports whether the list is scrolled near the bottom — drives the mobile status strip (Sprint F). */
   onAtBottomChange?: (atBottom: boolean) => void;
+  /** Lets the composer scroll the thread when the mobile keyboard opens (WhatsApp-style). */
+  onRegisterScrollToBottom?: (fn: () => void) => void;
 }) {
   const userId = useAuthStore((s) => s.user?._id);
+  const isTyping = useUIStore((s) => s.typingByChat[chatId]);
   const { data: messages = [] } = useMessages(chatId);
   const markRead = useMarkReadMutation(chatId);
   const react = useReactMessageMutation(chatId);
   const del = useDeleteMessageMutation(chatId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+    onAtBottomChange?.(true);
+  }, [onAtBottomChange]);
+
+  useEffect(() => {
+    onRegisterScrollToBottom?.(() => scrollToBottom("smooth"));
+  }, [onRegisterScrollToBottom, scrollToBottom]);
 
   // Treat "within 120px of the bottom" as at-bottom so the status strip shows for the latest messages
   // but tucks away once the user scrolls up into history.
@@ -670,10 +689,12 @@ function MessageList({
   };
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    // A new message auto-scrolls to the bottom, so the strip should reappear.
-    onAtBottomChange?.(true);
-  }, [messages.length, onAtBottomChange]);
+    scrollToBottom("smooth");
+  }, [messages.length, scrollToBottom]);
+
+  useEffect(() => {
+    if (isTyping) scrollToBottom("smooth");
+  }, [isTyping, scrollToBottom]);
 
   useEffect(() => {
     if (!messages.length || !userId) return;
@@ -731,7 +752,8 @@ function MessageList({
           </div>
         );
       })}
-      <div ref={bottomRef} />
+      {!isSelf && isTyping ? <TypingRow /> : null}
+      <div ref={bottomRef} className="h-px shrink-0" aria-hidden="true" />
     </div>
   );
 }
@@ -1283,6 +1305,7 @@ function Composer({
   isSelf = false,
   target,
   onClearTarget,
+  scrollToBottom,
 }: {
   chatId: string;
   participantId: string;
@@ -1291,6 +1314,8 @@ function Composer({
   isSelf?: boolean;
   target: ComposerTarget;
   onClearTarget: () => void;
+  /** Scroll the message list when the input is focused (mobile keyboard — WhatsApp-style). */
+  scrollToBottom?: () => void;
 }) {
   const [text, setText] = useState("");
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -1331,6 +1356,29 @@ function Composer({
 
   // Stop typing when leaving the chat or unmounting so the peer never sees a stale indicator.
   useEffect(() => () => stopTyping(), [chatId]);
+
+  /** WhatsApp-style: keep the latest messages visible when the mobile keyboard opens. */
+  const bumpScrollForKeyboard = useCallback(() => {
+    scrollToBottom?.();
+    requestAnimationFrame(() => scrollToBottom?.());
+    window.setTimeout(() => scrollToBottom?.(), 120);
+    window.setTimeout(() => scrollToBottom?.(), 320);
+  }, [scrollToBottom]);
+
+  useEffect(() => {
+    if (!isMobile || !scrollToBottom) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onViewportChange = () => {
+      if (document.activeElement === inputRef.current) bumpScrollForKeyboard();
+    };
+    vv.addEventListener("resize", onViewportChange);
+    vv.addEventListener("scroll", onViewportChange);
+    return () => {
+      vv.removeEventListener("resize", onViewportChange);
+      vv.removeEventListener("scroll", onViewportChange);
+    };
+  }, [isMobile, bumpScrollForKeyboard]);
 
   const isEditing = Boolean(target.editing);
 
@@ -1552,8 +1600,8 @@ function Composer({
   return (
     <form
       onSubmit={handleSubmit}
-      className="shrink-0 border-t border-border bg-surface/80 p-3 backdrop-blur-sm sm:px-4"
-      style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+      className="shrink-0 border-t border-border bg-surface/80 px-1.5 py-2 backdrop-blur-sm sm:px-4 sm:py-3"
+      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
     >
       {target.replyTo || target.editing ? (
         <div className="mb-2 flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm">
@@ -1622,7 +1670,7 @@ function Composer({
         </div>
       ) : null}
 
-      <div className="composer-field flex items-end gap-2 rounded-2xl border border-border bg-surface-2 px-2 py-1.5 shadow-soft">
+      <div className="composer-field mx-auto flex w-[90%] max-w-full items-end gap-0 rounded-2xl border border-border bg-surface-2 px-0.5 py-1 shadow-soft sm:w-full sm:gap-1.5 sm:px-2 sm:py-1.5">
         <input
           ref={fileInputRef}
           type="file"
@@ -1638,11 +1686,11 @@ function Composer({
           title={upload.isPending ? "Uploading…" : "Attach a photo or file"}
           disabled={upload.isPending || isEditing}
           onClick={() => fileInputRef.current?.click()}
-          className="touch-target grid h-10 w-10 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface hover:text-text disabled:opacity-50 sm:h-9 sm:w-9"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface hover:text-text disabled:opacity-50 sm:h-9 sm:w-9"
         >
           {upload.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
         </button>
-        <div ref={emojiRef} className="relative shrink-0">
+        <div ref={emojiRef} className="relative shrink-0 -ml-1">
           <button
             type="button"
             aria-label="Insert emoji"
@@ -1650,7 +1698,7 @@ function Composer({
             aria-expanded={emojiOpen}
             onClick={() => toggleEmoji()}
             className={cn(
-              "touch-target grid h-10 w-10 place-items-center rounded-full transition-colors hover:bg-surface hover:text-text sm:h-9 sm:w-9",
+              "grid h-8 w-8 place-items-center rounded-full transition-colors hover:bg-surface hover:text-text sm:h-9 sm:w-9",
               emojiOpen ? "text-primary" : "text-text-muted",
             )}
           >
@@ -1664,6 +1712,7 @@ function Composer({
           ref={inputRef}
           value={text}
           onChange={(e) => handleChange(e.target.value)}
+          onFocus={bumpScrollForKeyboard}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -1677,7 +1726,7 @@ function Composer({
           placeholder={isEditing ? "Edit your message..." : stagedFile ? "Add a caption…" : "Type a message..."}
           rows={1}
           aria-label="Message input"
-          className="composer-input min-h-[2.25rem] min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none"
+          className="composer-input min-h-[2.25rem] min-w-0 flex-1 resize-none bg-transparent px-0 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none sm:px-1 sm:py-2"
         />
         <Button
           type="submit"
@@ -1685,7 +1734,7 @@ function Composer({
           size="icon"
           disabled={!canSend}
           aria-label={isEditing ? "Save edit" : "Send message"}
-          className="touch-target h-10 w-10 shrink-0 sm:h-9 sm:w-9"
+          className="h-8 w-8 shrink-0 sm:h-9 sm:w-9"
         >
           {isEditing ? <Check className="h-4 w-4" /> : <Send className="h-4 w-4" />}
         </Button>

@@ -5,7 +5,7 @@ import {
   Ban,
   Bell,
   BellOff,
-  Bookmark,
+  NotepadText,
   Check,
   ChevronDown,
   Clock,
@@ -179,7 +179,7 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
         src={chat.participant.avatar}
         size="md"
         online={isSelf ? false : showDot}
-        icon={isSelf ? <Bookmark className="h-4 w-4" /> : undefined}
+        icon={isSelf ? <NotepadText className="h-4 w-4" /> : undefined}
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
@@ -477,7 +477,7 @@ export function Sidebar() {
             title="Self chat (message yourself)"
             className="grid h-8 w-8 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-primary disabled:opacity-50"
           >
-            <Bookmark className="h-4 w-4" />
+            <NotepadText className="h-4 w-4" />
           </button>
           <button
             type="button"

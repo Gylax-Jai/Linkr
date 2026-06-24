@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bookmark, Loader2, Search, Send, X } from "lucide-react";
+import { Loader2, NotepadText, Search, Send, X } from "lucide-react";
 import type { MessageDTO } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import { useFriends } from "@/features/friends";
@@ -123,7 +123,7 @@ export function ForwardMessageModal({ message, onClose }: { message: MessageDTO 
             <ForwardRow
               name="Saved messages"
               handle="Message yourself"
-              icon={<Bookmark className="h-4 w-4" />}
+              icon={<NotepadText className="h-4 w-4" />}
               busy={pendingId === "self"}
               disabled={forward.isPending}
               onClick={() => sessionUser && send(sessionUser._id, "self")}
