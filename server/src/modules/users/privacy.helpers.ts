@@ -6,6 +6,7 @@ type PrivacyDoc = {
   profile?: string | null;
   profileDetails?: string | null;
   profilePicture?: string | null;
+  whoCanRequest?: string | null;
 } | null | undefined;
 
 export function normalizeProfileVisibility(raw?: string | null): ProfileVisibility {
