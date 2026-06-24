@@ -19,8 +19,10 @@ export function UserContactCardModal({
   if (!view) return null;
 
   const showAvatar = view.contactCardVisible !== false;
-  const showBio = view.profileDetailsVisible && view.bio?.trim();
-  const showStatus = view.profileDetailsVisible && view.status?.trim();
+  const showDetails = view.profileDetailsVisible !== false;
+  const displayName = showDetails ? view.displayName : "Linkr user";
+  const showBio = showDetails && view.bio?.trim();
+  const showStatus = showDetails && view.status?.trim();
   const presenceLine = view.presenceVisible
     ? view.online
       ? "Online"
@@ -44,14 +46,14 @@ export function UserContactCardModal({
           </div>
           <div className="flex flex-col items-center gap-3 px-6 pb-6 pt-2 text-center">
             <Avatar
-              name={view.displayName}
+              name={displayName}
               src={showAvatar ? view.avatar : undefined}
               size="xl"
               ring
               zoomable={view.avatarZoomable === true}
             />
             <div className="space-y-1">
-              <p className="text-lg font-semibold tracking-tight">{view.displayName}</p>
+              <p className="text-lg font-semibold tracking-tight">{displayName}</p>
               {view.username ? (
                 <p className="font-mono text-xs text-text-muted">@{view.username}</p>
               ) : null}
@@ -66,6 +68,11 @@ export function UserContactCardModal({
             ) : null}
             {showBio ? (
               <p className="max-w-xs text-sm leading-relaxed text-text-muted">{view.bio}</p>
+            ) : null}
+            {!showDetails ? (
+              <p className="max-w-xs text-xs leading-relaxed text-text-muted">
+                This user keeps their profile details private.
+              </p>
             ) : null}
             {!showAvatar ? (
               <p className="max-w-xs text-xs leading-relaxed text-text-muted">

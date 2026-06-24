@@ -5,7 +5,7 @@ import { env } from "../../config/env.js";
 import { UserModel, type UserDoc } from "../../models/User.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { resolveAvatarUrl } from "../users/avatar.helpers.js";
-import { normalizeProfileVisibility } from "../users/privacy.helpers.js";
+import { toClientPrivacy } from "../users/privacy.helpers.js";
 import { applyReactivation } from "../users/account.service.js";
 
 /** Auth service: Google ID-token verification, find-or-create, and the safe session mapper. */
@@ -114,11 +114,7 @@ export function toSessionUser(user: UserDocument): SessionUser {
     onboarded: Boolean(user.onboarded),
     phoneVerified: Boolean(user.phoneVerified),
     e2eeSetupPromptPending: Boolean(user.e2eeSetupPromptPending),
-    privacy: {
-      lastSeen: user.privacy?.lastSeen ?? "friends",
-      profile: normalizeProfileVisibility(user.privacy?.profile),
-      whoCanRequest: user.privacy?.whoCanRequest ?? "everyone",
-    },
+    privacy: toClientPrivacy(user.privacy),
     createdAt: (user.createdAt instanceof Date ? user.createdAt : new Date()).toISOString(),
   };
 }

@@ -24,6 +24,9 @@ export type FriendRequestBody = z.infer<typeof friendRequestBodySchema>;
 /** Body for PATCH /api/users/me/privacy */
 export const privacyUpdateSchema = z.object({
   lastSeen: visibilitySchema.optional(),
+  profileDetails: z.enum(PROFILE_VISIBILITY_VALUES).optional(),
+  profilePicture: z.enum(PROFILE_VISIBILITY_VALUES).optional(),
+  /** @deprecated Sets both profileDetails and profilePicture when the split fields are omitted. */
   profile: z.enum(PROFILE_VISIBILITY_VALUES).optional(),
   whoCanRequest: z.enum(["everyone", "nobody"]).optional(),
 });

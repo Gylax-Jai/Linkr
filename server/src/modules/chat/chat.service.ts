@@ -325,7 +325,7 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
       participant: {
         _id: participant.id,
         username: participant.username ?? undefined,
-        displayName: avatarVisible ? participant.displayName : "Linkr user",
+        displayName: profileDetailsVisible ? participant.displayName : "Linkr user",
         avatar: avatarVisible
           ? resolveAvatarUrl(participant.avatar, participant.id)
           : undefined,

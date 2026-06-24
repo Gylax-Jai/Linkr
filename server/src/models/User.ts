@@ -92,7 +92,10 @@ const userSchema = new Schema(
     },
     privacy: {
       lastSeen: { type: String, enum: VISIBILITY_VALUES, default: "friends" },
+      /** @deprecated Legacy combined field — migrated to profileDetails/profilePicture on read. */
       profile: { type: String, enum: PROFILE_VISIBILITY_VALUES, default: "friends" },
+      profileDetails: { type: String, enum: PROFILE_VISIBILITY_VALUES },
+      profilePicture: { type: String, enum: PROFILE_VISIBILITY_VALUES },
       whoCanRequest: { type: String, enum: ["everyone", "nobody"], default: "everyone" },
     },
 

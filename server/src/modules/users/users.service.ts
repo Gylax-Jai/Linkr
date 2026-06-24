@@ -23,6 +23,7 @@ import {
   canZoomAvatar,
 } from "./privacy.helpers.js";
 import { resolveAvatarUrl } from "./avatar.helpers.js";
+import { notifyProfileChanged } from "./profile.notify.js";
 
 /** Users service: username availability + onboarding completion (blueprint §4). */
 
@@ -97,7 +98,13 @@ type UserProfileDoc = {
   statusExpiresAt?: Date | null;
   online?: boolean | null;
   lastSeen?: Date | null;
-  privacy?: { lastSeen?: string | null; profile?: string | null; whoCanRequest?: string | null } | null;
+  privacy?: {
+    lastSeen?: string | null;
+    profile?: string | null;
+    profileDetails?: string | null;
+    profilePicture?: string | null;
+    whoCanRequest?: string | null;
+  } | null;
 };
 
 function buildUserProfileView(
@@ -144,7 +151,7 @@ function buildUserProfileView(
   return {
     _id: user._id.toString(),
     username: user.username ?? undefined,
-    displayName: avatarVisible ? user.displayName : "Linkr user",
+    displayName: profileVisible ? user.displayName : "Linkr user",
     avatar: avatarVisible ? resolveAvatarUrl(user.avatar, user._id.toString()) : undefined,
     bio: profileVisible ? user.bio ?? undefined : undefined,
     status: profileVisible ? activeStatus(user.status, user.statusExpiresAt) : undefined,
@@ -224,19 +231,30 @@ export async function updatePrivacy(user: UserDocument, input: PrivacyUpdateInpu
     user.privacy = {
       lastSeen: "friends",
       profile: "friends",
+      profileDetails: "friends",
+      profilePicture: "friends",
       whoCanRequest: "everyone",
     };
   }
   if (input.lastSeen !== undefined) {
     user.privacy.lastSeen = input.lastSeen;
   }
+  if (input.profileDetails !== undefined) {
+    user.privacy.profileDetails = input.profileDetails;
+  }
+  if (input.profilePicture !== undefined) {
+    user.privacy.profilePicture = input.profilePicture;
+  }
   if (input.profile !== undefined) {
     user.privacy.profile = input.profile;
+    user.privacy.profileDetails = input.profile;
+    user.privacy.profilePicture = input.profile;
   }
   if (input.whoCanRequest !== undefined) {
     user.privacy.whoCanRequest = input.whoCanRequest;
   }
   await user.save();
+  void notifyProfileChanged(user.id);
   return user;
 }
 
@@ -300,6 +318,7 @@ export async function updateProfile(user: UserDocument, input: ProfileUpdateInpu
     }
   }
   await user.save();
+  void notifyProfileChanged(user.id);
   return user;
 }
 
@@ -310,6 +329,7 @@ export async function updateProfile(user: UserDocument, input: ProfileUpdateInpu
 export async function setUserAvatar(user: UserDocument, ref: string): Promise<UserDocument> {
   user.avatar = ref;
   await user.save();
+  void notifyProfileChanged(user.id);
   return user;
 }
 

@@ -3,6 +3,7 @@ import type { ChatListItem, MessageDTO, NotificationDTO } from "@linkr/shared";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { connectSocket, disconnectSocket, getSocket, reconnectSocket } from "@/lib/socket/client";
+import { refreshPeerProfileInCaches } from "@/features/friends/profileCache";
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { notificationKeys } from "@/features/notifications";
@@ -165,6 +166,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       queryClient.setQueryData<number>(notificationKeys.unread(), (count) => (count ?? 0) + 1);
     };
 
+    const onProfileChanged = ({ userId }: { userId: string }) => {
+      void refreshPeerProfileInCaches(queryClient, userId);
+    };
+
     socket.on(SOCKET_EVENTS.MESSAGE_NEW, onNewMessage);
     socket.on(SOCKET_EVENTS.MESSAGE_DELIVERED, onDelivered);
     socket.on(SOCKET_EVENTS.MESSAGE_READ, onRead);
@@ -178,6 +183,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     socket.on(SOCKET_EVENTS.FRIEND_REQUEST, onFriendChanged);
     socket.on(SOCKET_EVENTS.FRIEND_ACCEPTED, onFriendChanged);
     socket.on(SOCKET_EVENTS.NOTIFICATION_NEW, onNotification);
+    socket.on(SOCKET_EVENTS.USER_PROFILE_CHANGED, onProfileChanged);
 
     return () => {
       socket.off(SOCKET_EVENTS.MESSAGE_NEW, onNewMessage);
@@ -193,6 +199,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       socket.off(SOCKET_EVENTS.FRIEND_REQUEST, onFriendChanged);
       socket.off(SOCKET_EVENTS.FRIEND_ACCEPTED, onFriendChanged);
       socket.off(SOCKET_EVENTS.NOTIFICATION_NEW, onNotification);
+      socket.off(SOCKET_EVENTS.USER_PROFILE_CHANGED, onProfileChanged);
     };
   }, [accessToken, status, queryClient, setParticipantOnline, setTyping]);
 

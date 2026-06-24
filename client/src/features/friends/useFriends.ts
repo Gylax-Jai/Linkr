@@ -23,11 +23,14 @@ export function useUserSearch(query: string) {
       return res.data.results;
     },
     enabled: trimmed.length >= 1,
-    staleTime: 30_000,
+    staleTime: 10_000,
+    /** Background refresh while Find friends is open — merged silently (Phase 4.3). */
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
 }
 
-/** Profile for the contact card — fetch once on open (no polling; avoids modal flicker). */
+/** Profile for the contact card — fetch on open; socket + silent refetch keep it fresh without flicker. */
 export function useUserProfile(userId: string | null) {
   return useQuery({
     queryKey: ["users", "profile", userId],
@@ -36,7 +39,10 @@ export function useUserProfile(userId: string | null) {
       return res.data.profile;
     },
     enabled: Boolean(userId),
-    staleTime: 60_000,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+    placeholderData: (prev) => prev,
   });
 }
 

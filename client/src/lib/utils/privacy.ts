@@ -6,9 +6,14 @@ export function canShowPresence(participant: ChatParticipant): boolean {
   return participant.presenceVisible !== false;
 }
 
-/** Whether the viewer may see bio / custom status (Phase 4.2). */
+/** Whether the viewer may see display name, bio and custom status (Phase 4.3). */
 export function canShowProfileDetails(participant: ChatParticipant): boolean {
   return participant.profileDetailsVisible !== false;
+}
+
+/** Display name follows profile-details privacy (not avatar). */
+export function canShowDisplayName(participant: ChatParticipant): boolean {
+  return canShowProfileDetails(participant);
 }
 
 /** Avatar thumbnail visible (Friends/Everyone profile privacy). */

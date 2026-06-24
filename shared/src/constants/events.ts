@@ -7,6 +7,8 @@ export const SOCKET_EVENTS = {
   USER_ONLINE: "user:online",
   USER_OFFLINE: "user:offline",
   USER_TYPING: "user:typing",
+  /** A user's profile or privacy changed — viewers should refresh their cached peer profile. */
+  USER_PROFILE_CHANGED: "user:profile-changed",
 
   // Friends
   FRIEND_REQUEST: "friend:request",

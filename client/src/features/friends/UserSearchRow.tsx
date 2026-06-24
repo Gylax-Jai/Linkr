@@ -10,6 +10,8 @@ function handleLabel(user: UserSearchResult): string {
 
 export function UserSearchRow({ user, onChatStarted }: { user: UserSearchResult; onChatStarted?: () => void }) {
   const [cardOpen, setCardOpen] = useState(false);
+  const showDetails = user.profileDetailsVisible !== false;
+  const displayName = showDetails ? user.displayName : "Linkr user";
 
   return (
     <>
@@ -18,11 +20,11 @@ export function UserSearchRow({ user, onChatStarted }: { user: UserSearchResult;
           type="button"
           onClick={() => setCardOpen(true)}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
-          aria-label={`View ${user.displayName}'s profile`}
+          aria-label={`View ${displayName}'s profile`}
         >
-          <Avatar name={user.displayName} src={user.contactCardVisible !== false ? user.avatar : undefined} size="md" />
+          <Avatar name={displayName} src={user.contactCardVisible !== false ? user.avatar : undefined} size="md" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-text">{user.displayName}</p>
+            <p className="truncate text-sm font-medium text-text">{displayName}</p>
             <p className="truncate font-mono text-xs text-text-muted">
               {user.username ? `@${user.username}` : handleLabel(user)}
             </p>

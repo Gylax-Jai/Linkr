@@ -1,4 +1,4 @@
-import { Eye, Loader2, UserCheck } from "lucide-react";
+import { Eye, Image, Loader2, UserCheck } from "lucide-react";
 import type { PrivacyUpdateInput } from "@linkr/shared";
 import { useAuthStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -75,10 +75,15 @@ function PrivacyRow({
   );
 }
 
+const visibilityOptions = [
+  { value: "everyone", label: "Everyone" },
+  { value: "friends", label: "Friends" },
+  { value: "nobody", label: "Nobody" },
+] as const;
+
 /**
- * Privacy settings (Phase 4) wired to the existing `PATCH /api/users/me/privacy` endpoint. Lets the
- * user control who can see their last-seen/online state, their profile details, and who is allowed
- * to send them a friend request. Each change is saved immediately and reflected in the auth store.
+ * Privacy settings (Phase 4.3): last seen, profile details (name/status/bio), profile picture
+ * (avatar + zoom), and friend requests.
  */
 export function PrivacyCard() {
   const user = useAuthStore((s) => s.user);
@@ -112,28 +117,33 @@ export function PrivacyCard() {
             value={privacy.lastSeen}
             disabled={saving}
             onChange={(v) => save({ lastSeen: v as PrivacyUpdateInput["lastSeen"] })}
-            options={[
-              { value: "everyone", label: "Everyone" },
-              { value: "friends", label: "Friends" },
-              { value: "nobody", label: "Nobody" },
-            ]}
+            options={[...visibilityOptions]}
           />
         </PrivacyRow>
 
         <PrivacyRow
           icon={<Eye className="h-4 w-4" />}
           title="Profile details"
-          hint="Who can see your bio and status. Your display name and @username are always visible; photo thumbnail follows this setting (Friends = thumbnail without zoom for non-friends)."
+          hint="Who can see your display name, custom status and bio. Your @username is always visible."
         >
           <Segmented
-            value={privacy.profile}
+            value={privacy.profileDetails}
             disabled={saving}
-            onChange={(v) => save({ profile: v as PrivacyUpdateInput["profile"] })}
-            options={[
-              { value: "everyone", label: "Everyone" },
-              { value: "friends", label: "Friends" },
-              { value: "nobody", label: "Nobody" },
-            ]}
+            onChange={(v) => save({ profileDetails: v as PrivacyUpdateInput["profileDetails"] })}
+            options={[...visibilityOptions]}
+          />
+        </PrivacyRow>
+
+        <PrivacyRow
+          icon={<Image className="h-4 w-4" />}
+          title="Profile picture"
+          hint="Everyone: anyone sees your photo; only friends can zoom. Friends: only friends see and zoom. Nobody: hidden."
+        >
+          <Segmented
+            value={privacy.profilePicture}
+            disabled={saving}
+            onChange={(v) => save({ profilePicture: v as PrivacyUpdateInput["profilePicture"] })}
+            options={[...visibilityOptions]}
           />
         </PrivacyRow>
 

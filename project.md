@@ -3,7 +3,7 @@
 > **Living document:** everything built so far, how to run it, and what's next.  
 > For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
 
-**Last updated:** June 24, 2026 — **Phase 4.2 patch (round 2)**: **E2EE recovery passphrase prompt** is now **server-backed** (`e2eeSetupPromptPending` set on onboarding complete, cleared on dismiss or backup — no more sessionStorage race); **profile privacy is split** — `@username` always visible, avatar thumbnail for Everyone/Friends (Friends = thumbnail **without zoom** for non-friends), bio/status gated separately; **contact-card modal no longer flickers** — removed 5s poll from search/profile queries (kept on chat list + friends only). Builds on the first **Phase 4.2 patch**: sidebar previews show **deleted messages**, **call logs** (with duration), and **E2EE** text; list cache **patches + re-sorts** on socket/delete events; **sessionStorage** gives instant sidebar on reload; profile visibility is **Everyone | Friends | Nobody**; calls **prune ghost BUSY**, ring timeout **skips accepted** calls, and hang-up/disconnect use correct **cancelled / missed / declined** outcomes.
+**Last updated:** June 24, 2026 — **Phase 4.2 patch (round 3)**: privacy is now **two independent settings** — **Profile details** (display name, status, bio) and **Profile picture** (avatar thumbnail + zoom); `@username` always visible; **Everyone** picture = strangers see photo **without zoom**, friends can zoom; **`user:profile-changed`** socket + silent cache merge keeps search/contact card/chat list fresh **without modal flicker** (15s background refetch fallback). Builds on **round 2** (E2EE prompt, interim split privacy, contact-card poll fix) and **round 1** (sidebar previews, call reliability, privacy enforcement).
 
 Earlier (Sprint C.2.2 — Contact info button now toggles the profile pane open/closed; self chat renamed "Self chat" everywhere and now shows your own custom-status chip)
 
@@ -217,6 +217,10 @@ Five self-contained sprints layering social/UX controls and account lifecycle on
   - **Server-backed E2EE setup prompt:** new `User.e2eeSetupPromptPending` flag — set **`true` on onboarding complete**, exposed on `SessionUser`, cleared by **`PATCH /api/users/me/e2ee-prompt-dismiss`** or when a **recovery backup is saved** (`POST /api/keys/backup`). Client `E2EESecurityPrompt` shows when `e2eeSetupPromptPending && needsBackup && status === ready` (replaces fragile sessionStorage/localStorage gating).
   - **Split profile privacy:** `@username` is **always returned** to viewers; avatar thumbnail follows **Everyone/Friends** (hidden only on **Nobody**); **full-screen avatar zoom** is **Everyone-only for strangers** (Friends setting = friends can zoom, strangers see thumbnail only); bio/status remain gated by `canViewProfileDetails`. Server adds `avatarZoomable` on `ChatParticipant` / `UserSearchResult`; client `DetailsPane`, `UserContactCardModal`, and search rows respect it.
   - **Contact-card poll fix:** removed **`refetchInterval: 5000`** from `useUserSearch` and `useUserProfile` (fetch once on open, `staleTime` 30s/60s) so the Find-friends contact card **no longer flickers**; **5s poll kept** on `useChatList` and `useFriends` only.
+- **4.2 (patch round 3) — Split privacy settings + live profile sync:**
+  - **Two privacy toggles:** `privacy.profileDetails` (display name, custom status, bio) and `privacy.profilePicture` (avatar thumbnail + zoom) replace the single combined `privacy.profile` (legacy field still migrated on read). Settings → **Profile details** + **Profile picture** rows in `PrivacyCard`.
+  - **Rules:** `@username` always visible. **Picture → Everyone:** all see thumbnail, **only friends zoom**. **Picture → Friends:** strangers see no photo; friends see + zoom. **Picture → Nobody:** photo hidden. **Details → Everyone/Friends/Nobody:** gates name/status/bio independently (display name no longer tied to avatar visibility).
+  - **Live sync:** `notifyProfileChanged()` emits **`user:profile-changed`** to friends + 1:1 chat partners on profile/privacy/avatar updates. Client `profileCache.ts` **merges** the refreshed `GET /users/:id/profile` into search, contact card, chat list, and friends caches (no invalidate → no flicker). **15s silent refetch** on `useUserSearch` / `useUserProfile` as fallback for strangers not in a chat.
 
 ### Sprint 3.1.5 — Always-on audio dropdown + Earpiece default + mic gate 📞🎚️
 Discord/WhatsApp-style mobile audio routing UX.
@@ -736,6 +740,13 @@ pnpm build        # production build
 3. **Split profile privacy — Nobody:** User A sets Profile details → **Nobody**. Strangers see **@username** but **no avatar** and no bio; contact card explains the photo is private.
 4. **Contact card no flicker:** open **Find friends** → search a user → open their contact card → leave it open 15+ seconds. The modal should stay stable (no reload flash every 5s). Chat list and friends panel still refresh online/previews every ~5s.
 5. **Details pane:** open a chat with a non-friend whose profile is **Friends** → details pane shows `@username`, avatar thumbnail without zoom, and a note that bio is private until you're friends.
+
+### How to test Phase 4.2 patch (round 3) — split privacy + live sync
+1. **Independent settings:** Settings → set **Profile details = Everyone** and **Profile picture = Nobody**. As a stranger, search that user → you see **display name + status + bio** but **no avatar** (only `@username` + details).
+2. **Picture Everyone, details Friends:** Stranger sees **photo thumbnail (no zoom)** but **not** bio/status; friend sees everything + zoom.
+3. **Picture Friends:** Stranger sees **@username only** (no photo); after friending, photo + zoom appear live.
+4. **Live privacy change:** with Find friends open on account B, account A changes **Profile details** from Friends → Everyone → within ~15s (or instantly if B is A's chat partner/friend via socket), B's search row + contact card update **without closing the modal**.
+5. **No flicker:** leave a contact card open while A edits their bio → card text updates in place (no spinner flash).
 
 ---
 

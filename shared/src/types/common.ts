@@ -16,6 +16,9 @@ export type WhoCanRequest = "everyone" | "nobody";
 /** Per-user privacy controls (blueprint §12). */
 export interface PrivacySettings {
   lastSeen: Visibility;
-  profile: ProfileVisibility;
+  /** Who can see display name, custom status and bio (Phase 4.3). */
+  profileDetails: ProfileVisibility;
+  /** Who can see profile photo; zoom is friends-only when picture is Everyone (Phase 4.3). */
+  profilePicture: ProfileVisibility;
   whoCanRequest: WhoCanRequest;
 }

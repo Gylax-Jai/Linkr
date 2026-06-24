@@ -32,7 +32,7 @@ import { MessageMedia, useArchiveChatMutation, useChatById, useMessages, useMute
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { shareContact } from "@/lib/utils/share";
-import { canShowContactCard, canShowProfileDetails, canZoomAvatar, getPresenceLabel, showOnlineDot } from "@/lib/utils/privacy";
+import { canShowContactCard, canShowDisplayName, canShowProfileDetails, canZoomAvatar, getPresenceLabel, showOnlineDot } from "@/lib/utils/privacy";
 import { cn } from "@/lib/utils";
 
 type TabId = "profile" | "media" | "files";
@@ -110,9 +110,10 @@ function DetailsContent() {
   // Self chat: own space, no presence/relationship/block actions (Sprint C.2).
   const isSelf = chat?.type === "self";
   const showProfileDetails = participant ? canShowProfileDetails(participant) : true;
+  const showDisplayName = participant ? canShowDisplayName(participant) : true;
   const showAvatar = participant ? canShowContactCard(participant) : true;
   const avatarZoomable = participant ? canZoomAvatar(participant) : true;
-  const headerName = isSelf ? "Self chat" : showAvatar ? participant?.displayName : "Linkr user";
+  const headerName = isSelf ? "Self chat" : showDisplayName ? participant?.displayName : "Linkr user";
   const displayName = headerName;
   const online = !isSelf && participant ? (onlineOverrides[participant._id] ?? participant.online) : false;
   const presenceLabel = participant && !isSelf ? getPresenceLabel(participant, online) : null;
