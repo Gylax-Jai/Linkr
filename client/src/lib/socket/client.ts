@@ -15,7 +15,10 @@ export function connectSocket(token: string): Socket {
     return socket;
   }
 
-  socket?.disconnect();
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
 
   socket = io(API_URL, {
     auth: { token },

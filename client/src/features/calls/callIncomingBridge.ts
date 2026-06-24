@@ -9,26 +9,29 @@ import { useCallStore } from "@/lib/store";
  * `call:incoming-ack` once the store is updated.
  */
 export function attachCallIncomingHandler(socket: Socket): () => void {
+  const ackIncoming = (payload: CallIncomingPayload) => {
+    socket.emit(SOCKET_EVENTS.CALL_INCOMING_ACK, {
+      callId: payload.callId,
+      chatId: payload.chatId,
+      ok: true,
+    });
+  };
+
   const onIncoming = (payload: CallIncomingPayload) => {
     const state = useCallStore.getState();
 
     if (state.phase !== "idle") {
-      if (state.callId === payload.callId && state.phase === "incoming") {
-        socket.emit(SOCKET_EVENTS.CALL_INCOMING_ACK, {
-          callId: payload.callId,
-          chatId: payload.chatId,
-          ok: true,
-        });
-        return;
+      // Same call — duplicate delivery or retry while ringing/connecting (Phase 3.1.10).
+      if (state.callId === payload.callId) {
+        if (state.phase === "incoming" || state.phase === "connecting") {
+          ackIncoming(payload);
+          return;
+        }
       }
 
       if (state.phase === "active" || state.phase === "connecting") {
         socket.emit(SOCKET_EVENTS.CALL_REJECT, { callId: payload.callId, chatId: payload.chatId });
-        socket.emit(SOCKET_EVENTS.CALL_INCOMING_ACK, {
-          callId: payload.callId,
-          chatId: payload.chatId,
-          ok: true,
-        });
+        ackIncoming(payload);
         return;
       }
 
@@ -42,11 +45,7 @@ export function attachCallIncomingHandler(socket: Socket): () => void {
       peer: payload.from,
     });
 
-    socket.emit(SOCKET_EVENTS.CALL_INCOMING_ACK, {
-      callId: payload.callId,
-      chatId: payload.chatId,
-      ok: true,
-    });
+    ackIncoming(payload);
   };
 
   socket.on(SOCKET_EVENTS.CALL_INCOMING, onIncoming);

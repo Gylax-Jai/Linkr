@@ -418,9 +418,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     };
 
     const onAccept = (payload: CallSignalPayload) => {
-      const { phase, callId, chatId } = useCallStore.getState();
-      if (phase !== "outgoing" || payload.callId !== callId || !chatId) return;
-      beginCallerConnect();
+      const { phase, callId } = useCallStore.getState();
+      if (payload.callId === callId && phase === "outgoing") {
+        beginCallerConnect();
+        return;
+      }
+      // Caller reconnected on a fresh socket — restore from server then offer (Phase 3.1.10).
+      if ((phase === "idle" || phase === "ended") && payload.callId && payload.chatId) {
+        socket.emit(SOCKET_EVENTS.CALL_SYNC, {}, (res?: CallSyncResponse) => {
+          if (res?.call?.callId === payload.callId && res.call.role === "caller") {
+            applySyncResponse(res.call);
+          }
+        });
+      }
     };
 
     const restoreCalleeConnecting = (syncCall: CallSyncActiveCall) => {

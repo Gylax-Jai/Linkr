@@ -46,7 +46,7 @@ export function registerPresenceHandlers(io: Server, socket: Socket): void {
   registerTypingHandler(io, socket);
 
   registerUserSocket(userId, socket.id);
-  onUserSocketConnected(io, userId);
+  onUserSocketConnected(io, userId, socket.id);
 
   void (async () => {
     let sockets = userSockets.get(userId);

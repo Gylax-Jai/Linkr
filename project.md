@@ -53,6 +53,7 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Reliable incoming-call delivery (ack + retry, accurate Ringing) | ✅ Done (Sprint 3.1.7) |
 | Call delivery fix (fetchSockets, pending retry, sync poll) | ✅ Done (Sprint 3.1.8) |
 | Explicit incoming ack + early handler (no Socket.IO server ack) | ✅ Done (Sprint 3.1.9) |
+| Per-socket accept/WebRTC relay + reconnect replay | ✅ Done (Sprint 3.1.10) |
 | Mute notifications + archive chats (per-user) | ✅ Done (Phase 4) |
 | Privacy settings UI (last seen / profile / requests) | ✅ Done (Phase 4) |
 | Forward message (friends only) + share contact | ✅ Done (Phase 4) |
@@ -225,6 +226,21 @@ Five self-contained sprints layering social/UX controls and account lifecycle on
   - **Two privacy toggles:** `privacy.profileDetails` (display name, custom status, bio) and `privacy.profilePicture` (avatar thumbnail + zoom) replace the single combined `privacy.profile` (legacy field still migrated on read). Settings → **Profile details** + **Profile picture** rows in `PrivacyCard`.
   - **Rules:** `@username` always visible. **Picture → Everyone:** all see thumbnail, **only friends zoom**. **Picture → Friends:** strangers see no photo; friends see + zoom. **Picture → Nobody:** photo hidden. **Details → Everyone/Friends/Nobody:** gates name/status/bio independently (display name no longer tied to avatar visibility).
   - **Live sync:** `notifyProfileChanged()` emits **`user:profile-changed`** to friends + 1:1 chat partners on profile/privacy/avatar updates. Client `profileCache.ts` **merges** the refreshed `GET /users/:id/profile` into search, contact card, chat list, and friends caches (no invalidate → no flicker). **15s silent refetch** on `useUserSearch` / `useUserProfile` as fallback for strangers not in a chat.
+
+### Sprint 3.1.10 — Per-socket accept/WebRTC relay + reconnect replay 📞🔧
+Fixes **incoming rings but accept leaves callee on Connecting / caller stuck on Calling/Ringing** — signaling after accept used `io.to(user:room).emit()` while duplicate/replaced sockets meant the **idle** socket got events and the **call-state** socket missed them.
+- **Per-socket relay:** `call:accept`, `call:reject`, `call:end`, `webrtc:offer`, `webrtc:answer`, and ICE now emit to every live **`fetchSockets()` id** for the peer (same pattern as 3.1.9 incoming).
+- **Socket tracking:** `callerSocketId` / `calleeSocketId` on the in-memory call record; updated on initiate, incoming-ack, accept, offer, answer.
+- **Reconnect replay:** on connect, server replays `call:accept` + buffered SDP to a socket that rejoined mid-connect (`call:signaling replay` log).
+- **Caller recovery:** if `call:accept` arrives on a fresh idle socket, client runs `call:sync` and restores the offer flow.
+- **Bridge fix:** duplicate `call:incoming` during `connecting` for the **same callId** re-acks only — no auto-reject.
+- **Client:** tear down stale socket instance before creating a new one (reduces duplicate connections).
+- **Diagnostics:** Render logs `call:accept received`, `call:accept relayed`, `webrtc:offer relayed`, `webrtc:answer relayed`, `call:signaling replay`.
+
+**Test matrix:**
+1. Test → Gylax, accept → both reach **active** + timer within ~10s.
+2. Render shows `call:accept received` → `call:accept relayed` → `webrtc:offer relayed` → `webrtc:answer relayed`.
+3. Mid-call socket reconnect → replay or sync restores **Connecting → active**.
 
 ### Sprint 3.1.9 — Explicit incoming ack + early handler 📞🔧
 Fixes production bug where Render logs showed **`call:delivery callback → acked: false, err: "operation has timed out", responseCount: 0`** even with **`socketCount: 1`** — the server found the callee online but Socket.IO's **server-side ack** on `io.to(room).timeout().emit()` never received a client callback (handler race + Redis adapter + reconnect churn).

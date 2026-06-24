@@ -44,6 +44,10 @@ interface CallRecord {
   media: CallMedia;
   startedAt: number;
   acceptedAt?: number;
+  /** Live socket that initiated the call (Phase 3.1.10 — targets signaling on reconnect). */
+  callerSocketId?: string;
+  /** Live socket that acked incoming / accepted (Phase 3.1.10). */
+  calleeSocketId?: string;
   /** Set once the callee's device acknowledges the incoming event (stops retry; true ringing). */
   delivered?: boolean;
   ringTimeout?: ReturnType<typeof setTimeout>;
@@ -153,6 +157,25 @@ function finalizeCall(callId: string | undefined, outcome: CallOutcome): void {
   });
 }
 
+/** Emit to every live socket for a user (Phase 3.1.10 — room broadcast alone missed events with Redis + churn). */
+async function emitToUser(
+  io: Server,
+  userId: string,
+  event: string,
+  payload: unknown,
+  logMeta?: Record<string, unknown>,
+): Promise<string[]> {
+  const sockets = await io.in(`user:${userId}`).fetchSockets();
+  const socketIds = sockets.map((s) => s.id);
+  for (const socketId of socketIds) {
+    io.to(socketId).emit(event, payload);
+  }
+  if (logMeta && socketIds.length > 0) {
+    logger.info(logMeta.message as string, { ...logMeta, userId, socketIds, event });
+  }
+  return socketIds;
+}
+
 function endCallForPeer(
   io: Server,
   callId: string,
@@ -161,10 +184,12 @@ function endCallForPeer(
   outcome: CallOutcome,
 ): void {
   const peerId = record.caller === userId ? record.callee : record.caller;
-  io.to(`user:${peerId}`).emit(SOCKET_EVENTS.CALL_END, {
+  const payload = { callId, chatId: record.chatId } satisfies CallSignalPayload;
+  void emitToUser(io, peerId, SOCKET_EVENTS.CALL_END, payload, {
+    message: "call:end relayed",
     callId,
-    chatId: record.chatId,
-  } satisfies CallSignalPayload);
+    peerId,
+  });
   finalizeCall(callId, outcome);
 }
 
@@ -185,10 +210,34 @@ function finalizeAllUserCalls(io: Server, userId: string): void {
   }
 }
 
+/** Replay accept / SDP to a socket that reconnected mid-call (Phase 3.1.10). */
+function replaySignalingToSocket(io: Server, userId: string, socketId: string): void {
+  const set = callsByUser.get(userId);
+  if (!set) return;
+
+  for (const callId of set) {
+    const record = callsById.get(callId);
+    if (!record?.acceptedAt) continue;
+
+    const signal = { callId, chatId: record.chatId } satisfies CallSignalPayload;
+
+    if (record.caller === userId) {
+      io.to(socketId).emit(SOCKET_EVENTS.CALL_ACCEPT, signal);
+      if (record.lastOffer) io.to(socketId).emit(SOCKET_EVENTS.WEBRTC_OFFER, record.lastOffer);
+      logger.info("call:signaling replay", { callId, userId, socketId, role: "caller" });
+    } else if (record.callee === userId) {
+      if (record.lastOffer) io.to(socketId).emit(SOCKET_EVENTS.WEBRTC_OFFER, record.lastOffer);
+      if (record.lastAnswer) io.to(socketId).emit(SOCKET_EVENTS.WEBRTC_ANSWER, record.lastAnswer);
+      logger.info("call:signaling replay", { callId, userId, socketId, role: "callee" });
+    }
+  }
+}
+
 /** Cancel disconnect grace when a user reconnects (Phase 3.1.6). */
-export function onUserSocketConnected(io: Server, userId: string): void {
+export function onUserSocketConnected(io: Server, userId: string, socketId?: string): void {
   cancelDisconnectGrace(userId);
   deliverPendingCalls(io, userId);
+  if (socketId) replaySignalingToSocket(io, userId, socketId);
 }
 
 /** Schedule call cleanup when the user's last socket disconnects (Phase 3.1.6). */
@@ -208,8 +257,9 @@ function scheduleSafetyTimeout(io: Server, callId: string, record: CallRecord): 
   record.maxTimeout = setTimeout(() => {
     const rec = callsById.get(callId);
     if (!rec) return;
-    io.to(`user:${rec.caller}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: rec.chatId });
-    io.to(`user:${rec.callee}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: rec.chatId });
+    const payload = { callId, chatId: rec.chatId } satisfies CallSignalPayload;
+    void emitToUser(io, rec.caller, SOCKET_EVENTS.CALL_END, payload);
+    void emitToUser(io, rec.callee, SOCKET_EVENTS.CALL_END, payload);
     finalizeCall(callId, rec.acceptedAt ? "completed" : "missed");
   }, MAX_CALL_MS);
 }
@@ -218,8 +268,9 @@ function scheduleRingTimeout(io: Server, callId: string, record: CallRecord): vo
   record.ringTimeout = setTimeout(() => {
     const rec = callsById.get(callId);
     if (!rec || rec.acceptedAt) return;
-    io.to(`user:${rec.caller}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: rec.chatId });
-    io.to(`user:${rec.callee}`).emit(SOCKET_EVENTS.CALL_END, { callId, chatId: rec.chatId });
+    const payload = { callId, chatId: rec.chatId } satisfies CallSignalPayload;
+    void emitToUser(io, rec.caller, SOCKET_EVENTS.CALL_END, payload);
+    void emitToUser(io, rec.callee, SOCKET_EVENTS.CALL_END, payload);
     finalizeCall(callId, "missed");
   }, RING_TIMEOUT_MS);
 }
@@ -239,15 +290,25 @@ function deliverIncomingWithRetry(
   void runIncomingDelivery(io, callId, peerId, callerId, incoming, 1);
 }
 
-function markIncomingDelivered(io: Server, callId: string, peerId: string, attempt?: number): void {
+function markIncomingDelivered(
+  io: Server,
+  callId: string,
+  peerId: string,
+  calleeSocketId: string,
+  attempt?: number,
+): void {
   const record = callsById.get(callId);
   if (!record || record.delivered || record.acceptedAt) return;
   record.delivered = true;
-  io.to(`user:${record.caller}`).emit(SOCKET_EVENTS.CALL_RINGING, {
-    callId,
-    chatId: record.chatId,
-  } satisfies CallSignalPayload);
-  logger.info("call:incoming acked", { callId, peerId, attempt: attempt ?? null });
+  record.calleeSocketId = calleeSocketId;
+  void emitToUser(
+    io,
+    record.caller,
+    SOCKET_EVENTS.CALL_RINGING,
+    { callId, chatId: record.chatId } satisfies CallSignalPayload,
+    { message: "call:ringing relayed", callId, callerId: record.caller },
+  );
+  logger.info("call:incoming acked", { callId, peerId, calleeSocketId, attempt: attempt ?? null });
 }
 
 async function runIncomingDelivery(
@@ -432,7 +493,7 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
     if (!callId) return;
     const record = callsById.get(callId);
     if (!record || record.callee !== userId || record.delivered || record.acceptedAt) return;
-    markIncomingDelivered(io, callId, userId);
+    markIncomingDelivered(io, callId, userId, socket.id);
   });
 
   socket.on(
@@ -471,6 +532,7 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
           chatId,
           media,
           startedAt: Date.now(),
+          callerSocketId: socket.id,
         };
         trackCall(callId, record);
         scheduleSafetyTimeout(io, callId, record);
@@ -530,11 +592,29 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
     clearStaleCallsForUser(io, userId);
   });
 
-  const relayToPeer = async (event: string, payload: CallSignalPayload): Promise<void> => {
+  const relayToCallPeer = async (
+    event: string,
+    payload: CallSignalPayload,
+    logMessage: string,
+  ): Promise<void> => {
     const { callId, chatId } = payload ?? {};
     if (!callId || !chatId) return;
-    const peerId = await resolvePeer(userId, chatId);
-    if (peerId) io.to(`user:${peerId}`).emit(event, { callId, chatId } satisfies CallSignalPayload);
+
+    const record = callsById.get(callId);
+    let peerId: string | null = null;
+    if (record) {
+      peerId = record.caller === userId ? record.callee : record.caller;
+    } else {
+      peerId = await resolvePeer(userId, chatId);
+    }
+    if (!peerId) return;
+
+    await emitToUser(io, peerId, event, payload, {
+      message: logMessage,
+      callId,
+      fromUserId: userId,
+      peerId,
+    });
   };
 
   socket.on(SOCKET_EVENTS.CALL_ACCEPT, (payload: CallSignalPayload) => {
@@ -542,17 +622,23 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
       const record = payload?.callId ? callsById.get(payload.callId) : undefined;
       if (record && !record.acceptedAt) {
         record.acceptedAt = Date.now();
+        record.calleeSocketId = socket.id;
         if (record.ringTimeout) clearTimeout(record.ringTimeout);
         record.ringTimeout = undefined;
         pendingIncoming.delete(payload.callId);
       }
-      await relayToPeer(SOCKET_EVENTS.CALL_ACCEPT, payload);
+      logger.info("call:accept received", {
+        callId: payload?.callId,
+        userId,
+        socketId: socket.id,
+      });
+      await relayToCallPeer(SOCKET_EVENTS.CALL_ACCEPT, payload, "call:accept relayed");
     })();
   });
 
   socket.on(SOCKET_EVENTS.CALL_REJECT, (payload: CallSignalPayload) => {
     void (async () => {
-      await relayToPeer(SOCKET_EVENTS.CALL_REJECT, payload);
+      await relayToCallPeer(SOCKET_EVENTS.CALL_REJECT, payload, "call:reject relayed");
       finalizeCall(payload?.callId, "declined");
     })();
   });
@@ -560,7 +646,7 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
   socket.on(SOCKET_EVENTS.CALL_END, (payload: CallSignalPayload) => {
     void (async () => {
       const record = payload?.callId ? callsById.get(payload.callId) : undefined;
-      await relayToPeer(SOCKET_EVENTS.CALL_END, payload);
+      await relayToCallPeer(SOCKET_EVENTS.CALL_END, payload, "call:end relayed");
       if (!record) return;
       const outcome: CallOutcome = record.acceptedAt
         ? "completed"
@@ -574,23 +660,66 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
   socket.on(SOCKET_EVENTS.WEBRTC_OFFER, async (payload: WebRtcSdpPayload) => {
     if (payload?.callId) {
       const record = callsById.get(payload.callId);
-      if (record) record.lastOffer = payload;
+      if (record) {
+        record.lastOffer = payload;
+        if (record.caller === userId) record.callerSocketId = socket.id;
+      }
     }
-    const peerId = payload?.chatId ? await resolvePeer(userId, payload.chatId) : null;
-    if (peerId) io.to(`user:${peerId}`).emit(SOCKET_EVENTS.WEBRTC_OFFER, payload);
+    const record = payload?.callId ? callsById.get(payload.callId) : undefined;
+    const peerId = record
+      ? record.caller === userId
+        ? record.callee
+        : record.caller
+      : payload?.chatId
+        ? await resolvePeer(userId, payload.chatId)
+        : null;
+    if (peerId) {
+      await emitToUser(io, peerId, SOCKET_EVENTS.WEBRTC_OFFER, payload, {
+        message: "webrtc:offer relayed",
+        callId: payload.callId,
+        fromUserId: userId,
+        peerId,
+      });
+    }
   });
 
   socket.on(SOCKET_EVENTS.WEBRTC_ANSWER, async (payload: WebRtcSdpPayload) => {
     if (payload?.callId) {
       const record = callsById.get(payload.callId);
-      if (record) record.lastAnswer = payload;
+      if (record) {
+        record.lastAnswer = payload;
+        if (record.callee === userId) record.calleeSocketId = socket.id;
+      }
     }
-    const peerId = payload?.chatId ? await resolvePeer(userId, payload.chatId) : null;
-    if (peerId) io.to(`user:${peerId}`).emit(SOCKET_EVENTS.WEBRTC_ANSWER, payload);
+    const record = payload?.callId ? callsById.get(payload.callId) : undefined;
+    const peerId = record
+      ? record.caller === userId
+        ? record.callee
+        : record.caller
+      : payload?.chatId
+        ? await resolvePeer(userId, payload.chatId)
+        : null;
+    if (peerId) {
+      await emitToUser(io, peerId, SOCKET_EVENTS.WEBRTC_ANSWER, payload, {
+        message: "webrtc:answer relayed",
+        callId: payload.callId,
+        fromUserId: userId,
+        peerId,
+      });
+    }
   });
 
   socket.on(SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, async (payload: WebRtcIceCandidatePayload) => {
-    const peerId = payload?.chatId ? await resolvePeer(userId, payload.chatId) : null;
-    if (peerId) io.to(`user:${peerId}`).emit(SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, payload);
+    const record = payload?.callId ? callsById.get(payload.callId) : undefined;
+    const peerId = record
+      ? record.caller === userId
+        ? record.callee
+        : record.caller
+      : payload?.chatId
+        ? await resolvePeer(userId, payload.chatId)
+        : null;
+    if (peerId) {
+      await emitToUser(io, peerId, SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, payload);
+    }
   });
 }
