@@ -3,6 +3,7 @@ import type { ChatListItem, MessageDTO, NotificationDTO } from "@linkr/shared";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { connectSocket, disconnectSocket, getSocket, reconnectSocket } from "@/lib/socket/client";
+import { attachCallIncomingHandler } from "@/features/calls/callIncomingBridge";
 import { refreshPeerProfileInCaches } from "@/features/friends/profileCache";
 import { useAuthStore, useCallStore, useUIStore } from "@/lib/store";
 import { api } from "@/lib/api";
@@ -27,6 +28,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     }
 
     const socket = connectSocket(accessToken);
+    const detachCallIncoming = attachCallIncomingHandler(socket);
 
     const onNewMessage = ({ message }: { message: MessageDTO }) => {
       queryClient.setQueryData<MessageDTO[]>(chatKeys.messages(message.chatId), (old) => {
@@ -186,6 +188,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     socket.on(SOCKET_EVENTS.USER_PROFILE_CHANGED, onProfileChanged);
 
     return () => {
+      detachCallIncoming();
       socket.off(SOCKET_EVENTS.MESSAGE_NEW, onNewMessage);
       socket.off(SOCKET_EVENTS.MESSAGE_DELIVERED, onDelivered);
       socket.off(SOCKET_EVENTS.MESSAGE_READ, onRead);
@@ -205,6 +208,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
   // Reconnect after token refresh so the socket re-authenticates with the new JWT (Phase 4.2).
   const prevTokenRef = useRef<string | null>(null);
+  const lastReconnectAtRef = useRef(0);
+  const MIN_RECONNECT_MS = 30_000;
+
   useEffect(() => {
     if (status !== "authed" || !accessToken) {
       prevTokenRef.current = null;
@@ -213,7 +219,14 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     if (prevTokenRef.current && prevTokenRef.current !== accessToken && getSocket()?.connected) {
       const callPhase = useCallStore.getState().phase;
       if (callPhase === "idle" || callPhase === "ended") {
-        reconnectSocket(accessToken);
+        const now = Date.now();
+        if (now - lastReconnectAtRef.current >= MIN_RECONNECT_MS) {
+          lastReconnectAtRef.current = now;
+          reconnectSocket(accessToken);
+        } else {
+          const s = getSocket();
+          if (s) s.auth = { token: accessToken };
+        }
       }
     }
     prevTokenRef.current = accessToken;
@@ -226,8 +239,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       if (document.visibilityState !== "visible") return;
       const callPhase = useCallStore.getState().phase;
       if (callPhase !== "idle" && callPhase !== "ended") return;
-      // Skip forced reconnect when the socket is already healthy (Phase 3.1.8).
       if (getSocket()?.connected) return;
+      const now = Date.now();
+      if (now - lastReconnectAtRef.current < MIN_RECONNECT_MS) return;
+      lastReconnectAtRef.current = now;
       reconnectSocket(accessToken);
     };
     document.addEventListener("visibilitychange", onVisible);

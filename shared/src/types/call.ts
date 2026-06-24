@@ -52,12 +52,11 @@ export interface CallIncomingPayload {
 }
 
 /**
- * Callee → server acknowledgement of a `call:incoming` event (Phase 3.1.7). The server retries
- * delivery until it receives this ack or the call rings out, so a missed/late socket no longer
- * silently drops the incoming call.
+ * Callee → server acknowledgement of a `call:incoming` event (Phase 3.1.9). Emitted as
+ * `call:incoming-ack` after the UI/store updates — not via Socket.IO's server-side ack callback.
  */
-export interface CallIncomingAck {
-  ok: boolean;
+export interface CallIncomingAck extends CallSignalPayload {
+  ok?: boolean;
 }
 
 /** Response of `call:sync` — active server-side call for this user, or null. */

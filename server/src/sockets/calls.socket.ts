@@ -1,7 +1,6 @@
 import type { Server, Socket } from "socket.io";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import type {
-  CallIncomingAck,
   CallIncomingPayload,
   CallInitiateAck,
   CallInitiatePayload,
@@ -33,8 +32,8 @@ const MAX_CALL_MS = 3 * 60_000;
 const STALE_RING_GRACE_MS = 5_000;
 /** Wait for reconnect before ending calls on last-socket disconnect (Phase 3.1.6). */
 const RECONNECT_GRACE_MS = 20_000;
-/** Reliable incoming delivery (Phase 3.1.7): retry until the callee acks or the call rings out. */
-const INCOMING_ACK_TIMEOUT_MS = 1_800;
+/** Reliable incoming delivery (Phase 3.1.9): emit + wait for explicit `call:incoming-ack`. */
+const INCOMING_ACK_WAIT_MS = 2_500;
 const INCOMING_RETRY_MS = 2_000;
 const INCOMING_MAX_ATTEMPTS = 12;
 
@@ -225,15 +224,10 @@ function scheduleRingTimeout(io: Server, callId: string, record: CallRecord): vo
   }, RING_TIMEOUT_MS);
 }
 
-/** Authoritative online check — same source as call:initiate (Phase 3.1.8). */
-async function peerSocketCount(io: Server, userId: string): Promise<number> {
-  return (await io.in(`user:${userId}`).fetchSockets()).length;
-}
-
 /**
- * Reliable incoming delivery (Phase 3.1.7 / 3.1.8). Uses fetchSockets (not the local registry) so
- * delivery matches call:initiate peerOnline. Retries while the call is ringing even if the callee
- * was briefly offline or already connected when the invite was first buffered.
+ * Reliable incoming delivery (Phase 3.1.9). Emits to each live socket id (not Socket.IO server-side
+ * ack — that timed out with zero responses under Redis adapter + reconnect churn). Retries until
+ * the callee sends `call:incoming-ack` or the call rings out.
  */
 function deliverIncomingWithRetry(
   io: Server,
@@ -243,6 +237,17 @@ function deliverIncomingWithRetry(
   incoming: CallIncomingPayload,
 ): void {
   void runIncomingDelivery(io, callId, peerId, callerId, incoming, 1);
+}
+
+function markIncomingDelivered(io: Server, callId: string, peerId: string, attempt?: number): void {
+  const record = callsById.get(callId);
+  if (!record || record.delivered || record.acceptedAt) return;
+  record.delivered = true;
+  io.to(`user:${record.caller}`).emit(SOCKET_EVENTS.CALL_RINGING, {
+    callId,
+    chatId: record.chatId,
+  } satisfies CallSignalPayload);
+  logger.info("call:incoming acked", { callId, peerId, attempt: attempt ?? null });
 }
 
 async function runIncomingDelivery(
@@ -256,7 +261,8 @@ async function runIncomingDelivery(
   const record = callsById.get(callId);
   if (!record || record.acceptedAt || record.delivered) return;
 
-  const socketCount = await peerSocketCount(io, peerId);
+  const sockets = await io.in(`user:${peerId}`).fetchSockets();
+  const socketCount = sockets.length;
   logger.info("call:delivery attempt", {
     callId,
     peerId,
@@ -284,41 +290,22 @@ async function runIncomingDelivery(
 
   pendingIncoming.delete(callId);
 
-  io.to(`user:${peerId}`)
-    .timeout(INCOMING_ACK_TIMEOUT_MS)
-    .emit(SOCKET_EVENTS.CALL_INCOMING, incoming, (err: Error | null, responses?: CallIncomingAck[]) => {
-      const rec = callsById.get(callId);
-      if (!rec || rec.acceptedAt || rec.delivered) return;
+  const socketIds = sockets.map((s) => s.id);
+  for (const socketId of socketIds) {
+    io.to(socketId).emit(SOCKET_EVENTS.CALL_INCOMING, incoming);
+  }
+  logger.info("call:incoming emitted", { callId, peerId, attempt, socketIds });
 
-      const acked = !err && Array.isArray(responses) && responses.some((r) => r?.ok);
-      logger.info("call:delivery callback", {
-        callId,
-        peerId,
-        attempt,
-        acked,
-        err: err?.message ?? null,
-        responseCount: responses?.length ?? 0,
-      });
+  setTimeout(() => {
+    const rec = callsById.get(callId);
+    if (!rec || rec.acceptedAt || rec.delivered) return;
 
-      if (acked) {
-        rec.delivered = true;
-        io.to(`user:${callerId}`).emit(SOCKET_EVENTS.CALL_RINGING, {
-          callId,
-          chatId: rec.chatId,
-        } satisfies CallSignalPayload);
-        logger.info("call:incoming acked", { callId, peerId, attempt });
-        return;
-      }
-
-      if (attempt < INCOMING_MAX_ATTEMPTS) {
-        setTimeout(
-          () => void runIncomingDelivery(io, callId, peerId, callerId, incoming, attempt + 1),
-          INCOMING_RETRY_MS,
-        );
-      } else {
-        logger.warn("call:incoming not acked after retries", { callId, peerId, attempt });
-      }
-    });
+    if (attempt < INCOMING_MAX_ATTEMPTS) {
+      void runIncomingDelivery(io, callId, peerId, callerId, incoming, attempt + 1);
+    } else {
+      logger.warn("call:incoming not acked after retries", { callId, peerId, attempt });
+    }
+  }, INCOMING_ACK_WAIT_MS);
 }
 
 /** Deliver a call that was initiated while the callee's socket was offline (Phase 4.2 / 3.1.7). */
@@ -439,6 +426,14 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
 
   type InitAck = (res?: CallInitiateAck) => void;
   type SyncAck = (res?: CallSyncResponse) => void;
+
+  socket.on(SOCKET_EVENTS.CALL_INCOMING_ACK, (payload: CallSignalPayload) => {
+    const { callId } = payload ?? {};
+    if (!callId) return;
+    const record = callsById.get(callId);
+    if (!record || record.callee !== userId || record.delivered || record.acceptedAt) return;
+    markIncomingDelivered(io, callId, userId);
+  });
 
   socket.on(
     SOCKET_EVENTS.CALL_INITIATE,

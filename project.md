@@ -52,6 +52,7 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Call resync after refresh (ghost BUSY + Ringing/Connecting desync) | ✅ Done (Sprint 3.1.6) |
 | Reliable incoming-call delivery (ack + retry, accurate Ringing) | ✅ Done (Sprint 3.1.7) |
 | Call delivery fix (fetchSockets, pending retry, sync poll) | ✅ Done (Sprint 3.1.8) |
+| Explicit incoming ack + early handler (no Socket.IO server ack) | ✅ Done (Sprint 3.1.9) |
 | Mute notifications + archive chats (per-user) | ✅ Done (Phase 4) |
 | Privacy settings UI (last seen / profile / requests) | ✅ Done (Phase 4) |
 | Forward message (friends only) + share contact | ✅ Done (Phase 4) |
@@ -225,6 +226,21 @@ Five self-contained sprints layering social/UX controls and account lifecycle on
   - **Rules:** `@username` always visible. **Picture → Everyone:** all see thumbnail, **only friends zoom**. **Picture → Friends:** strangers see no photo; friends see + zoom. **Picture → Nobody:** photo hidden. **Details → Everyone/Friends/Nobody:** gates name/status/bio independently (display name no longer tied to avatar visibility).
   - **Live sync:** `notifyProfileChanged()` emits **`user:profile-changed`** to friends + 1:1 chat partners on profile/privacy/avatar updates. Client `profileCache.ts` **merges** the refreshed `GET /users/:id/profile` into search, contact card, chat list, and friends caches (no invalidate → no flicker). **15s silent refetch** on `useUserSearch` / `useUserProfile` as fallback for strangers not in a chat.
 
+### Sprint 3.1.9 — Explicit incoming ack + early handler 📞🔧
+Fixes production bug where Render logs showed **`call:delivery callback → acked: false, err: "operation has timed out", responseCount: 0`** even with **`socketCount: 1`** — the server found the callee online but Socket.IO's **server-side ack** on `io.to(room).timeout().emit()` never received a client callback (handler race + Redis adapter + reconnect churn).
+- **Root cause:** `call:incoming` handlers lived in `CallProvider`'s `useEffect`, which mounts **after** `SocketProvider` connects — first emits could land before the listener existed. Server-side ack also failed cluster-wide with zero responses.
+- **`call:incoming-ack` event:** callee emits an explicit ack **after** updating the store (replaces Socket.IO callback ack). Server marks delivered and emits `call:ringing` to the caller.
+- **Per-socket delivery:** server emits to each **`fetchSockets()` id** directly (not room-only + timeout).
+- **Early handler (`callIncomingBridge.ts`):** `SocketProvider` registers `call:incoming` **immediately on connect** — before `CallProvider` mounts.
+- **Reconnect debounce:** token refresh / visibility reconnect throttled to **30s** when the socket is still connected (updates `auth` in place instead of disconnecting).
+
+**Test matrix:**
+1. Both phones foreground → Render shows `call:incoming emitted` → `call:incoming acked` → callee rings.
+2. Caller: **Calling…** → **Ringing…** after ack.
+3. Callee WS Messages tab shows `call:incoming` frames; no `operation has timed out` in logs.
+
+> **Follow-ups:** Web Push for tab-closed rings (3.2); durable call store in Redis/Mongo.
+
 ### Sprint 3.1.8 — Call delivery fix (fetchSockets + pending retry + sync poll) 📞🔧
 Fixes production bug where Render logs showed **`call:initiate` + `peerOnline: true`** but **never** `call:incoming acked` — callee UI stayed blank while caller showed **Ringing…** (optimistically).
 - **Root cause:** `call:initiate` used `fetchSockets()` (peer online) but delivery used `userHasLiveSockets()` (local registry). Registry could desync from Socket.IO rooms → invite **buffered silently** with no retry while callee was already connected.
@@ -248,7 +264,7 @@ Fixes the intermittent **"call goes from this side but nothing shows on the othe
 - **Client ack (`CallProvider.tsx`):** the callee acks `call:incoming` **on receipt** (idempotent — dedupes repeats), stopping retries immediately.
 - **Diagnostics:** server logs `call:initiate`, `call:incoming acked` (with attempt count), and `call:incoming not acked after retries` for visibility in Render logs.
 
-> **Follow-ups:** Web Push for tab-closed rings (3.2); durable call store in Redis/Mongo (3.1.9).
+> **Follow-ups:** Web Push for tab-closed rings (3.2); durable call store in Redis/Mongo (see 3.1.9).
 
 **Test matrix:**
 1. Test → Galaxy while Galaxy tab is foreground → rings within ~1–2s.

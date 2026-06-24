@@ -35,6 +35,8 @@ export const SOCKET_EVENTS = {
   CALL_INITIATE: "call:initiate",
   /** Server → callee: an incoming call is ringing (carries the caller's public profile). */
   CALL_INCOMING: "call:incoming",
+  /** Callee → server: device received `call:incoming` (Phase 3.1.9 — replaces Socket.IO server-side ack). */
+  CALL_INCOMING_ACK: "call:incoming-ack",
   /** Server → caller: the callee's device acknowledged the incoming call (true "Ringing…"). */
   CALL_RINGING: "call:ringing",
   CALL_ACCEPT: "call:accept",

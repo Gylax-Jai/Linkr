@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import type {
-  CallIncomingPayload,
   CallInitiateAck,
   CallMedia,
   CallSignalPayload,
@@ -358,41 +357,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     const emit = (event: string, payload: unknown) => socket.emit(event, payload);
 
-    const onIncoming = (payload: CallIncomingPayload, ack?: (res: { ok: boolean }) => void) => {
-      const state = useCallStore.getState();
-      const hasLiveEngine = Boolean(engineRef.current);
-
-      if (state.phase !== "idle") {
-        if (state.callId === payload.callId && state.phase === "incoming") {
-          ack?.({ ok: true });
-          return;
-        }
-
-        if (state.phase === "active" || (state.phase === "connecting" && hasLiveEngine)) {
-          emit(SOCKET_EVENTS.CALL_REJECT, { callId: payload.callId, chatId: payload.chatId });
-          ack?.({ ok: true });
-          return;
-        }
-
-        engineRef.current?.close();
-        engineRef.current = null;
-        earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
-        earlyStreamRef.current = null;
-        pendingOfferRef.current = null;
-        pendingIceRef.current = [];
-        if (endTimerRef.current) window.clearTimeout(endTimerRef.current);
-        useCallStore.getState().reset();
-      }
-
-      useCallStore.getState().receiveIncoming({
-        callId: payload.callId,
-        chatId: payload.chatId,
-        media: payload.media,
-        peer: payload.from,
-      });
-      ack?.({ ok: true });
-    };
-
     // Callee accepted → caller creates the offer (also used after call:sync restore).
     const beginCallerConnect = () => {
       const { callId, chatId, media } = useCallStore.getState();
@@ -655,7 +619,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (useCallStore.getState().phase === "outgoing") useCallStore.getState().setRinging(true);
     };
 
-    socket.on(SOCKET_EVENTS.CALL_INCOMING, onIncoming);
     socket.on(SOCKET_EVENTS.CALL_RINGING, onRinging);
     socket.on(SOCKET_EVENTS.CALL_ACCEPT, onAccept);
     socket.on(SOCKET_EVENTS.CALL_REJECT, onReject);
@@ -667,7 +630,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     return () => {
       window.clearInterval(syncPollId);
       socket.off("connect", runCallSync);
-      socket.off(SOCKET_EVENTS.CALL_INCOMING, onIncoming);
       socket.off(SOCKET_EVENTS.CALL_RINGING, onRinging);
       socket.off(SOCKET_EVENTS.CALL_ACCEPT, onAccept);
       socket.off(SOCKET_EVENTS.CALL_REJECT, onReject);
