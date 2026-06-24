@@ -2,6 +2,8 @@ import type { Server, Socket } from "socket.io";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import { UserModel } from "../models/User.js";
 import { FriendshipModel } from "../models/Friendship.js";
+import { allowsPresenceBroadcast } from "../modules/users/privacy.helpers.js";
+import { deliverPendingCalls } from "./calls.socket.js";
 import { requireSocketUser } from "./auth.socket.js";
 import { registerTypingHandler } from "./chat.socket.js";
 
@@ -50,8 +52,12 @@ export function registerPresenceHandlers(io: Server, socket: Socket): void {
     sockets.add(socket.id);
 
     if (sockets.size === 1) {
+      const user = await UserModel.findById(userId).select("privacy");
       await UserModel.findByIdAndUpdate(userId, { online: true, lastSeen: new Date() });
-      await broadcastToFriends(io, userId, SOCKET_EVENTS.USER_ONLINE, { userId });
+      if (user && allowsPresenceBroadcast(user.privacy)) {
+        await broadcastToFriends(io, userId, SOCKET_EVENTS.USER_ONLINE, { userId });
+      }
+      deliverPendingCalls(io, userId);
     }
   })();
 
@@ -65,10 +71,13 @@ export function registerPresenceHandlers(io: Server, socket: Socket): void {
         userSockets.delete(userId);
         const lastSeen = new Date();
         await UserModel.findByIdAndUpdate(userId, { online: false, lastSeen });
-        await broadcastToFriends(io, userId, SOCKET_EVENTS.USER_OFFLINE, {
-          userId,
-          lastSeen: lastSeen.toISOString(),
-        });
+        const user = await UserModel.findById(userId).select("privacy");
+        if (user && allowsPresenceBroadcast(user.privacy)) {
+          await broadcastToFriends(io, userId, SOCKET_EVENTS.USER_OFFLINE, {
+            userId,
+            lastSeen: lastSeen.toISOString(),
+          });
+        }
       }
     })();
   });

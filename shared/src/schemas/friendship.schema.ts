@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { USERNAME_MAX } from "../constants/limits.js";
+import { PROFILE_VISIBILITY_VALUES, USERNAME_MAX } from "../constants/limits.js";
 import { friendshipStatusSchema } from "./enums.schema.js";
 import { visibilitySchema } from "./enums.schema.js";
 
@@ -24,7 +24,7 @@ export type FriendRequestBody = z.infer<typeof friendRequestBodySchema>;
 /** Body for PATCH /api/users/me/privacy */
 export const privacyUpdateSchema = z.object({
   lastSeen: visibilitySchema.optional(),
-  profile: z.enum(["everyone", "friends"]).optional(),
+  profile: z.enum(PROFILE_VISIBILITY_VALUES).optional(),
   whoCanRequest: z.enum(["everyone", "nobody"]).optional(),
 });
 

@@ -42,6 +42,7 @@ import {
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { useDecryptedText } from "@/lib/crypto";
 import { formatChatListTime } from "@/lib/utils/formatTime";
+import { showOnlineDot } from "@/lib/utils/privacy";
 import { cn } from "@/lib/utils";
 
 function ChatPreview({ chat, userId }: { chat: ChatListItem; userId: string }) {
@@ -74,6 +75,7 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
   const setActiveChat = useUIStore((s) => s.setActiveChat);
   const onlineOverrides = useUIStore((s) => s.onlineOverrides);
   const online = onlineOverrides[chat.participant._id] ?? chat.participant.online;
+  const showDot = showOnlineDot(chat.participant, online);
   const pinChat = usePinChatMutation();
   const muteChat = useMuteChatMutation();
   const archiveChat = useArchiveChatMutation();
@@ -183,7 +185,7 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
         name={displayName}
         src={chat.participant.avatar}
         size="md"
-        online={isSelf ? false : online}
+        online={isSelf ? false : showDot}
         icon={isSelf ? <Bookmark className="h-4 w-4" /> : undefined}
       />
       <span className="min-w-0 flex-1">

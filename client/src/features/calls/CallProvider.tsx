@@ -91,7 +91,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const actions = useMemo<CallActions>(() => {
     const emit = (event: string, payload: unknown) => getSocket()?.emit(event, payload);
 
-    const teardown = (reason: CallEndReason) => {
+    const teardown = (reason: CallEndReason, opts?: { signal?: boolean }) => {
+      const { callId, chatId, phase, direction } = useCallStore.getState();
+      const shouldSignal = opts?.signal !== false;
+      if (shouldSignal && callId && chatId && phase !== "idle" && phase !== "ended") {
+        if (reason === "rejected" && direction === "incoming") {
+          emit(SOCKET_EVENTS.CALL_REJECT, { callId, chatId });
+        } else if (reason === "failed" || reason === "no-mic" || reason === "hangup") {
+          emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
+        }
+      }
+
       engineRef.current?.close();
       engineRef.current = null;
       pendingOfferRef.current = null;
@@ -206,7 +216,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           if (state === "connected") useCallStore.getState().setActive();
           if (state === "failed") teardown("failed");
         },
-        onRemoteStream: () => useCallStore.getState().setActive(),
       });
       await engine.startLocalMedia();
       engineRef.current = engine;
@@ -276,22 +285,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             });
           }
         } catch {
-          emit(SOCKET_EVENTS.CALL_END, { callId, chatId } as CallSignalPayload);
           teardown("no-mic");
         }
       })();
     };
 
     const rejectCall: CallActions["rejectCall"] = () => {
-      const { callId, chatId } = useCallStore.getState();
-      if (callId && chatId) emit(SOCKET_EVENTS.CALL_REJECT, { callId, chatId });
       teardown("rejected");
     };
 
     const hangUp: CallActions["hangUp"] = () => {
-      const { callId, chatId, phase } = useCallStore.getState();
+      const { phase } = useCallStore.getState();
       if (phase === "idle" || phase === "ended") return;
-      if (callId && chatId) emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
       teardown("hangup");
     };
 
@@ -368,11 +373,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               if (state === "failed") {
                 engineRef.current?.close();
                 engineRef.current = null;
+                earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
+                earlyStreamRef.current = null;
+                pendingOfferRef.current = null;
+                pendingIceRef.current = [];
                 useCallStore.getState().endCall("failed");
+                emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
                 window.setTimeout(() => useCallStore.getState().reset(), 1400);
               }
             },
-            onRemoteStream: () => useCallStore.getState().setActive(),
           });
           // Adopt the mic captured at call start (no second prompt); engine owns it now.
           await engine.startLocalMedia(earlyStreamRef.current);
@@ -390,9 +399,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             description: offer as WebRtcSdpPayload["description"],
           });
         } catch {
-          emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
           engineRef.current?.close();
           engineRef.current = null;
+          earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
+          earlyStreamRef.current = null;
+          emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
           useCallStore.getState().endCall("no-mic");
           window.setTimeout(() => useCallStore.getState().reset(), 1400);
         }

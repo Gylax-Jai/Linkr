@@ -11,13 +11,19 @@ import type {
 } from "@linkr/shared";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import { ChatModel, type ChatDoc } from "../../models/Chat.js";
+import { FriendshipModel } from "../../models/Friendship.js";
 import { MessageModel, type MessageDoc } from "../../models/Message.js";
 import { UserModel } from "../../models/User.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { getSocketServer } from "../../sockets/io.js";
-import { areFriends, findFriendshipBetween } from "../friends/friendship.helpers.js";
+import { areFriends } from "../friends/friendship.helpers.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import { resolveAvatarUrl } from "../users/avatar.helpers.js";
+import {
+  canViewContactCard,
+  canViewLastSeen,
+  canViewProfileDetails,
+} from "../users/privacy.helpers.js";
 import { LOCAL_MEDIA_PREFIX } from "./chat.media.service.js";
 
 type ChatDocument = HydratedDocument<ChatDoc>;
@@ -221,7 +227,6 @@ export async function getOrCreateDirectChat(userId: string, participantId: strin
 
 /** List all 1:1 chats for the user with participant info and last message preview. */
 export async function listChatsForUser(userId: string): Promise<ChatListItem[]> {
-  // Include the user's own self ("Saved messages") chat alongside their 1:1s (Sprint C.2).
   const chats = await ChatModel.find({
     members: userId,
     type: { $in: ["1:1", "self"] },
@@ -234,14 +239,48 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
         "content sender status readBy createdAt chatId type encrypted mediaUrl mediaName mediaSize mediaMime deletedForEveryone",
     });
 
-  const items: ChatListItem[] = [];
+  // Batch participant + friendship lookups (Phase 4.2 — avoid N+1 per chat row).
+  const chatMeta: Array<{ chat: ChatDocument; selfChat: boolean; participantId: string }> = [];
+  const participantIdSet = new Set<string>();
 
   for (const chat of chats) {
     const selfChat = isSelfChat(chat);
-    const participantId = await getOtherMemberId(chat, userId);
-    const participant = await UserModel.findById(participantId).select(
-      "username displayName avatar online lastSeen bio status statusExpiresAt",
-    );
+    const participantId = selfChat
+      ? userId
+      : chat.members.find((m) => m.toString() !== userId)?.toString();
+    if (!participantId) continue;
+    chatMeta.push({ chat, selfChat, participantId });
+    participantIdSet.add(participantId);
+  }
+
+  const participantIds = [...participantIdSet];
+  const participants = participantIds.length
+    ? await UserModel.find({ _id: { $in: participantIds } }).select(
+        "username displayName avatar online lastSeen bio status statusExpiresAt privacy",
+      )
+    : [];
+  const participantById = new Map(participants.map((p) => [p.id, p]));
+
+  const peerIds = participantIds.filter((id) => id !== userId);
+  const friendships = peerIds.length
+    ? await FriendshipModel.find({
+        $or: [
+          { requester: userId, recipient: { $in: peerIds } },
+          { recipient: userId, requester: { $in: peerIds } },
+        ],
+      })
+    : [];
+  const friendshipByPeer = new Map<string, (typeof friendships)[number]>();
+  for (const f of friendships) {
+    const requesterId = f.requester.toString();
+    const peerId = requesterId === userId ? f.recipient.toString() : requesterId;
+    friendshipByPeer.set(peerId, f);
+  }
+
+  const items: ChatListItem[] = [];
+
+  for (const { chat, selfChat, participantId } of chatMeta) {
+    const participant = participantById.get(participantId);
     if (!participant) continue;
 
     const pinned = (chat.pinnedBy ?? []).some((id) => id.toString() === userId);
@@ -254,35 +293,49 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
       unreadCount = 1;
     }
 
-    // Relationship context so the UI can offer Block/Unblock plus Add/Accept/Requested for the
-    // participant (Sprint 5.5 + 5.7). `direction`/`friendshipId` let the chat UI act on pending
-    // requests; the relationship doc is already fetched here, so this stays cheap. Self chats have
-    // no relationship.
-    const relationship = selfChat ? null : await findFriendshipBetween(userId, participantId);
+    const relationship = selfChat ? null : friendshipByPeer.get(participantId) ?? null;
     let friendship: ChatParticipantFriendship | undefined;
     if (relationship) {
       friendship = {
         status: relationship.status,
-        blockedByMe: relationship.status === "blocked" && relationship.actionBy.toString() === userId,
+        blockedByMe:
+          relationship.status === "blocked" && relationship.actionBy.toString() === userId,
         friendshipId: relationship._id.toString(),
         ...(relationship.status === "pending"
-          ? { direction: relationship.requester.toString() === userId ? "outgoing" : "incoming" }
+          ? {
+              direction:
+                relationship.requester.toString() === userId ? ("outgoing" as const) : ("incoming" as const),
+            }
           : {}),
       };
     }
+
+    const viewerIsFriend = selfChat || relationship?.status === "accepted";
+    const presenceVisible = selfChat || canViewLastSeen(participant.privacy, viewerIsFriend);
+    const profileDetailsVisible =
+      selfChat || canViewProfileDetails(participant.privacy, viewerIsFriend);
+    const contactCardVisible =
+      selfChat || canViewContactCard(participant.privacy, viewerIsFriend);
 
     items.push({
       _id: chat._id.toString(),
       type: selfChat ? "self" : "1:1",
       participant: {
         _id: participant.id,
-        username: participant.username ?? undefined,
-        displayName: participant.displayName,
-        avatar: resolveAvatarUrl(participant.avatar, participant.id),
-        online: Boolean(participant.online),
-        lastSeen: participant.lastSeen?.toISOString(),
-        bio: participant.bio ?? undefined,
-        status: activeStatus(participant.status, participant.statusExpiresAt),
+        username: contactCardVisible ? participant.username ?? undefined : undefined,
+        displayName: contactCardVisible ? participant.displayName : "Linkr user",
+        avatar: contactCardVisible
+          ? resolveAvatarUrl(participant.avatar, participant.id)
+          : undefined,
+        online: presenceVisible ? Boolean(participant.online) : false,
+        lastSeen: presenceVisible ? participant.lastSeen?.toISOString() : undefined,
+        presenceVisible,
+        profileDetailsVisible,
+        contactCardVisible,
+        bio: profileDetailsVisible ? participant.bio ?? undefined : undefined,
+        status: profileDetailsVisible
+          ? activeStatus(participant.status, participant.statusExpiresAt)
+          : undefined,
         friendship,
       },
       lastMessage: lastMsg,

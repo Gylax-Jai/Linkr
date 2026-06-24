@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { KeyRound, Loader2, X } from "lucide-react";
+import { Link } from "react-router-dom";
+import { KeyRound, Loader2, ShieldCheck, X } from "lucide-react";
 import { isMsg91Enabled, sendMsg91Otp, verifyMsg91Otp } from "@/lib/msg91";
 import { api } from "@/lib/api";
 import { useCryptoStore, useE2EEAccount } from "@/lib/crypto";
+import { useAuthStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { PATHS } from "@/routes/paths";
 
 /**
  * Account-level E2EE gatekeeper (Sprint D / D.1 / D.2). Mounted once inside the authenticated shell.
@@ -15,7 +18,8 @@ import { cn } from "@/lib/utils";
  * passphrase or a single-use backup code (phone-OTP gated), or dismiss it and keep using the app.
  * They can restore later anytime from Profile → Security. New messages still flow while dismissed.
  *
- * New users are NOT nagged to set up multi-device — that's opt-in from Profile → Security (D.1).
+ * New users see a one-time security prompt after onboarding recommending a recovery passphrase (Phase 4.2+).
+ * Ongoing multi-device setup remains opt-in from Settings → Security.
  */
 
 /** Minimum recovery passphrase length. Kept modest but non-trivial; Argon2id does the heavy lifting. */
@@ -480,5 +484,95 @@ export function RecoverySetupFields({
         </p>
       ) : null}
     </div>
+  );
+}
+
+const ONBOARDING_PROMPT_KEY = "linkr.e2ee.promptAfterOnboarding";
+
+function setupPromptDismissKey(userId: string | null): string {
+  return `linkr.e2ee.setupPromptDismissed.${userId ?? "anon"}`;
+}
+
+/**
+ * One-time prompt for brand-new users (right after onboarding): E2EE is on, but without a recovery
+ * passphrase they won't be able to read old chats on another device. Shown once until dismissed or
+ * the user opens Settings to set a passphrase.
+ */
+export function E2EESecurityPrompt() {
+  const userId = useAuthStore((s) => s.user?._id ?? null);
+  const { needsBackup, locked, status } = useE2EEAccount();
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      if (localStorage.getItem(setupPromptDismissKey(userId)) === "1") return true;
+      return sessionStorage.getItem(ONBOARDING_PROMPT_KEY) !== "1";
+    } catch {
+      return true;
+    }
+  });
+
+  const shouldShow =
+    !dismissed &&
+    !locked &&
+    needsBackup &&
+    status === "ready" &&
+    (() => {
+      try {
+        return sessionStorage.getItem(ONBOARDING_PROMPT_KEY) === "1";
+      } catch {
+        return false;
+      }
+    })();
+
+  if (!shouldShow) return null;
+
+  const finish = () => {
+    try {
+      sessionStorage.removeItem(ONBOARDING_PROMPT_KEY);
+      localStorage.setItem(setupPromptDismissKey(userId), "1");
+    } catch {
+      /* storage unavailable */
+    }
+    setDismissed(true);
+  };
+
+  return (
+    <ModalShell onBackdrop={finish}>
+      <div className="mb-4 flex items-start gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+          <ShieldCheck className="h-5 w-5" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-text">Your chats are end-to-end encrypted</h2>
+          <p className="mt-1 text-xs leading-relaxed text-text-muted">
+            For your security, messages are encrypted on this device. If you sign in on another phone or computer
+            later, you'll need a <span className="font-medium text-text">recovery passphrase</span> to read your
+            chat history — we can't reset it for you.
+          </p>
+          <p className="mt-2 text-xs leading-relaxed text-text-muted">
+            We recommend setting one now in Settings. It only takes a minute and you'll get backup codes too.
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={finish}
+          className="ml-auto -mr-1 -mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Button type="button" variant="ghost" size="sm" className="flex-1" onClick={finish}>
+          Maybe later
+        </Button>
+        <Link
+          to={PATHS.settings}
+          onClick={finish}
+          className="inline-flex flex-1 items-center justify-center rounded-2xl bg-gradient-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-soft no-underline transition-[box-shadow,transform] hover:shadow-glow active:scale-[0.97]"
+        >
+          Set recovery passphrase
+        </Link>
+      </div>
+    </ModalShell>
   );
 }

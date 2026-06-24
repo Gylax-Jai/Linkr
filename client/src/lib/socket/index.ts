@@ -1,1 +1,1 @@
-export { connectSocket, disconnectSocket, getSocket } from "./client";
+export { connectSocket, disconnectSocket, getSocket, reconnectSocket } from "./client";

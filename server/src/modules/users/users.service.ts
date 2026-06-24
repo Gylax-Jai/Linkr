@@ -148,7 +148,7 @@ export async function updatePrivacy(user: UserDocument, input: PrivacyUpdateInpu
   if (!user.privacy) {
     user.privacy = {
       lastSeen: "friends",
-      profile: "everyone",
+      profile: "friends",
       whoCanRequest: "everyone",
     };
   }

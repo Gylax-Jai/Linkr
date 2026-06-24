@@ -25,6 +25,7 @@ import {
   getChats,
   getMedia,
   getMessages,
+  markChatRead,
   muteChat,
   patchMessage,
   pinChat,
@@ -112,6 +113,12 @@ chatRouter.patch(
   validate(chatIdParamSchema, "params"),
   validate(muteChatSchema),
   muteChat,
+);
+chatRouter.patch(
+  "/:chatId/read",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  markChatRead,
 );
 chatRouter.patch(
   "/:chatId/archive",

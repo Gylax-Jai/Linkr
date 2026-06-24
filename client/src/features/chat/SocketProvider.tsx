@@ -1,8 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ChatListItem, MessageDTO, NotificationDTO } from "@linkr/shared";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import { useQueryClient } from "@tanstack/react-query";
-import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket/client";
+import { connectSocket, disconnectSocket, getSocket, reconnectSocket } from "@/lib/socket/client";
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { notificationKeys } from "@/features/notifications";
@@ -71,7 +71,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         const byId = new Map(messages.map((m) => [m._id, m]));
         return old.map((m) => byId.get(m._id) ?? m);
       });
-      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) =>
+        old?.map((c) => {
+          if (c._id !== chatId) return c;
+          const last = messages.at(-1);
+          return { ...c, unreadCount: 0, ...(last ? { lastMessage: last } : {}) };
+        }),
+      );
     };
 
     // Edit / delete-for-everyone / react all return the updated message — patch it in place.
@@ -83,11 +89,17 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     };
 
     const onOnline = ({ userId }: { userId: string }) => {
+      const list = queryClient.getQueryData<ChatListItem[]>(chatKeys.list());
+      const row = list?.find((c) => c.participant._id === userId);
+      if (row?.participant.presenceVisible === false) return;
       setParticipantOnline(userId, true);
       void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
     };
 
     const onOffline = ({ userId }: { userId: string }) => {
+      const list = queryClient.getQueryData<ChatListItem[]>(chatKeys.list());
+      const row = list?.find((c) => c.participant._id === userId);
+      if (row?.participant.presenceVisible === false) return;
       setParticipantOnline(userId, false);
       void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
     };
@@ -164,6 +176,29 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       socket.off(SOCKET_EVENTS.NOTIFICATION_NEW, onNotification);
     };
   }, [accessToken, status, queryClient, setParticipantOnline, setTyping]);
+
+  // Reconnect after token refresh so the socket re-authenticates with the new JWT (Phase 4.2).
+  const prevTokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (status !== "authed" || !accessToken) {
+      prevTokenRef.current = null;
+      return;
+    }
+    if (prevTokenRef.current && prevTokenRef.current !== accessToken && getSocket()?.connected) {
+      reconnectSocket(accessToken);
+    }
+    prevTokenRef.current = accessToken;
+  }, [accessToken, status]);
+
+  // Reconnect when the tab becomes visible again (mobile background / laptop sleep).
+  useEffect(() => {
+    if (status !== "authed" || !accessToken) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") reconnectSocket(accessToken);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [accessToken, status]);
 
   return <>{children}</>;
 }

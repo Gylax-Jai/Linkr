@@ -26,6 +26,22 @@ export function connectSocket(token: string): Socket {
   return socket;
 }
 
+/**
+ * Force a reconnect with a fresh access token (Phase 4.2). Used after token refresh or when the
+ * tab becomes visible again so call/message events aren't missed on a stale socket.
+ */
+export function reconnectSocket(token: string): void {
+  if (!socket) {
+    connectSocket(token);
+    return;
+  }
+  socket.auth = { token };
+  if (socket.connected) {
+    socket.disconnect();
+  }
+  socket.connect();
+}
+
 /** Tear down the socket connection (logout). */
 export function disconnectSocket(): void {
   socket?.disconnect();

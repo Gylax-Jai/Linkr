@@ -6,7 +6,7 @@ import { CallProvider } from "@/features/calls";
 import { OnboardingWizard } from "@/features/onboarding";
 import { ProfilePage } from "@/features/profile";
 import { SettingsPage } from "@/features/settings";
-import { E2EEKeyGuard } from "@/features/security";
+import { E2EEKeyGuard, E2EESecurityPrompt } from "@/features/security";
 import { useAuthStore } from "@/lib/store";
 import { useE2EEInit } from "@/lib/crypto";
 import { PATHS } from "./paths";
@@ -25,8 +25,9 @@ function AuthedShell({ children }: { children: React.ReactNode }) {
     <SocketProvider>
       <CallProvider>
         {children}
-        {/* Account-key unlock (new device) + multi-device setup prompt, overlaid above the shell. */}
+        {/* Account-key unlock (new device) + one-time E2EE setup prompt for new users. */}
         <E2EEKeyGuard />
+        <E2EESecurityPrompt />
       </CallProvider>
     </SocketProvider>
   );

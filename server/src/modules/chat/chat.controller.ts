@@ -26,6 +26,7 @@ import {
   getOtherMemberId,
   listChatsForUser,
   listMessages,
+  markMessagesRead,
   reactToMessage,
   sendMessage,
   setChatArchived,
@@ -201,6 +202,25 @@ export const muteChat = asyncHandler(async (req, res) => {
   const { muted } = req.body as MuteChatInput;
   await setChatMuted(chatId, requireUserId(req), muted);
   res.status(200).json({ ok: true, muted });
+});
+
+/** PATCH /api/chat/:chatId/read — mark all peer messages in this chat as read (Phase 4.2 HTTP fallback). */
+export const markChatRead = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  if (!chatId) throw ApiError.badRequest("Missing chatId");
+  const userId = requireUserId(req);
+  const messages = await markMessagesRead(chatId, userId);
+
+  const io = getSocketServer();
+  if (io && messages.length > 0) {
+    const chat = await getChatForUser(chatId, userId);
+    const otherId = await getOtherMemberId(chat, userId);
+    if (otherId !== userId) {
+      io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_READ, { chatId, messages });
+    }
+  }
+
+  res.status(200).json({ ok: true, messages });
 });
 
 /** PATCH /api/chat/:chatId/archive — archive/unarchive a chat for the current user. */

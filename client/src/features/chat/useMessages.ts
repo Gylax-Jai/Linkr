@@ -256,18 +256,23 @@ export function useMarkReadMutation(chatId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
+      if (!chatId) return;
       const socket = getSocket();
-      if (!socket?.connected || !chatId) return;
-      socket.emit(SOCKET_EVENTS.MESSAGE_READ, { chatId });
+      if (socket?.connected) {
+        socket.emit(SOCKET_EVENTS.MESSAGE_READ, { chatId });
+      }
+      await api.patch(`/chat/${chatId}/read`);
     },
-    // Optimistically clear this chat's sidebar unread badge as soon as we mark it read (e.g. when
-    // opening a chat that had an unread last message). The server records the read on the same
-    // socket event, so later list refetches stay at 0 — fixing the badge that used to stick at "1"
-    // while the chat was open.
     onMutate: () => {
       if (!chatId) return;
       queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) =>
         old?.map((c) => (c._id === chatId && c.unreadCount ? { ...c, unreadCount: 0 } : c)),
+      );
+    },
+    onSuccess: () => {
+      if (!chatId) return;
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) =>
+        old?.map((c) => (c._id === chatId ? { ...c, unreadCount: 0 } : c)),
       );
     },
   });

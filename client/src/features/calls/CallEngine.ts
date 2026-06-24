@@ -5,7 +5,8 @@ import { isMobilePhone, supportsSetSinkId } from "./audioRoute";
 interface CallEngineCallbacks {
   onIceCandidate: (candidate: RTCIceCandidateInit) => void;
   onConnectionStateChange: (state: RTCPeerConnectionState) => void;
-  onRemoteStream: (stream: MediaStream) => void;
+  /** Optional — UI should prefer `onConnectionStateChange("connected")` for the active phase. */
+  onRemoteStream?: (stream: MediaStream) => void;
 }
 
 type SinkCapable = { setSinkId?: (id: string) => Promise<void>; sinkId?: string };
@@ -45,7 +46,7 @@ export class CallEngine {
     this.pc.ontrack = (e) => {
       this.remoteStream.addTrack(e.track);
       this.playRemote();
-      this.cb.onRemoteStream(this.remoteStream);
+      this.cb.onRemoteStream?.(this.remoteStream);
     };
   }
 

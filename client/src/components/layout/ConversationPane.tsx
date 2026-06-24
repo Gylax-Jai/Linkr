@@ -58,6 +58,7 @@ import {
 } from "@/features/chat";
 import {
   ReportUserModal,
+  FriendRequestDisabledModal,
   useAcceptFriendRequestMutation,
   useBlockUserMutation,
   useCancelFriendRequestMutation,
@@ -71,8 +72,10 @@ import { useTheme } from "@/lib/theme";
 import { useDecryptedText, usePeerHasKey } from "@/lib/crypto";
 import { EmojiPickerPopover } from "@/features/chat/EmojiPicker";
 import { bubbleRadiusClasses, getBubblePosition } from "@/lib/utils/bubbleGrouping";
-import { formatDayLabel, formatLastSeen, formatMessageTime } from "@/lib/utils/formatTime";
+import { formatDayLabel, formatMessageTime } from "@/lib/utils/formatTime";
+import { canShowProfileDetails, getPresenceLabel, showOnlineDot } from "@/lib/utils/privacy";
 import { shareContact } from "@/lib/utils/share";
+import { getApiErrorCode } from "@/lib/utils/apiError";
 import { cn } from "@/lib/utils";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -227,6 +230,9 @@ function ConversationHeader({
   const closeMobileDetails = useUIStore((s) => s.closeMobileDetails);
   const isTyping = typingByChat[chat._id];
   const online = onlineOverrides[chat.participant._id] ?? chat.participant.online;
+  const presenceLabel = getPresenceLabel(chat.participant, online);
+  const showDot = showOnlineDot(chat.participant, online);
+  const showStatus = canShowProfileDetails(chat.participant);
   // E2EE is active for this chat once the peer has published a public key (Phase 2).
   const e2ee = usePeerHasKey(chat.participant._id) === true;
   // Self chat: no peer presence/friend actions, but your own custom status still shows (Sprint C.2).
@@ -291,7 +297,7 @@ function ConversationHeader({
             name={title}
             src={chat.participant.avatar}
             size="sm"
-            online={isSelf ? false : online}
+            online={isSelf ? false : showDot}
             icon={isSelf ? <Bookmark className="h-4 w-4" /> : undefined}
           />
           {/* WhatsApp-style status hanging under the avatar (mobile only). */}
@@ -314,16 +320,14 @@ function ConversationHeader({
                 <span>.</span>
               </span>
             </p>
-          ) : (
-            // Presence is the source of truth in the subtitle (Sprint C.2): Online, or a relative
-            // "last seen …" when offline. The custom status moved to a floating chip (see below).
-            <p className="truncate font-mono text-xs text-text-muted">
-              {online ? "Online" : (formatLastSeen(chat.participant.lastSeen) ?? "Offline")}
-            </p>
-          )}
+          ) : presenceLabel ? (
+            <p className="truncate font-mono text-xs text-text-muted">{presenceLabel}</p>
+          ) : null}
         </div>
       </button>
-      {chat.participant.status?.trim() ? <StatusChip status={chat.participant.status.trim()} /> : null}
+      {showStatus && chat.participant.status?.trim() ? (
+        <StatusChip status={chat.participant.status.trim()} />
+      ) : null}
       <EncryptedBadge iconOnly e2ee={e2ee} />
       <div className="flex shrink-0 items-center gap-0.5">
         {/* Voice call is live (Sprint 3.1) for accepted friends; video lands in 3.2. Compact on
@@ -1151,6 +1155,15 @@ function ComposerGate({
   const cancel = useCancelFriendRequestMutation();
   const pending = send.isPending || accept.isPending || cancel.isPending;
   const friendshipId = friendship?.friendshipId;
+  const [requestsDisabledOpen, setRequestsDisabledOpen] = useState(false);
+
+  const sendRequest = () => {
+    send.mutate(participantId, {
+      onError: (err) => {
+        if (getApiErrorCode(err) === "REQUESTS_DISABLED") setRequestsDisabledOpen(true);
+      },
+    });
+  };
 
   let message: string;
   let action: ReactNode = null;
@@ -1178,7 +1191,7 @@ function ComposerGate({
     // Strangers (no friendship, or a stale rejected row) → send a request to start messaging.
     message = `You're not friends with ${participantName}. Add friend to start messaging.`;
     action = (
-      <Button variant="gradient" size="sm" disabled={pending} onClick={() => send.mutate(participantId)}>
+      <Button variant="gradient" size="sm" disabled={pending} onClick={sendRequest}>
         <UserPlus className="h-4 w-4" />
         Add friend
       </Button>
@@ -1186,13 +1199,20 @@ function ComposerGate({
   }
 
   return (
-    <div
-      className="flex shrink-0 flex-col items-center gap-2 border-t border-border bg-surface/80 p-4 text-center backdrop-blur-sm"
-      style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
-    >
-      <p className="text-sm text-text-muted">{message}</p>
-      {action}
-    </div>
+    <>
+      <div
+        className="flex shrink-0 flex-col items-center gap-2 border-t border-border bg-surface/80 p-4 text-center backdrop-blur-sm"
+        style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+      >
+        <p className="text-sm text-text-muted">{message}</p>
+        {action}
+      </div>
+      <FriendRequestDisabledModal
+        name={participantName}
+        open={requestsDisabledOpen}
+        onClose={() => setRequestsDisabledOpen(false)}
+      />
+    </>
   );
 }
 

@@ -31,8 +31,8 @@ import {
 import { MessageMedia, useArchiveChatMutation, useChatById, useMessages, useMuteChatMutation } from "@/features/chat";
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
 import { useAuthStore, useUIStore } from "@/lib/store";
-import { formatLastSeen } from "@/lib/utils/formatTime";
 import { shareContact } from "@/lib/utils/share";
+import { canShowContactCard, canShowProfileDetails, getPresenceLabel, showOnlineDot } from "@/lib/utils/privacy";
 import { cn } from "@/lib/utils";
 
 type TabId = "profile" | "media" | "files";
@@ -109,8 +109,13 @@ function DetailsContent() {
   const participant = chat?.participant;
   // Self chat: own space, no presence/relationship/block actions (Sprint C.2).
   const isSelf = chat?.type === "self";
-  const displayName = isSelf ? "Self chat" : participant?.displayName;
+  const showProfileDetails = participant ? canShowProfileDetails(participant) : true;
+  const showContactCard = participant ? canShowContactCard(participant) : true;
+  const headerName = isSelf ? "Self chat" : showContactCard ? participant?.displayName : "Linkr user";
+  const displayName = headerName;
   const online = !isSelf && participant ? (onlineOverrides[participant._id] ?? participant.online) : false;
+  const presenceLabel = participant && !isSelf ? getPresenceLabel(participant, online) : null;
+  const showDot = participant && !isSelf ? showOnlineDot(participant, online) : false;
 
   const block = useBlockUserMutation();
   const unblock = useUnblockUserMutation();
@@ -125,28 +130,28 @@ function DetailsContent() {
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex flex-col items-center gap-3 border-b border-border px-6 py-8 text-center">
         <Avatar
-          name={isSelf ? (sessionUser?.displayName ?? "You") : (displayName ?? "Linkr")}
-          src={participant?.avatar}
+          name={isSelf ? (sessionUser?.displayName ?? "You") : (headerName ?? "Linkr")}
+          src={showContactCard ? participant?.avatar : undefined}
           size="xl"
           ring
-          online={online}
-          pulseRing={online}
+          online={showDot}
+          pulseRing={showDot}
           zoomable
           icon={isSelf ? <Bookmark className="h-7 w-7" /> : undefined}
         />
         <div className="space-y-1">
           <p className="text-lg font-semibold tracking-tight">{displayName ?? "Select a chat"}</p>
           <p className="font-mono text-xs text-text-muted">
-            {isSelf ? "Only you" : participant?.username ? `@${participant.username}` : "—"}
+            {isSelf ? "Only you" : showContactCard && participant?.username ? `@${participant.username}` : "—"}
           </p>
           {/* Presence under the name (Sprint F): on phones this replaces the "Private chat" badge
               (which is hidden < sm) so the contact's last seen is visible where it matters most. */}
-          {!isSelf && participant ? (
+          {!isSelf && participant && presenceLabel ? (
             <p className="text-xs font-medium text-text-muted">
-              {online ? (
+              {presenceLabel === "Online" ? (
                 <span className="text-online">Online</span>
               ) : (
-                (formatLastSeen(participant.lastSeen) ?? "Offline")
+                presenceLabel
               )}
             </p>
           ) : null}
@@ -177,9 +182,13 @@ function DetailsContent() {
               {isSelf
                 ? "Your personal space — jot notes, save links, and message yourself. Messages here are just for you."
                 : participant
-                  ? (participant.bio?.trim()
-                    ? participant.bio
-                    : `You're connected with ${participant.displayName}. Only friends can message and call on Linkr.`)
+                  ? showProfileDetails
+                    ? participant.bio?.trim()
+                      ? participant.bio
+                      : `You're connected with ${participant.displayName}. Only friends can message and call on Linkr.`
+                    : showContactCard
+                      ? `${participant.displayName} keeps their bio private. Add them as a friend to see more.`
+                      : "This user has hidden their profile."
                   : (sessionUser?.bio ?? "Select a conversation to view contact details.")}
             </DetailSection>
 

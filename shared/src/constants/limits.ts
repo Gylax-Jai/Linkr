@@ -26,6 +26,8 @@ export const MESSAGE_TYPES = ["text", "image", "video", "file", "voice", "call"]
 export const MESSAGE_STATUSES = ["sent", "delivered", "read"] as const;
 export const CHAT_TYPES = ["1:1", "group", "self"] as const;
 export const VISIBILITY_VALUES = ["everyone", "friends", "nobody"] as const;
+/** Profile bio/status visibility (Phase 4.2): friends only, or hidden from everyone. */
+export const PROFILE_VISIBILITY_VALUES = ["friends", "nobody"] as const;
 
 /**
  * Account deletion (Phase 4). A "scheduled" (soft) deletion deactivates the account immediately and

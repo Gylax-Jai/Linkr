@@ -150,6 +150,13 @@ export function useCompleteOnboardingMutation() {
       const res = await api.post<{ user: SessionUser }>("/users/onboarding", input);
       return res.data.user;
     },
-    onSuccess: setUser,
+    onSuccess: (user) => {
+      setUser(user);
+      try {
+        sessionStorage.setItem("linkr.e2ee.promptAfterOnboarding", "1");
+      } catch {
+        /* storage unavailable */
+      }
+    },
   });
 }

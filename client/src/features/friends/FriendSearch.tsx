@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { useUserSearch } from "./useFriends";
-import { UserSearchRow } from "./FriendActions";
+import { UserSearchRow } from "./UserSearchRow";
 
 /** Debounced username search wired to GET /api/users/search. */
 export function FriendSearch({ onClose }: { onClose?: () => void }) {

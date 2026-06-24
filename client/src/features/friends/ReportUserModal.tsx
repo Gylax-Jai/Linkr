@@ -6,6 +6,7 @@ import {
   REPORT_REASON_LABELS,
   type ReportReason,
 } from "@linkr/shared";
+import { Portal } from "@/components/ui/Portal";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useReportUserMutation } from "./useFriends";
@@ -58,7 +59,8 @@ export function ReportUserModal({ target, onClose }: { target: ReportTarget | nu
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center" role="dialog" aria-modal="true">
+    <Portal>
+      <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center" role="dialog" aria-modal="true">
       <button type="button" aria-label="Close" className="absolute inset-0 bg-bg/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative z-10 w-full max-w-md animate-fade-in-up rounded-t-3xl border border-border bg-surface shadow-elevated sm:rounded-3xl">
         <div className="flex items-center justify-between gap-2 border-b border-border p-4">
@@ -152,5 +154,6 @@ export function ReportUserModal({ target, onClose }: { target: ReportTarget | nu
         )}
       </div>
     </div>
+    </Portal>
   );
 }

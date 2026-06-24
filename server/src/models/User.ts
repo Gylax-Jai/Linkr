@@ -1,5 +1,5 @@
 import { Schema, model, type InferSchemaType } from "mongoose";
-import { ACCOUNT_STATUSES, VISIBILITY_VALUES } from "@linkr/shared";
+import { ACCOUNT_STATUSES, PROFILE_VISIBILITY_VALUES, VISIBILITY_VALUES } from "@linkr/shared";
 
 /**
  * User model (blueprint §12). A user is created at first Google login BEFORE onboarding, so
@@ -90,7 +90,7 @@ const userSchema = new Schema(
     },
     privacy: {
       lastSeen: { type: String, enum: VISIBILITY_VALUES, default: "friends" },
-      profile: { type: String, enum: ["everyone", "friends"], default: "everyone" },
+      profile: { type: String, enum: [...PROFILE_VISIBILITY_VALUES, "everyone"], default: "friends" },
       whoCanRequest: { type: String, enum: ["everyone", "nobody"], default: "everyone" },
     },
 

@@ -25,6 +25,12 @@ export interface ChatParticipant {
   avatar?: string;
   online: boolean;
   lastSeen?: Timestamp;
+  /** False when the participant's privacy hides last-seen/online from the viewer (Phase 4.2). */
+  presenceVisible?: boolean;
+  /** False when bio/status are hidden by the participant's profile privacy (Phase 4.2). */
+  profileDetailsVisible?: boolean;
+  /** False when the participant hid their contact card from non-friends (profile → Nobody). */
+  contactCardVisible?: boolean;
   /** Profile bio shown in the contact details "About" section (Sprint C.1). */
   bio?: string;
   /** Free-text custom status (e.g. "At the gym"); shown under the name in the chat header (Sprint C.1). */
