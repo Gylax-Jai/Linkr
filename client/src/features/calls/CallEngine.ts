@@ -25,8 +25,6 @@ export class CallEngine {
   private remoteAudio: HTMLAudioElement | null = null;
   private audioCtx: AudioContext | null = null;
   private audioSource: MediaStreamAudioSourceNode | null = null;
-  /** Last sink id that applied successfully. */
-  private sinkId = "";
   /** Ordered sink ids to try (from resolveSinkCandidates). */
   private sinkCandidates: string[] = [""];
   private readonly useWebAudio = isMobilePhone();
@@ -145,10 +143,7 @@ export class CallEngine {
 
   private async applySinkCandidates(): Promise<void> {
     for (const id of this.sinkCandidates) {
-      if (await this.trySetSink(id)) {
-        this.sinkId = id;
-        return;
-      }
+      if (await this.trySetSink(id)) return;
     }
   }
 
