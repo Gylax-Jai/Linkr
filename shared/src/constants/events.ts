@@ -35,6 +35,8 @@ export const SOCKET_EVENTS = {
   CALL_INITIATE: "call:initiate",
   /** Server → callee: an incoming call is ringing (carries the caller's public profile). */
   CALL_INCOMING: "call:incoming",
+  /** Server → caller: the callee's device acknowledged the incoming call (true "Ringing…"). */
+  CALL_RINGING: "call:ringing",
   CALL_ACCEPT: "call:accept",
   CALL_REJECT: "call:reject",
   CALL_END: "call:end",

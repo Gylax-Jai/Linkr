@@ -51,6 +51,15 @@ export interface CallIncomingPayload {
   from: PublicUser;
 }
 
+/**
+ * Callee → server acknowledgement of a `call:incoming` event (Phase 3.1.7). The server retries
+ * delivery until it receives this ack or the call rings out, so a missed/late socket no longer
+ * silently drops the incoming call.
+ */
+export interface CallIncomingAck {
+  ok: boolean;
+}
+
 /** Response of `call:sync` — active server-side call for this user, or null. */
 export type CallSyncRole = "caller" | "callee";
 

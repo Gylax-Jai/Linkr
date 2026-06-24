@@ -357,7 +357,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     const emit = (event: string, payload: unknown) => socket.emit(event, payload);
 
-    const onIncoming = (payload: CallIncomingPayload) => {
+    const onIncoming = (payload: CallIncomingPayload, ack?: (res: { ok: boolean }) => void) => {
+      // Ack on receipt so the server stops retrying (reliable delivery, Phase 3.1.7).
+      ack?.({ ok: true });
+
       const state = useCallStore.getState();
       const hasLiveEngine = Boolean(engineRef.current);
 
@@ -636,7 +639,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const onReject = finishRemote("rejected");
     const onEnd = finishRemote("hangup");
 
+    // Server confirms the callee's device acked the incoming call → show true "Ringing…".
+    const onRinging = (payload: CallSignalPayload) => {
+      if (payload.callId !== useCallStore.getState().callId) return;
+      if (useCallStore.getState().phase === "outgoing") useCallStore.getState().setRinging(true);
+    };
+
     socket.on(SOCKET_EVENTS.CALL_INCOMING, onIncoming);
+    socket.on(SOCKET_EVENTS.CALL_RINGING, onRinging);
     socket.on(SOCKET_EVENTS.CALL_ACCEPT, onAccept);
     socket.on(SOCKET_EVENTS.CALL_REJECT, onReject);
     socket.on(SOCKET_EVENTS.CALL_END, onEnd);
@@ -647,6 +657,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     return () => {
       socket.off("connect", runCallSync);
       socket.off(SOCKET_EVENTS.CALL_INCOMING, onIncoming);
+      socket.off(SOCKET_EVENTS.CALL_RINGING, onRinging);
       socket.off(SOCKET_EVENTS.CALL_ACCEPT, onAccept);
       socket.off(SOCKET_EVENTS.CALL_REJECT, onReject);
       socket.off(SOCKET_EVENTS.CALL_END, onEnd);

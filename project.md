@@ -50,6 +50,7 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Bluetooth route icon correct on mobile | ✅ Done (Sprint 3.1.4) |
 | Mobile audio dropdown + earpiece default + mic gate | ✅ Done (Sprint 3.1.5) |
 | Call resync after refresh (ghost BUSY + Ringing/Connecting desync) | ✅ Done (Sprint 3.1.6) |
+| Reliable incoming-call delivery (ack + retry, accurate Ringing) | ✅ Done (Sprint 3.1.7) |
 | Mute notifications + archive chats (per-user) | ✅ Done (Phase 4) |
 | Privacy settings UI (last seen / profile / requests) | ✅ Done (Phase 4) |
 | Forward message (friends only) + share contact | ✅ Done (Phase 4) |
@@ -222,6 +223,22 @@ Five self-contained sprints layering social/UX controls and account lifecycle on
   - **Two privacy toggles:** `privacy.profileDetails` (display name, custom status, bio) and `privacy.profilePicture` (avatar thumbnail + zoom) replace the single combined `privacy.profile` (legacy field still migrated on read). Settings → **Profile details** + **Profile picture** rows in `PrivacyCard`.
   - **Rules:** `@username` always visible. **Picture → Everyone:** all see thumbnail, **only friends zoom**. **Picture → Friends:** strangers see no photo; friends see + zoom. **Picture → Nobody:** photo hidden. **Details → Everyone/Friends/Nobody:** gates name/status/bio independently (display name no longer tied to avatar visibility).
   - **Live sync:** `notifyProfileChanged()` emits **`user:profile-changed`** to friends + 1:1 chat partners on profile/privacy/avatar updates. Client `profileCache.ts` **merges** the refreshed `GET /users/:id/profile` into search, contact card, chat list, and friends caches (no invalidate → no flicker). **15s silent refetch** on `useUserSearch` / `useUserProfile` as fallback for strangers not in a chat.
+
+### Sprint 3.1.7 — Reliable incoming-call delivery (ack + retry) 📞✅
+Fixes the intermittent **"call goes from this side but nothing shows on the other end"** (then a **missed voice call** log when the caller hangs up). Root cause: Socket.IO is **at-most-once** — a single `call:incoming` emit can be missed if the callee's socket is reconnecting, stale, backgrounded, or its handler isn't mounted yet, and the server never retries.
+- **Ack-based delivery (`calls.socket.ts`):** `call:incoming` is now emitted with a **server-side acknowledgement** (`io.to(room).timeout(1.8s).emit(..., cb)`). If the callee's device doesn't ack, the server **retries** (every 2s, up to 12 attempts) until the call is acked, accepted, ended, or rings out. Works cluster-wide via the Redis adapter.
+- **Peer-dropped buffering:** if the callee goes offline mid-ring, the invite is **buffered** (`pendingIncoming`) and re-rung through the same retry path on their next connect (`deliverPendingCalls`).
+- **Accurate "Ringing…" (`call:ringing`):** the caller now flips from **Calling…** to **Ringing…** only when the callee's device **actually acks** the incoming event — not optimistically. New `CALL_RINGING` server→caller event + `CallIncomingAck` type.
+- **Client ack (`CallProvider.tsx`):** the callee acks `call:incoming` **on receipt** (idempotent — dedupes repeats), stopping retries immediately.
+- **Diagnostics:** server logs `call:initiate`, `call:incoming acked` (with attempt count), and `call:incoming not acked after retries` for visibility in Render logs.
+
+> **Note on WhatsApp/Discord-level reliability:** for incoming calls to arrive when the tab is **closed or the phone is locked**, browser sockets aren't enough — that needs **Web Push + a service worker (PWA)** and/or native FCM/APNs. Current call state is also **in-memory** per server instance; moving it to **Redis/Mongo with TTL** is the next step for true multi-instance durability. Both are tracked as follow-ups (3.1.8 Web Push calls, 3.1.9 durable call store).
+
+**Test matrix:**
+1. Test → Galaxy while Galaxy tab is foreground → rings within ~1–2s.
+2. Galaxy tab backgrounded / just reconnected → retry re-delivers, rings (no silent drop).
+3. Caller shows **Calling…** then flips to **Ringing…** only after the callee's device acks.
+4. Callee offline → buffered → rings on next connect; otherwise clean missed log.
 
 ### Sprint 3.1.6 — Call resync after refresh (ghost BUSY + desync fix) 📞🔄
 Fixes the bug where refreshing one browser left the server with a ghost in-memory call (phantom **BUSY**) or split UI (**Ringing** vs **Connecting**) because client Zustand reset to `idle` while the server still tracked the session.
