@@ -54,3 +54,15 @@ export const profileUpdateSchema = z
   });
 
 export type ProfileUpdateInput = z.infer<typeof profileUpdateSchema>;
+
+/**
+ * Account deletion (Phase 4). `mode` chooses a 15-day reversible deactivation ("scheduled") or an
+ * irreversible purge now ("immediate"). `confirm` must match the user's @username (or, for accounts
+ * without one, their email) — a typed safety gate so the action can't be triggered by accident.
+ */
+export const deleteAccountSchema = z.object({
+  mode: z.enum(["scheduled", "immediate"]),
+  confirm: z.string().trim().min(1, "Type your username to confirm"),
+});
+
+export type DeleteAccountInput = z.infer<typeof deleteAccountSchema>;

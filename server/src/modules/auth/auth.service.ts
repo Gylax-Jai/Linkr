@@ -5,6 +5,7 @@ import { env } from "../../config/env.js";
 import { UserModel, type UserDoc } from "../../models/User.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { resolveAvatarUrl } from "../users/avatar.helpers.js";
+import { applyReactivation } from "../users/account.service.js";
 
 /** Auth service: Google ID-token verification, find-or-create, and the safe session mapper. */
 
@@ -81,6 +82,8 @@ export async function loginWithGoogle(idToken: string): Promise<UserDocument> {
     if (!user.onboarded && profile.picture && !user.avatar) {
       user.avatar = profile.picture;
     }
+    // Logging back in cancels a pending account deletion (Phase 4) and brings the account back.
+    applyReactivation(user);
     await user.save();
   }
 

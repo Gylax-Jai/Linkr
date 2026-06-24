@@ -3,6 +3,7 @@ import type {
   FriendRequestResponse,
   FriendsListResponse,
   PendingRequestsResponse,
+  ReportUserInput,
   UserSearchResult,
 } from "@linkr/shared";
 import { api } from "@/lib/api";
@@ -129,5 +130,14 @@ export function useRemoveFriendMutation() {
       return res.data;
     },
     onSuccess: () => invalidateFriends(queryClient),
+  });
+}
+
+/** Report a user for abuse/spam etc. (Phase 4). Write-only — no list to invalidate. */
+export function useReportUserMutation() {
+  return useMutation({
+    mutationFn: async ({ userId, reason, details }: { userId: string } & ReportUserInput) => {
+      await api.post(`/users/${userId}/report`, { reason, details });
+    },
   });
 }

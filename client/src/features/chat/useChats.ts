@@ -83,3 +83,55 @@ export function usePinChatMutation() {
     },
   });
 }
+
+/** Mute/unmute a chat's notifications (Phase 4). Optimistic, mirrors the pin pattern. */
+export function useMuteChatMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ chatId, muted }: { chatId: string; muted: boolean }) => {
+      await api.patch(`/chat/${chatId}/mute`, { muted });
+      return { chatId, muted };
+    },
+    onMutate: async ({ chatId, muted }) => {
+      await queryClient.cancelQueries({ queryKey: chatKeys.list() });
+      const previous = queryClient.getQueryData<ChatListItem[]>(chatKeys.list());
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) =>
+        old?.map((c) => (c._id === chatId ? { ...c, muted } : c)),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(chatKeys.list(), context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+    },
+  });
+}
+
+/** Archive/unarchive a chat (Phase 4). Optimistic; archived chats live in their own list section. */
+export function useArchiveChatMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ chatId, archived }: { chatId: string; archived: boolean }) => {
+      await api.patch(`/chat/${chatId}/archive`, { archived });
+      return { chatId, archived };
+    },
+    onMutate: async ({ chatId, archived }) => {
+      await queryClient.cancelQueries({ queryKey: chatKeys.list() });
+      const previous = queryClient.getQueryData<ChatListItem[]>(chatKeys.list());
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) =>
+        old?.map((c) => (c._id === chatId ? { ...c, archived } : c)),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(chatKeys.list(), context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+    },
+  });
+}

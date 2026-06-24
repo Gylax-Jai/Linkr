@@ -50,6 +50,8 @@ const messageSchema = new Schema(
       },
     ],
     pinned: { type: Boolean, default: false },
+    /** True when this message was created by forwarding another message (Phase 4). */
+    forwarded: { type: Boolean, default: false },
     deletedFor: [{ type: Types.ObjectId, ref: "User" }],
     deletedForEveryone: { type: Boolean, default: false },
     status: { type: String, enum: MESSAGE_STATUSES, default: "sent" },

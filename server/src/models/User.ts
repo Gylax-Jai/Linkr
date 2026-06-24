@@ -1,5 +1,5 @@
 import { Schema, model, type InferSchemaType } from "mongoose";
-import { VISIBILITY_VALUES } from "@linkr/shared";
+import { ACCOUNT_STATUSES, VISIBILITY_VALUES } from "@linkr/shared";
 
 /**
  * User model (blueprint §12). A user is created at first Google login BEFORE onboarding, so
@@ -93,6 +93,17 @@ const userSchema = new Schema(
       profile: { type: String, enum: ["everyone", "friends"], default: "everyone" },
       whoCanRequest: { type: String, enum: ["everyone", "nobody"], default: "everyone" },
     },
+
+    /**
+     * Account lifecycle (Phase 4). `active` is the norm. `deactivated` marks a soft-deleted account:
+     * it's signed out everywhere and scheduled for permanent purge at `scheduledPurgeAt`, but logging
+     * back in via Google reactivates it (clearing these fields). An immediate deletion skips this and
+     * purges the document outright.
+     */
+    accountStatus: { type: String, enum: ACCOUNT_STATUSES, default: "active", index: true },
+    deactivatedAt: { type: Date },
+    /** When a deactivated account becomes eligible for permanent deletion (read by the purge job). */
+    scheduledPurgeAt: { type: Date },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

@@ -76,6 +76,8 @@ export interface MessageDTO {
   reactions: Reaction[];
   /** Set when the message body was edited in place. */
   editedAt?: Timestamp;
+  /** True when this message was created by forwarding another message (Phase 4). */
+  forwarded?: boolean;
   /** True when the sender deleted the message for everyone (body is cleared). */
   deletedForEveryone: boolean;
 }
@@ -88,6 +90,10 @@ export interface ChatListItem {
   participant: ChatParticipant;
   lastMessage?: MessageDTO;
   pinned: boolean;
+  /** Notifications for this chat are silenced for the current user (Phase 4). */
+  muted: boolean;
+  /** Hidden from the main list into the Archived section for the current user (Phase 4). */
+  archived: boolean;
   unreadCount: number;
   updatedAt: Timestamp;
 }

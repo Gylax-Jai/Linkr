@@ -1,8 +1,11 @@
 import type { Request } from "express";
 import type {
+  ArchiveChatInput,
   CreateChatInput,
   DeleteMessageInput,
   EditMessageInput,
+  ForwardMessageInput,
+  MuteChatInput,
   PinChatInput,
   ReactMessageInput,
   SendMessageInput,
@@ -16,6 +19,7 @@ import {
   deleteChatForUser,
   deleteMessage,
   editMessage,
+  forwardMessage,
   getChatForUser,
   getMessageForUser,
   getOrCreateDirectChat,
@@ -24,6 +28,8 @@ import {
   listMessages,
   reactToMessage,
   sendMessage,
+  setChatArchived,
+  setChatMuted,
   setChatPinned,
 } from "./chat.service.js";
 import { resolveLocalMediaPath, storeMedia, validateUpload } from "./chat.media.service.js";
@@ -162,6 +168,15 @@ export const reactMessage = asyncHandler(async (req, res) => {
   res.status(200).json({ message });
 });
 
+/** POST /api/chat/messages/:messageId/forward — forward a message to a friend (Phase 4). */
+export const postForward = asyncHandler(async (req, res) => {
+  const { messageId } = req.params;
+  if (!messageId) throw ApiError.badRequest("Missing messageId");
+  const { targetUserId, content, encrypted } = req.body as ForwardMessageInput;
+  const message = await forwardMessage(messageId, requireUserId(req), { targetUserId, content, encrypted });
+  res.status(201).json({ message });
+});
+
 /** DELETE /api/chat/:chatId — per-user soft delete (hide the chat from the current user's list). */
 export const deleteChat = asyncHandler(async (req, res) => {
   const { chatId } = req.params;
@@ -177,4 +192,22 @@ export const pinChat = asyncHandler(async (req, res) => {
   const { pinned } = req.body as PinChatInput;
   await setChatPinned(chatId, requireUserId(req), pinned);
   res.status(200).json({ ok: true, pinned });
+});
+
+/** PATCH /api/chat/:chatId/mute — mute/unmute a chat's notifications for the current user. */
+export const muteChat = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  if (!chatId) throw ApiError.badRequest("Missing chatId");
+  const { muted } = req.body as MuteChatInput;
+  await setChatMuted(chatId, requireUserId(req), muted);
+  res.status(200).json({ ok: true, muted });
+});
+
+/** PATCH /api/chat/:chatId/archive — archive/unarchive a chat for the current user. */
+export const archiveChat = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  if (!chatId) throw ApiError.badRequest("Missing chatId");
+  const { archived } = req.body as ArchiveChatInput;
+  await setChatArchived(chatId, requireUserId(req), archived);
+  res.status(200).json({ ok: true, archived });
 });

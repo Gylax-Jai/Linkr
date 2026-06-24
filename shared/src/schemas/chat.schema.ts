@@ -66,6 +66,28 @@ export const pinChatSchema = z.object({
   pinned: z.boolean(),
 });
 
+/** PATCH /api/chat/:chatId/mute — mute/unmute notifications for the current user (Phase 4). */
+export const muteChatSchema = z.object({
+  muted: z.boolean(),
+});
+
+/** PATCH /api/chat/:chatId/archive — archive/unarchive for the current user (Phase 4). */
+export const archiveChatSchema = z.object({
+  archived: z.boolean(),
+});
+
+/**
+ * POST /api/chat/messages/:messageId/forward — forward a message to a friend (Phase 4). `targetUserId`
+ * is the friend to forward to (server resolves/creates the 1:1 chat and enforces friendship). For an
+ * E2EE text message the client re-encrypts the plaintext for the TARGET peer and passes it as
+ * `content` (+ `encrypted`); for media the server copies the stored attachment, so `content` is omitted.
+ */
+export const forwardMessageSchema = z.object({
+  targetUserId: z.string().min(1),
+  content: z.string().trim().min(1).max(CONTENT_MAX).optional(),
+  encrypted: z.boolean().optional(),
+});
+
 /**
  * POST /api/chat/:chatId/media — multipart body (the file itself is handled by multer; this
  * validates the optional text caption that can accompany an attachment). Sprint 5.
@@ -80,4 +102,7 @@ export type EditMessageInput = z.infer<typeof editMessageSchema>;
 export type ReactMessageInput = z.infer<typeof reactMessageSchema>;
 export type DeleteMessageInput = z.infer<typeof deleteMessageSchema>;
 export type PinChatInput = z.infer<typeof pinChatSchema>;
+export type MuteChatInput = z.infer<typeof muteChatSchema>;
+export type ArchiveChatInput = z.infer<typeof archiveChatSchema>;
+export type ForwardMessageInput = z.infer<typeof forwardMessageSchema>;
 export type UploadMediaInput = z.infer<typeof uploadMediaBodySchema>;

@@ -1,19 +1,24 @@
 import type { Request } from "express";
 import type {
+  DeleteAccountInput,
   OnboardingInput,
   PrivacyUpdateInput,
   ProfileUpdateInput,
+  ReportUserInput,
   UserIdParam,
   UsernameAvailability,
 } from "@linkr/shared";
+import { clearRefreshCookie } from "../../config/cookies.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { toSessionUser, type UserDocument } from "../auth/auth.service.js";
 import { storeMedia, validateAvatarUpload } from "../chat/chat.media.service.js";
+import { deactivateAccount, purgeUser } from "./account.service.js";
 import {
   completeOnboarding,
   getLocalAvatar,
   isUsernameAvailable,
+  reportUser as reportUserService,
   searchUsersByUsername,
   setUserAvatar,
   updatePrivacy,
@@ -54,11 +59,46 @@ export const updateUserPrivacy = asyncHandler(async (req, res) => {
   res.status(200).json({ user: toSessionUser(user) });
 });
 
+/** POST /api/users/:userId/report — file a report against another user (Phase 4). */
+export const reportUser = asyncHandler(async (req, res) => {
+  const { userId } = req.params as UserIdParam;
+  const input = req.body as ReportUserInput;
+  await reportUserService(requireUser(req).id, userId, input);
+  res.status(201).json({ ok: true });
+});
+
 /** PATCH /api/users/me — update displayName, bio, status (username is immutable). */
 export const updateMe = asyncHandler(async (req, res) => {
   const input = req.body as ProfileUpdateInput;
   const user = await updateProfile(requireUser(req), input);
   res.status(200).json({ user: toSessionUser(user) });
+});
+
+/**
+ * POST /api/users/me/delete — delete the account (Phase 4). `mode: "scheduled"` soft-deletes with a
+ * 15-day grace window (reversible by logging back in); `mode: "immediate"` purges everything now.
+ * Guarded by a typed confirmation that must match the user's @username (or email). Either way we
+ * clear the refresh cookie so this device is signed out; the client then drops its access token.
+ */
+export const deleteAccount = asyncHandler(async (req, res) => {
+  const user = requireUser(req);
+  const { mode, confirm } = req.body as DeleteAccountInput;
+
+  const expected = (user.username ?? user.email).trim().toLowerCase();
+  if (confirm.trim().toLowerCase() !== expected) {
+    throw ApiError.badRequest("Confirmation doesn't match your username");
+  }
+
+  if (mode === "immediate") {
+    await purgeUser(user.id);
+    clearRefreshCookie(res);
+    res.status(200).json({ ok: true, purged: true });
+    return;
+  }
+
+  const scheduledPurgeAt = await deactivateAccount(user.id);
+  clearRefreshCookie(res);
+  res.status(200).json({ ok: true, scheduledPurgeAt: scheduledPurgeAt.toISOString() });
 });
 
 /**

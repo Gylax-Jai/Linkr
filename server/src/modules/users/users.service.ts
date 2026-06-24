@@ -1,6 +1,13 @@
 import path from "node:path";
-import type { OnboardingInput, PrivacyUpdateInput, ProfileUpdateInput, UserSearchResult } from "@linkr/shared";
+import type {
+  OnboardingInput,
+  PrivacyUpdateInput,
+  ProfileUpdateInput,
+  ReportUserInput,
+  UserSearchResult,
+} from "@linkr/shared";
 import { UserModel } from "../../models/User.js";
+import { ReportModel } from "../../models/Report.js";
 import { ApiError } from "../../utils/ApiError.js";
 import type { UserDocument } from "../auth/auth.service.js";
 import {
@@ -156,6 +163,45 @@ export async function updatePrivacy(user: UserDocument, input: PrivacyUpdateInpu
   }
   await user.save();
   return user;
+}
+
+/**
+ * File a report against another user (Phase 4). Validates the target exists and isn't the reporter,
+ * then records it. To curb spam we de-duplicate: if the reporter already has an OPEN report against
+ * the same user we update its reason/details rather than stacking a new row. Returns nothing — the
+ * client only needs a success acknowledgement.
+ */
+export async function reportUser(
+  reporterId: string,
+  reportedUserId: string,
+  input: ReportUserInput,
+): Promise<void> {
+  if (reporterId === reportedUserId) {
+    throw ApiError.badRequest("You can't report yourself");
+  }
+  const target = await UserModel.exists({ _id: reportedUserId });
+  if (!target) throw ApiError.notFound("User not found");
+
+  const details = input.details?.trim() ? input.details.trim() : undefined;
+
+  const existingOpen = await ReportModel.findOne({
+    reporter: reporterId,
+    reportedUser: reportedUserId,
+    status: "open",
+  });
+  if (existingOpen) {
+    existingOpen.reason = input.reason;
+    existingOpen.set("details", details);
+    await existingOpen.save();
+    return;
+  }
+
+  await ReportModel.create({
+    reporter: reporterId,
+    reportedUser: reportedUserId,
+    reason: input.reason,
+    ...(details ? { details } : {}),
+  });
 }
 
 /** Update profile fields (displayName, bio, status — username is immutable). */

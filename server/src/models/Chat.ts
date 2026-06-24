@@ -10,6 +10,10 @@ const chatSchema = new Schema(
     name: { type: String },
     avatar: { type: String },
     pinnedBy: [{ type: Types.ObjectId, ref: "User" }],
+    /** Per-user mute: members who silenced notifications for this chat (Phase 4). */
+    mutedBy: [{ type: Types.ObjectId, ref: "User" }],
+    /** Per-user archive: members who moved this chat into their Archived section (Phase 4). */
+    archivedBy: [{ type: Types.ObjectId, ref: "User" }],
     /** Per-user soft delete: members who hid this chat from THEIR list (never affects the other side). */
     hiddenFor: [{ type: Types.ObjectId, ref: "User" }],
     lastMessage: { type: Types.ObjectId, ref: "Message" },

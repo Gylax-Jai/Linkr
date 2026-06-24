@@ -27,6 +27,14 @@ export const MESSAGE_STATUSES = ["sent", "delivered", "read"] as const;
 export const CHAT_TYPES = ["1:1", "group", "self"] as const;
 export const VISIBILITY_VALUES = ["everyone", "friends", "nobody"] as const;
 
+/**
+ * Account deletion (Phase 4). A "scheduled" (soft) deletion deactivates the account immediately and
+ * permanently purges it after this many days unless the owner logs back in to reactivate. An
+ * "immediate" deletion purges everything right away with no grace period.
+ */
+export const ACCOUNT_DELETION_GRACE_DAYS = 15;
+export const ACCOUNT_STATUSES = ["active", "deactivated"] as const;
+
 /** In-app notification kinds (Sprint 5). */
 export const NOTIFICATION_TYPES = ["friend_request", "friend_accepted", "message"] as const;
 /** Max notifications returned by GET /api/notifications (newest first). */

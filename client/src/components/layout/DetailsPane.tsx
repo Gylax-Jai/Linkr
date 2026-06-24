@@ -1,5 +1,21 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Ban, Bookmark, Check, Clock, Image, Info, Share2, ShieldCheck, ShieldOff, UserPlus, VolumeX, X } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  Ban,
+  Bell,
+  Bookmark,
+  Check,
+  Clock,
+  Image,
+  Info,
+  Share2,
+  ShieldCheck,
+  ShieldOff,
+  UserPlus,
+  VolumeX,
+  X,
+} from "lucide-react";
 import type { ChatParticipantFriendship, MessageDTO } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
@@ -12,10 +28,11 @@ import {
   useSendFriendRequestMutation,
   useUnblockUserMutation,
 } from "@/features/friends";
-import { MessageMedia, useChatById, useMessages } from "@/features/chat";
+import { MessageMedia, useArchiveChatMutation, useChatById, useMessages, useMuteChatMutation } from "@/features/chat";
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { formatLastSeen } from "@/lib/utils/formatTime";
+import { shareContact } from "@/lib/utils/share";
 import { cn } from "@/lib/utils";
 
 type TabId = "profile" | "media" | "files";
@@ -97,6 +114,9 @@ function DetailsContent() {
 
   const block = useBlockUserMutation();
   const unblock = useUnblockUserMutation();
+  const muteChat = useMuteChatMutation();
+  const archiveChat = useArchiveChatMutation();
+  const [shareNote, setShareNote] = useState<string | null>(null);
   const blocked = participant?.friendship?.status === "blocked";
   const blockedByMe = Boolean(participant?.friendship?.blockedByMe);
   const blockPending = block.isPending || unblock.isPending;
@@ -181,44 +201,87 @@ function DetailsContent() {
         <RelationshipControl participantId={participant._id} friendship={participant.friendship} />
       ) : null}
 
-      <div className="flex shrink-0 gap-2 border-t border-border p-4">
-        <Button variant="ghost" size="sm" disabled className="flex-1" title="Coming soon">
-          <VolumeX className="h-4 w-4" />
-          Mute
-        </Button>
-        {isSelf ? null : blocked && !blockedByMe ? (
-          // A block placed by the other user can't be lifted here.
-          <Button variant="ghost" size="sm" disabled className="flex-1" title="This user has blocked you">
-            <Ban className="h-4 w-4" />
-            Blocked
-          </Button>
-        ) : blocked && blockedByMe ? (
+      <div className="shrink-0 space-y-2 border-t border-border p-4">
+        <div className="flex gap-2">
           <Button
             variant="ghost"
             size="sm"
-            disabled={!participant || blockPending}
+            disabled={!chat}
             className="flex-1"
-            onClick={() => participant && unblock.mutate(participant._id)}
+            title={chat?.muted ? "Unmute notifications" : "Mute notifications"}
+            onClick={() => chat && muteChat.mutate({ chatId: chat._id, muted: !chat.muted })}
           >
-            <ShieldOff className="h-4 w-4" />
-            Unblock
+            {chat?.muted ? <Bell className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            {chat?.muted ? "Unmute" : "Mute"}
           </Button>
-        ) : (
           <Button
             variant="ghost"
             size="sm"
-            disabled={!participant || blockPending}
+            disabled={!chat}
             className="flex-1"
-            onClick={() => participant && block.mutate(participant._id)}
+            title={chat?.archived ? "Unarchive chat" : "Archive chat"}
+            onClick={() => chat && archiveChat.mutate({ chatId: chat._id, archived: !chat.archived })}
           >
-            <Ban className="h-4 w-4" />
-            Block
+            {chat?.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+            {chat?.archived ? "Unarchive" : "Archive"}
           </Button>
-        )}
-        <Button variant="ghost" size="sm" disabled className="flex-1" title="Coming soon">
-          <Share2 className="h-4 w-4" />
-          Share
-        </Button>
+        </div>
+        <div className="flex gap-2">
+          {isSelf ? null : blocked && !blockedByMe ? (
+            // A block placed by the other user can't be lifted here.
+            <Button variant="ghost" size="sm" disabled className="flex-1" title="This user has blocked you">
+              <Ban className="h-4 w-4" />
+              Blocked
+            </Button>
+          ) : blocked && blockedByMe ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!participant || blockPending}
+              className="flex-1"
+              onClick={() => participant && unblock.mutate(participant._id)}
+            >
+              <ShieldOff className="h-4 w-4" />
+              Unblock
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!participant || blockPending}
+              className="flex-1"
+              onClick={() => participant && block.mutate(participant._id)}
+            >
+              <Ban className="h-4 w-4" />
+              Block
+            </Button>
+          )}
+          {isSelf ? null : (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!participant}
+              className="flex-1"
+              title="Share this contact"
+              onClick={async () => {
+                if (!participant) return;
+                const result = await shareContact({
+                  displayName: participant.displayName,
+                  username: participant.username,
+                });
+                if (result === "copied") setShareNote("Copied to clipboard");
+                else if (result === "shared") setShareNote("Shared");
+                else if (result === "unavailable") setShareNote("Couldn't share");
+                if (result !== "cancelled") {
+                  window.setTimeout(() => setShareNote(null), 2000);
+                }
+              }}
+            >
+              <Share2 className="h-4 w-4" />
+              {shareNote ?? "Share"}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

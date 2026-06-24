@@ -21,6 +21,11 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     if (!user) {
       throw ApiError.unauthorized();
     }
+    // A deactivated (soft-deleted) account can't act with a lingering access token (Phase 4). It's
+    // restored only by logging back in via Google, which mints a fresh session.
+    if (user.accountStatus === "deactivated") {
+      throw ApiError.unauthorized();
+    }
 
     req.user = user;
     req.sessionId = sessionId;

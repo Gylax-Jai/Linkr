@@ -112,6 +112,7 @@ function toMessageDTO(doc: MessageDocument): MessageDTO {
       ? []
       : (doc.reactions ?? []).map((r) => ({ user: String(r.user), emoji: r.emoji })),
     editedAt: doc.editedAt instanceof Date ? doc.editedAt.toISOString() : undefined,
+    forwarded: deletedForEveryone ? false : Boolean(doc.forwarded),
     deletedForEveryone,
   };
 }
@@ -244,6 +245,8 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
     if (!participant) continue;
 
     const pinned = (chat.pinnedBy ?? []).some((id) => id.toString() === userId);
+    const muted = (chat.mutedBy ?? []).some((id) => id.toString() === userId);
+    const archived = (chat.archivedBy ?? []).some((id) => id.toString() === userId);
     const lastMsg = chat.lastMessage ? toMessageDTO(chat.lastMessage as MessageDocument) : undefined;
 
     let unreadCount = 0;
@@ -284,6 +287,8 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
       },
       lastMessage: lastMsg,
       pinned,
+      muted,
+      archived,
       unreadCount,
       updatedAt: (chat.updatedAt instanceof Date ? chat.updatedAt : chat.createdAt).toISOString(),
     });
@@ -334,6 +339,8 @@ export interface SendMessageOptions {
   media?: SendMessageMedia;
   /** True when `content` is an E2EE envelope (Phase 2); stored verbatim, never read by the server. */
   encrypted?: boolean;
+  /** True when this message is the result of a forward (Phase 4). */
+  forwarded?: boolean;
 }
 
 function truncatePreview(text: string, max = 80): string {
@@ -395,6 +402,7 @@ export async function sendMessage(
     type: media ? media.type : "text",
     ...(content ? { content } : {}),
     ...(encrypted ? { encrypted: true } : {}),
+    ...(options.forwarded ? { forwarded: true } : {}),
     ...(media
       ? { mediaUrl: media.url, mediaName: media.name, mediaSize: media.size, mediaMime: media.mime }
       : {}),
@@ -411,8 +419,10 @@ export async function sendMessage(
   if (replyId) await message.populate(REPLY_POPULATE);
 
   // Notify the recipient (best-effort; never blocks or breaks the send). Skip for self chats —
-  // there's no one else to notify, and you shouldn't ping yourself.
-  if (!selfChat) {
+  // there's no one else to notify, and you shouldn't ping yourself. Skip too when the recipient has
+  // MUTED this chat (Phase 4) — no in-app notification (and, later, no push) for muted threads.
+  const mutedByRecipient = (chat.mutedBy ?? []).some((id) => id.toString() === otherId);
+  if (!selfChat && !mutedByRecipient) {
     void createNotification({
       userId: otherId,
       type: "message",
@@ -559,6 +569,59 @@ export async function reactToMessage(
   return dto;
 }
 
+/**
+ * Forward a message to a friend (Phase 4). Resolves/creates the 1:1 chat with `targetUserId`
+ * (friendship enforced by getOrCreateDirectChat), then re-creates the message there flagged as a
+ * forward. For media we copy the stored attachment reference (media isn't E2EE); for text the caller
+ * passes a freshly re-encrypted `content` for the target peer (the server can't re-encrypt). Call
+ * logs and deleted messages can't be forwarded. Broadcasts MESSAGE_NEW to both members.
+ */
+export async function forwardMessage(
+  messageId: string,
+  userId: string,
+  options: { targetUserId: string; content?: string; encrypted?: boolean },
+): Promise<MessageDTO> {
+  const source = await getMessageForUser(messageId, userId);
+  if (source.deletedForEveryone) throw ApiError.badRequest("Cannot forward a deleted message");
+  if (source.type === "call") throw ApiError.badRequest("Cannot forward a call log");
+
+  const targetChat = await getOrCreateDirectChat(userId, options.targetUserId);
+  const targetChatId = targetChat._id.toString();
+  const hasMedia = typeof source.mediaUrl === "string" && source.mediaUrl.length > 0;
+
+  let dto: MessageDTO;
+  if (hasMedia) {
+    dto = await sendMessage(targetChatId, userId, {
+      media: {
+        type: source.type as MessageType,
+        url: source.mediaUrl as string,
+        name: typeof source.mediaName === "string" ? source.mediaName : "file",
+        size: typeof source.mediaSize === "number" ? source.mediaSize : 0,
+        mime: typeof source.mediaMime === "string" ? source.mediaMime : "application/octet-stream",
+      },
+      ...(options.content ? { content: options.content } : {}),
+      forwarded: true,
+    });
+  } else {
+    if (!options.content?.trim()) throw ApiError.badRequest("Nothing to forward");
+    dto = await sendMessage(targetChatId, userId, {
+      content: options.content,
+      encrypted: options.encrypted,
+      forwarded: true,
+    });
+  }
+
+  // Render live for both members (sendMessage persists but doesn't broadcast; mirror the media path).
+  const io = getSocketServer();
+  if (io) {
+    const otherId = await getOtherMemberId(targetChat, userId);
+    io.to(`user:${userId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message: dto });
+    if (otherId !== userId) io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message: dto });
+  }
+
+  return dto;
+}
+
 /** Pin or unpin a chat for the current user (per-user, stored in chat.pinnedBy). */
 export async function setChatPinned(chatId: string, userId: string, pinned: boolean): Promise<void> {
   const chat = await getChatForUser(chatId, userId);
@@ -569,6 +632,42 @@ export async function setChatPinned(chatId: string, userId: string, pinned: bool
     chat.set(
       "pinnedBy",
       chat.pinnedBy.filter((id) => id.toString() !== userId),
+    );
+  }
+  await chat.save();
+}
+
+/** Mute or unmute a chat's notifications for the current user (per-user, stored in chat.mutedBy). */
+export async function setChatMuted(chatId: string, userId: string, muted: boolean): Promise<void> {
+  const chat = await getChatForUser(chatId, userId);
+  const list = chat.mutedBy ?? [];
+  const has = list.some((id) => id.toString() === userId);
+  if (muted && !has) {
+    chat.mutedBy.push(userId as unknown as (typeof chat.mutedBy)[number]);
+  } else if (!muted && has) {
+    chat.set(
+      "mutedBy",
+      list.filter((id) => id.toString() !== userId),
+    );
+  }
+  await chat.save();
+}
+
+/**
+ * Archive or unarchive a chat for the current user (per-user, stored in chat.archivedBy). Unlike a
+ * "delete" (hiddenFor), archiving is an organizational hide that PERSISTS across new activity — the
+ * chat stays in the Archived section until the user explicitly unarchives it.
+ */
+export async function setChatArchived(chatId: string, userId: string, archived: boolean): Promise<void> {
+  const chat = await getChatForUser(chatId, userId);
+  const list = chat.archivedBy ?? [];
+  const has = list.some((id) => id.toString() === userId);
+  if (archived && !has) {
+    chat.archivedBy.push(userId as unknown as (typeof chat.archivedBy)[number]);
+  } else if (!archived && has) {
+    chat.set(
+      "archivedBy",
+      list.filter((id) => id.toString() !== userId),
     );
   }
   await chat.save();

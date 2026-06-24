@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   Ban,
+  Bell,
+  BellOff,
   Bookmark,
   Check,
   ChevronDown,
@@ -13,12 +17,20 @@ import {
   Trash2,
   UserMinus,
   UserPlus,
+  VolumeX,
 } from "lucide-react";
 import type { ChatListItem } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import { FriendSearchModal } from "@/features/friends/FriendSearchModal";
 import { FriendsPanel } from "@/features/friends";
-import { useChatList, useCreateChatMutation, useDeleteChatMutation, usePinChatMutation } from "@/features/chat";
+import {
+  useArchiveChatMutation,
+  useChatList,
+  useCreateChatMutation,
+  useDeleteChatMutation,
+  useMuteChatMutation,
+  usePinChatMutation,
+} from "@/features/chat";
 import {
   useAcceptFriendRequestMutation,
   useBlockUserMutation,
@@ -63,6 +75,8 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
   const onlineOverrides = useUIStore((s) => s.onlineOverrides);
   const online = onlineOverrides[chat.participant._id] ?? chat.participant.online;
   const pinChat = usePinChatMutation();
+  const muteChat = useMuteChatMutation();
+  const archiveChat = useArchiveChatMutation();
   const deleteChat = useDeleteChatMutation();
   const removeFriend = useRemoveFriendMutation();
   const blockUser = useBlockUserMutation();
@@ -179,6 +193,9 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
             <span className={cn("truncate text-sm", active ? "font-semibold text-text" : "font-medium text-text")}>
               {displayName}
             </span>
+            {chat.muted ? (
+              <VolumeX className="h-3 w-3 shrink-0 text-text-muted" aria-label="Muted" />
+            ) : null}
           </span>
           <span
             className={cn(
@@ -227,6 +244,26 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
               }}
             >
               {chat.pinned ? "Unpin chat" : "Pin chat"}
+            </ChatMenuItem>
+
+            <ChatMenuItem
+              icon={chat.muted ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+              onClick={() => {
+                muteChat.mutate({ chatId: chat._id, muted: !chat.muted });
+                setMenuOpen(false);
+              }}
+            >
+              {chat.muted ? "Unmute" : "Mute notifications"}
+            </ChatMenuItem>
+
+            <ChatMenuItem
+              icon={chat.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+              onClick={() => {
+                archiveChat.mutate({ chatId: chat._id, archived: !chat.archived });
+                setMenuOpen(false);
+              }}
+            >
+              {chat.archived ? "Unarchive chat" : "Archive chat"}
             </ChatMenuItem>
 
             {isStranger ? (
@@ -417,8 +454,11 @@ export function Sidebar() {
     );
   }, [chats, search]);
 
-  const pinned = filtered.filter((c) => c.pinned);
-  const recent = filtered.filter((c) => !c.pinned);
+  // Archived chats live in their own collapsible section and never mix into Pinned/Recent.
+  const active = filtered.filter((c) => !c.archived);
+  const pinned = active.filter((c) => c.pinned);
+  const recent = active.filter((c) => !c.pinned);
+  const archived = filtered.filter((c) => c.archived);
 
   if (!user) return null;
 
@@ -501,6 +541,13 @@ export function Sidebar() {
               <>
                 <ChatSection title="Pinned" chats={pinned} activeChatId={activeChatId} userId={user._id} />
                 <ChatSection title="Recent" chats={recent} activeChatId={activeChatId} userId={user._id} />
+                <ChatSection
+                  title="Archived"
+                  chats={archived}
+                  activeChatId={activeChatId}
+                  userId={user._id}
+                  defaultOpen={false}
+                />
               </>
             )}
           </nav>

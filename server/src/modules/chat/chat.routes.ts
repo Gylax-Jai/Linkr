@@ -1,12 +1,15 @@
 import { Router } from "express";
 import {
+  archiveChatSchema,
   chatIdParamSchema,
   createChatSchema,
   deleteMessageSchema,
   editMessageSchema,
+  forwardMessageSchema,
   listMessagesQuerySchema,
   MEDIA_FILE_MAX_BYTES,
   messageIdParamSchema,
+  muteChatSchema,
   pinChatSchema,
   postMessageBodySchema,
   reactMessageSchema,
@@ -16,13 +19,16 @@ import { requireAuth } from "../../middleware/auth.js";
 import { validate } from "../../middleware/validate.js";
 import { singleFileUpload } from "../../middleware/upload.js";
 import {
+  archiveChat,
   createChat,
   deleteChat,
   getChats,
   getMedia,
   getMessages,
+  muteChat,
   patchMessage,
   pinChat,
+  postForward,
   postMedia,
   postMessage,
   reactMessage,
@@ -63,6 +69,13 @@ chatRouter.post(
   validate(reactMessageSchema),
   reactMessage,
 );
+chatRouter.post(
+  "/messages/:messageId/forward",
+  requireAuth,
+  validate(messageIdParamSchema, "params"),
+  validate(forwardMessageSchema),
+  postForward,
+);
 
 // Authenticated media download for locally-stored files (re-checks chat membership).
 chatRouter.get(
@@ -92,6 +105,20 @@ chatRouter.patch(
   validate(chatIdParamSchema, "params"),
   validate(pinChatSchema),
   pinChat,
+);
+chatRouter.patch(
+  "/:chatId/mute",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  validate(muteChatSchema),
+  muteChat,
+);
+chatRouter.patch(
+  "/:chatId/archive",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  validate(archiveChatSchema),
+  archiveChat,
 );
 // Per-user delete (hide). Only membership is required — friendship is not needed to hide a chat.
 // The single-segment `/:chatId` can't collide with the two-segment `/messages/:messageId` above.

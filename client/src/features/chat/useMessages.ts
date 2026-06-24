@@ -176,6 +176,45 @@ export function useDeleteMessageMutation(chatId: string | null) {
   });
 }
 
+/**
+ * Forward a message to a friend (Phase 4). For media the server copies the stored attachment; for a
+ * text message we re-encrypt the plaintext for the TARGET peer client-side (E2EE never leaves the
+ * client) and pass it as `content`. The decrypted plaintext comes from the crypto cache (an
+ * encrypted bubble is decrypted as soon as it renders) or directly from a plaintext message.
+ */
+export function useForwardMessageMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ message, targetUserId }: { message: MessageDTO; targetUserId: string }) => {
+      const isMedia = Boolean(message.mediaUrl);
+
+      let body: { targetUserId: string; content?: string; encrypted?: boolean } = { targetUserId };
+
+      if (!isMedia) {
+        let text = "";
+        if (message.encrypted && message.content) {
+          const store = useCryptoStore.getState();
+          store.decryptInto(message._id, message.content);
+          text = useCryptoStore.getState().plaintext[message._id] ?? "";
+        } else {
+          text = message.content ?? "";
+        }
+        if (!text.trim()) throw new Error("This message can't be forwarded");
+        const prepared = await useCryptoStore.getState().encryptText(text, [targetUserId]);
+        body = { targetUserId, content: prepared.content, encrypted: prepared.encrypted };
+      }
+
+      const res = await api.post<{ message: MessageDTO }>(`/chat/messages/${message._id}/forward`, body);
+      return res.data.message;
+    },
+    onSuccess: (message) => {
+      void queryClient.invalidateQueries({ queryKey: chatKeys.messages(message.chatId) });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+    },
+  });
+}
+
 export function useReactMessageMutation(chatId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({

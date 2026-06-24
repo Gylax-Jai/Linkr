@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   Ban,
+  Bell,
+  BellOff,
   Bookmark,
   Check,
   CheckCheck,
   Copy,
   CornerUpLeft,
   FileText,
+  Flag,
+  Forward,
   Info,
   Loader2,
   MoreVertical,
@@ -27,7 +33,6 @@ import {
   UserMinus,
   UserPlus,
   Video,
-  VolumeX,
   X,
 } from "lucide-react";
 import { isAxiosError } from "axios";
@@ -38,17 +43,21 @@ import { Button } from "@/components/ui/button";
 import { EncryptedBadge } from "@/components/ui/EncryptedBadge";
 import {
   emitTyping,
+  ForwardMessageModal,
   MessageMedia,
+  useArchiveChatMutation,
   useChatById,
   useDeleteMessageMutation,
   useEditMessageMutation,
   useMarkReadMutation,
   useMessages,
+  useMuteChatMutation,
   useReactMessageMutation,
   useSendMessageMutation,
   useUploadMediaMutation,
 } from "@/features/chat";
 import {
+  ReportUserModal,
   useAcceptFriendRequestMutation,
   useBlockUserMutation,
   useCancelFriendRequestMutation,
@@ -63,6 +72,7 @@ import { useDecryptedText, usePeerHasKey } from "@/lib/crypto";
 import { EmojiPickerPopover } from "@/features/chat/EmojiPicker";
 import { bubbleRadiusClasses, getBubblePosition } from "@/lib/utils/bubbleGrouping";
 import { formatDayLabel, formatLastSeen, formatMessageTime } from "@/lib/utils/formatTime";
+import { shareContact } from "@/lib/utils/share";
 import { cn } from "@/lib/utils";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -106,6 +116,8 @@ export function ConversationPane() {
   const sessionUser = useAuthStore((s) => s.user);
   const chat = useChatById(activeChatId);
   const [target, setTarget] = useState<ComposerTarget>({ replyTo: null, editing: null });
+  // Message currently being forwarded (Phase 4) — drives the friend-picker modal. Null = closed.
+  const [forwardTarget, setForwardTarget] = useState<MessageDTO | null>(null);
   // WhatsApp-style status strip (Sprint F): visible while viewing the latest messages, slides away as
   // you scroll up through history, and returns when you're back at the bottom.
   const [statusVisible, setStatusVisible] = useState(true);
@@ -113,6 +125,7 @@ export function ConversationPane() {
   // Reset per-chat UI (reply/edit target + status strip) whenever the active chat changes.
   useEffect(() => {
     setTarget({ replyTo: null, editing: null });
+    setForwardTarget(null);
     setStatusVisible(true);
   }, [activeChatId]);
 
@@ -145,6 +158,7 @@ export function ConversationPane() {
         participant={chat.participant}
         onReply={(m) => setTarget({ replyTo: m, editing: null })}
         onEdit={(m) => setTarget({ replyTo: null, editing: m })}
+        onForward={(m) => setForwardTarget(m)}
         onAtBottomChange={setStatusVisible}
       />
       <Composer
@@ -156,6 +170,7 @@ export function ConversationPane() {
         target={target}
         onClearTarget={() => setTarget({ replyTo: null, editing: null })}
       />
+      <ForwardMessageModal message={forwardTarget} onClose={() => setForwardTarget(null)} />
     </section>
   );
 }
@@ -398,6 +413,9 @@ function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () =
   const block = useBlockUserMutation();
   const unblock = useUnblockUserMutation();
   const unfriend = useRemoveFriendMutation();
+  const muteChat = useMuteChatMutation();
+  const archiveChat = useArchiveChatMutation();
+  const [reportOpen, setReportOpen] = useState(false);
 
   const participant = chat.participant;
   const friendship = participant.friendship;
@@ -451,7 +469,16 @@ function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () =
           className="absolute right-0 top-full z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-elevated"
         >
           <HeaderMenuItem icon={<Info className="h-4 w-4" />} label="Contact info" onClick={() => run(onViewInfo)} />
-          <HeaderMenuItem icon={<VolumeX className="h-4 w-4" />} label="Mute" disabled hint="Soon" />
+          <HeaderMenuItem
+            icon={chat.muted ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+            label={chat.muted ? "Unmute" : "Mute notifications"}
+            onClick={() => run(() => muteChat.mutate({ chatId: chat._id, muted: !chat.muted }))}
+          />
+          <HeaderMenuItem
+            icon={chat.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+            label={chat.archived ? "Unarchive" : "Archive chat"}
+            onClick={() => run(() => archiveChat.mutate({ chatId: chat._id, archived: !chat.archived }))}
+          />
           {/* Friend/block/share actions are meaningless for the self ("Saved messages") chat. */}
           {!isSelf && isFriend ? (
             <HeaderMenuItem
@@ -478,10 +505,31 @@ function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () =
             />
           ) : null}
           {!isSelf ? (
-            <HeaderMenuItem icon={<Share2 className="h-4 w-4" />} label="Share contact" disabled hint="Soon" />
+            <HeaderMenuItem
+              icon={<Share2 className="h-4 w-4" />}
+              label="Share contact"
+              onClick={() =>
+                run(() => {
+                  void shareContact({ displayName: participant.displayName, username: participant.username });
+                })
+              }
+            />
+          ) : null}
+          {!isSelf ? (
+            <HeaderMenuItem
+              icon={<Flag className="h-4 w-4" />}
+              label="Report"
+              danger
+              onClick={() => run(() => setReportOpen(true))}
+            />
           ) : null}
         </div>
       ) : null}
+
+      <ReportUserModal
+        target={reportOpen ? { userId: participant._id, name: participant.displayName } : null}
+        onClose={() => setReportOpen(false)}
+      />
     </div>
   );
 }
@@ -560,12 +608,14 @@ function MessageList({
   participant,
   onReply,
   onEdit,
+  onForward,
   onAtBottomChange,
 }: {
   chatId: string;
   participant: ChatListItem["participant"];
   onReply: (m: MessageDTO) => void;
   onEdit: (m: MessageDTO) => void;
+  onForward: (m: MessageDTO) => void;
   /** Reports whether the list is scrolled near the bottom — drives the mobile status strip (Sprint F). */
   onAtBottomChange?: (atBottom: boolean) => void;
 }) {
@@ -640,6 +690,7 @@ function MessageList({
               participantName={participant.displayName}
               onReply={() => onReply(message)}
               onEdit={() => onEdit(message)}
+              onForward={() => onForward(message)}
               onDelete={(scope) => del.mutate({ messageId: message._id, scope })}
               onReact={(emoji) => react.mutate({ messageId: message._id, emoji })}
             />
@@ -736,6 +787,7 @@ function MessageActions({
   deleted,
   onReply,
   onEdit,
+  onForward,
   onCopy,
   onDelete,
   onReact,
@@ -744,6 +796,7 @@ function MessageActions({
   deleted: boolean;
   onReply: () => void;
   onEdit: () => void;
+  onForward: () => void;
   onCopy: () => void;
   onDelete: (scope: "me" | "everyone") => void;
   onReact: (emoji: string) => void;
@@ -802,6 +855,9 @@ function MessageActions({
         <div className="absolute bottom-full right-0 z-30 mb-1 w-44 rounded-xl border border-border bg-surface p-1 shadow-elevated">
           <MenuItem icon={<Copy className="h-4 w-4" />} onClick={() => { onCopy(); setMenu(null); }}>
             Copy text
+          </MenuItem>
+          <MenuItem icon={<Forward className="h-4 w-4" />} onClick={() => { onForward(); setMenu(null); }}>
+            Forward
           </MenuItem>
           {mine ? (
             <MenuItem icon={<Pencil className="h-4 w-4" />} onClick={() => { onEdit(); setMenu(null); }}>
@@ -928,6 +984,7 @@ function MessageBubble({
   participantName,
   onReply,
   onEdit,
+  onForward,
   onDelete,
   onReact,
 }: {
@@ -939,6 +996,7 @@ function MessageBubble({
   participantName: string;
   onReply: () => void;
   onEdit: () => void;
+  onForward: () => void;
   onDelete: (scope: "me" | "everyone") => void;
   onReact: (emoji: string) => void;
 }) {
@@ -966,6 +1024,7 @@ function MessageBubble({
           deleted={deleted}
           onReply={onReply}
           onEdit={onEdit}
+          onForward={onForward}
           onCopy={handleCopy}
           onDelete={onDelete}
           onReact={onReact}
@@ -981,6 +1040,17 @@ function MessageBubble({
               : cn("border border-border bg-surface text-text shadow-soft", bubbleRadiusClasses(position, false)),
           )}
         >
+          {!deleted && message.forwarded ? (
+            <span
+              className={cn(
+                "mb-0.5 flex items-center gap-1 text-[11px] italic",
+                mine ? "text-primary-foreground/70" : "text-text-muted",
+              )}
+            >
+              <Forward className="h-3 w-3" />
+              Forwarded
+            </span>
+          ) : null}
           {!deleted ? (
             <ReplyPreviewBlock message={message} mine={mine} participantName={participantName} userId={userId} />
           ) : null}
@@ -1032,6 +1102,7 @@ function MessageBubble({
           deleted={deleted}
           onReply={onReply}
           onEdit={onEdit}
+          onForward={onForward}
           onCopy={handleCopy}
           onDelete={onDelete}
           onReact={onReact}

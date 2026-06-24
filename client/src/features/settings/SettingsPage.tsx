@@ -1,9 +1,11 @@
 import { Link } from "react-router-dom";
-import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { Lock, ArrowLeft, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RecoveryCard } from "@/features/security";
 import { PATHS } from "@/routes/paths";
+import { PrivacyCard } from "./PrivacyCard";
 import { SessionsCard } from "./SessionsCard";
+import { DangerZoneCard } from "./DangerZoneCard";
 
 /**
  * Settings hub (Sprint E/G). The canonical home for account security only: multi-device encryption
@@ -25,6 +27,14 @@ export function SettingsPage() {
       <div className="mx-auto w-full max-w-lg space-y-8 p-6">
         <section className="space-y-3">
           <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
+            <Lock className="h-4 w-4" />
+            Privacy
+          </h2>
+          <PrivacyCard />
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
             <ShieldCheck className="h-4 w-4" />
             Security
           </h2>
@@ -32,6 +42,8 @@ export function SettingsPage() {
         </section>
 
         <SessionsCard />
+
+        <DangerZoneCard />
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import { connectRedis, disconnectRedis } from "./config/redis.js";
 import { registerSocketHandlers } from "./sockets/index.js";
 import { setSocketServer } from "./sockets/io.js";
 import { ensureBotUser } from "./modules/bot/bot.service.js";
+import { startAccountPurgeJob } from "./modules/users/account.service.js";
 import { logger } from "./utils/logger.js";
 
 async function bootstrap(): Promise<void> {
@@ -40,8 +41,12 @@ async function bootstrap(): Promise<void> {
     logger.info(`Linkr server listening on http://localhost:${env.PORT}`, { env: env.NODE_ENV });
   });
 
+  // Background job (Phase 4): permanently purge deactivated accounts past their 15-day grace period.
+  const stopAccountPurge = startAccountPurgeJob();
+
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal} — shutting down gracefully`);
+    stopAccountPurge();
     io.close();
     httpServer.close();
     await disconnectRedis();
