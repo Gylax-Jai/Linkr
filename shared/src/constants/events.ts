@@ -46,6 +46,11 @@ export const SOCKET_EVENTS = {
   WEBRTC_ANSWER: "webrtc:answer",
   WEBRTC_ICE_CANDIDATE: "webrtc:ice-candidate",
 
+  /** Client reconnect — restore server-side active call (Phase 3.1.6). */
+  CALL_SYNC: "call:sync",
+  /** Client idle after reload — drop unanswered ghost sessions for this user (Phase 3.1.6). */
+  CALL_CLEAR_STALE: "call:clear-stale",
+
   // Screen share (Phase 3)
   SCREEN_START: "screen:start",
   SCREEN_STOP: "screen:stop",

@@ -51,6 +51,34 @@ export interface CallIncomingPayload {
   from: PublicUser;
 }
 
+/** Response of `call:sync` — active server-side call for this user, or null. */
+export type CallSyncRole = "caller" | "callee";
+
+export type CallSyncPhase = "incoming" | "outgoing" | "connecting";
+
+export interface CallSyncReplay {
+  /** Callee should treat as accepted; caller should run offer flow. */
+  accepted?: boolean;
+  offer?: WebRtcSdpPayload;
+  answer?: WebRtcSdpPayload;
+}
+
+export interface CallSyncActiveCall {
+  callId: string;
+  chatId: string;
+  media: CallMedia;
+  role: CallSyncRole;
+  phase: CallSyncPhase;
+  peer: PublicUser;
+  /** Outgoing only — callee has a live device. */
+  ringing?: boolean;
+  replay?: CallSyncReplay;
+}
+
+export interface CallSyncResponse {
+  call: CallSyncActiveCall | null;
+}
+
 /** Generic per-call control message (accept / reject / end / busy / unavailable). */
 export interface CallSignalPayload {
   callId: string;

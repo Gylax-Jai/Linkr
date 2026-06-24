@@ -56,6 +56,16 @@ interface CallState {
 
   startOutgoing: (args: { callId: string; chatId: string; media: CallMedia; peer: PublicUser }) => void;
   receiveIncoming: (args: { callId: string; chatId: string; media: CallMedia; peer: PublicUser }) => void;
+  /** Restore UI from server `call:sync` after reconnect (Phase 3.1.6). */
+  restoreFromSync: (args: {
+    callId: string;
+    chatId: string;
+    media: CallMedia;
+    peer: PublicUser;
+    role: "caller" | "callee";
+    phase: "incoming" | "outgoing" | "connecting";
+    ringing?: boolean;
+  }) => void;
   setConnecting: () => void;
   setActive: () => void;
   setConnection: (state: RTCPeerConnectionState) => void;
@@ -100,6 +110,18 @@ export const useCallStore = create<CallState>((set) => ({
 
   receiveIncoming: ({ callId, chatId, media, peer }) =>
     set({ ...initial, phase: "incoming", direction: "incoming", callId, chatId, media, peer }),
+
+  restoreFromSync: ({ callId, chatId, media, peer, role, phase, ringing }) =>
+    set({
+      ...initial,
+      phase,
+      direction: role === "caller" ? "outgoing" : "incoming",
+      callId,
+      chatId,
+      media,
+      peer,
+      ringing: ringing ?? false,
+    }),
 
   setConnecting: () => set({ phase: "connecting" }),
 

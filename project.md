@@ -49,6 +49,7 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Call UX polish (full-screen-first, audio-route dropdown, BT icon) | ✅ Done (Sprint 3.1.3) |
 | Bluetooth route icon correct on mobile | ✅ Done (Sprint 3.1.4) |
 | Mobile audio dropdown + earpiece default + mic gate | ✅ Done (Sprint 3.1.5) |
+| Call resync after refresh (ghost BUSY + Ringing/Connecting desync) | ✅ Done (Sprint 3.1.6) |
 | Mute notifications + archive chats (per-user) | ✅ Done (Phase 4) |
 | Privacy settings UI (last seen / profile / requests) | ✅ Done (Phase 4) |
 | Forward message (friends only) + share contact | ✅ Done (Phase 4) |
@@ -221,6 +222,21 @@ Five self-contained sprints layering social/UX controls and account lifecycle on
   - **Two privacy toggles:** `privacy.profileDetails` (display name, custom status, bio) and `privacy.profilePicture` (avatar thumbnail + zoom) replace the single combined `privacy.profile` (legacy field still migrated on read). Settings → **Profile details** + **Profile picture** rows in `PrivacyCard`.
   - **Rules:** `@username` always visible. **Picture → Everyone:** all see thumbnail, **only friends zoom**. **Picture → Friends:** strangers see no photo; friends see + zoom. **Picture → Nobody:** photo hidden. **Details → Everyone/Friends/Nobody:** gates name/status/bio independently (display name no longer tied to avatar visibility).
   - **Live sync:** `notifyProfileChanged()` emits **`user:profile-changed`** to friends + 1:1 chat partners on profile/privacy/avatar updates. Client `profileCache.ts` **merges** the refreshed `GET /users/:id/profile` into search, contact card, chat list, and friends caches (no invalidate → no flicker). **15s silent refetch** on `useUserSearch` / `useUserProfile` as fallback for strangers not in a chat.
+
+### Sprint 3.1.6 — Call resync after refresh (ghost BUSY + desync fix) 📞🔄
+Fixes the bug where refreshing one browser left the server with a ghost in-memory call (phantom **BUSY**) or split UI (**Ringing** vs **Connecting**) because client Zustand reset to `idle` while the server still tracked the session.
+- **Sync socket registry (`socket-registry.ts`):** per-user socket counts updated **synchronously** on connect/disconnect — no async `fetchSockets()` race on refresh.
+- **Reconnect grace (`calls.socket.ts`):** when the **last** socket for a user drops, wait **20s** before finalizing their calls (cancelled/missed/completed) so a quick reload doesn't tear down an active ring.
+- **`call:sync` / `call:clear-stale`:** on connect the client emits **`call:sync`**; server returns the active call (role, phase, peer, optional SDP replay). If idle and no call, client emits **`call:clear-stale`** to drop unanswered ghost sessions for that user.
+- **SDP replay buffer:** server stores `lastOffer` / `lastAnswer` on WebRTC events so a refreshed callee/caller can resume **connecting** without a stuck state machine.
+- **Client restore (`CallProvider.tsx`):** restores incoming/outgoing/connecting UI from sync; replays accept/offer/answer flows; requests mic when needed after reload.
+- **Reconnect safety (`SocketProvider.tsx`):** skip `reconnectSocket()` on token refresh / tab visibility while a call is live (`phase` not idle/ended).
+
+**Test matrix:**
+1. Galaxy refresh (idle) → Test calls → Galaxy rings (not BUSY).
+2. Galaxy refresh during ring → incoming restored or clean missed.
+3. Test accepts → Galaxy refresh mid-connect → recover or clean end (not stuck Ringing/Connecting).
+4. Tab visibility during call does not drop signaling.
 
 ### Sprint 3.1.5 — Always-on audio dropdown + Earpiece default + mic gate 📞🎚️
 Discord/WhatsApp-style mobile audio routing UX.

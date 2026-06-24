@@ -4,7 +4,7 @@ import { SOCKET_EVENTS } from "@linkr/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { connectSocket, disconnectSocket, getSocket, reconnectSocket } from "@/lib/socket/client";
 import { refreshPeerProfileInCaches } from "@/features/friends/profileCache";
-import { useAuthStore, useUIStore } from "@/lib/store";
+import { useAuthStore, useCallStore, useUIStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { notificationKeys } from "@/features/notifications";
 import { chatKeys } from "./useChats";
@@ -211,7 +211,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     if (prevTokenRef.current && prevTokenRef.current !== accessToken && getSocket()?.connected) {
-      reconnectSocket(accessToken);
+      const callPhase = useCallStore.getState().phase;
+      if (callPhase === "idle" || callPhase === "ended") {
+        reconnectSocket(accessToken);
+      }
     }
     prevTokenRef.current = accessToken;
   }, [accessToken, status]);
@@ -220,7 +223,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (status !== "authed" || !accessToken) return;
     const onVisible = () => {
-      if (document.visibilityState === "visible") reconnectSocket(accessToken);
+      if (document.visibilityState !== "visible") return;
+      const callPhase = useCallStore.getState().phase;
+      if (callPhase !== "idle" && callPhase !== "ended") return;
+      reconnectSocket(accessToken);
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);

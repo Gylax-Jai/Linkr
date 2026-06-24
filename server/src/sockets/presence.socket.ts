@@ -4,7 +4,8 @@ import { UserModel } from "../models/User.js";
 import { FriendshipModel } from "../models/Friendship.js";
 import { allowsPresenceBroadcast } from "../modules/users/privacy.helpers.js";
 import { deliverAllPendingMessagesForUser } from "../modules/chat/chat.service.js";
-import { deliverPendingCalls } from "./calls.socket.js";
+import { deliverPendingCalls, onUserSocketConnected, onUserSocketDisconnected } from "./calls.socket.js";
+import { registerUserSocket, unregisterUserSocket } from "./socket-registry.js";
 import { requireSocketUser } from "./auth.socket.js";
 import { registerTypingHandler } from "./chat.socket.js";
 
@@ -44,6 +45,9 @@ export function registerPresenceHandlers(io: Server, socket: Socket): void {
 
   registerTypingHandler(io, socket);
 
+  registerUserSocket(userId, socket.id);
+  onUserSocketConnected(io, userId);
+
   void (async () => {
     let sockets = userSockets.get(userId);
     if (!sockets) {
@@ -68,6 +72,9 @@ export function registerPresenceHandlers(io: Server, socket: Socket): void {
   })();
 
   socket.on("disconnect", () => {
+    const isLast = unregisterUserSocket(userId, socket.id);
+    if (isLast) onUserSocketDisconnected(io, userId);
+
     void (async () => {
       const sockets = userSockets.get(userId);
       if (!sockets) return;

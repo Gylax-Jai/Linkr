@@ -5,6 +5,8 @@ import type {
   CallInitiateAck,
   CallMedia,
   CallSignalPayload,
+  CallSyncActiveCall,
+  CallSyncResponse,
   PublicUser,
   WebRtcIceCandidatePayload,
   WebRtcSdpPayload,
@@ -69,6 +71,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   // Buffer signaling that can arrive before the engine exists (offer / early ICE candidates).
   const pendingOfferRef = useRef<WebRtcSdpPayload | null>(null);
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
+  /** Answer that arrived before the caller's post-sync offer completes (Phase 3.1.6). */
+  const pendingAnswerAfterOfferRef = useRef<WebRtcSdpPayload | null>(null);
   // Caller's mic captured early (during "Calling…") to unlock device labels so the audio-route icon
   // is correct before connect; adopted by the engine on accept, or stopped on teardown.
   const earlyStreamRef = useRef<MediaStream | null>(null);
@@ -383,12 +387,87 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       });
     };
 
-    // Callee accepted → caller creates the offer.
-    const onAccept = (payload: CallSignalPayload) => {
-      const { phase, callId, chatId, media } = useCallStore.getState();
-      if (phase !== "outgoing" || payload.callId !== callId || !chatId) return;
+    // Callee accepted → caller creates the offer (also used after call:sync restore).
+    const beginCallerConnect = () => {
+      const { callId, chatId, media } = useCallStore.getState();
+      if (!callId || !chatId) return;
       useCallStore.getState().setConnecting();
       void (async () => {
+        try {
+          const iceServers = await fetchIceConfig();
+          const engine = new CallEngine(iceServers, media, {
+            onIceCandidate: (candidate) =>
+              emit(SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, { callId, chatId, candidate }),
+            onConnectionStateChange: (state) => {
+              useCallStore.getState().setConnection(state);
+              if (state === "connected") useCallStore.getState().setActive();
+              if (state === "failed") {
+                engineRef.current?.close();
+                engineRef.current = null;
+                earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
+                earlyStreamRef.current = null;
+                pendingOfferRef.current = null;
+                pendingIceRef.current = [];
+                pendingAnswerAfterOfferRef.current = null;
+                useCallStore.getState().endCall("failed");
+                emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
+                window.setTimeout(() => useCallStore.getState().reset(), 1400);
+              }
+            },
+          });
+          await engine.startLocalMedia(earlyStreamRef.current);
+          earlyStreamRef.current = null;
+          engine.setMuted(useCallStore.getState().muted);
+          engineRef.current = engine;
+          await routeHelpersRef.current.refreshRoutes();
+          for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
+          pendingIceRef.current = [];
+
+          const offer = await engine.createOffer();
+          emit(SOCKET_EVENTS.WEBRTC_OFFER, {
+            callId,
+            chatId,
+            description: offer as WebRtcSdpPayload["description"],
+          });
+
+          const bufferedAnswer = pendingAnswerAfterOfferRef.current;
+          if (bufferedAnswer) {
+            pendingAnswerAfterOfferRef.current = null;
+            await engine.setRemoteDescription(bufferedAnswer.description);
+          }
+        } catch {
+          engineRef.current?.close();
+          engineRef.current = null;
+          earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
+          earlyStreamRef.current = null;
+          emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
+          useCallStore.getState().endCall("no-mic");
+          window.setTimeout(() => useCallStore.getState().reset(), 1400);
+        }
+      })();
+    };
+
+    const onAccept = (payload: CallSignalPayload) => {
+      const { phase, callId, chatId } = useCallStore.getState();
+      if (phase !== "outgoing" || payload.callId !== callId || !chatId) return;
+      beginCallerConnect();
+    };
+
+    const restoreCalleeConnecting = (syncCall: CallSyncActiveCall) => {
+      const { callId, chatId, media, replay } = syncCall;
+      if (!callId || !chatId) return;
+
+      void (async () => {
+        const mic = await requestMicAccess();
+        if (!mic.ok) {
+          emit(SOCKET_EVENTS.CALL_END, { callId, chatId });
+          useCallStore.getState().endCall("no-mic");
+          window.setTimeout(() => useCallStore.getState().reset(), 1400);
+          return;
+        }
+        earlyStreamRef.current = mic.stream;
+        if (replay?.offer) pendingOfferRef.current = replay.offer;
+
         try {
           const iceServers = await fetchIceConfig();
           const engine = new CallEngine(iceServers, media, {
@@ -410,7 +489,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               }
             },
           });
-          // Adopt the mic captured at call start (no second prompt); engine owns it now.
           await engine.startLocalMedia(earlyStreamRef.current);
           earlyStreamRef.current = null;
           engine.setMuted(useCallStore.getState().muted);
@@ -419,12 +497,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           for (const c of pendingIceRef.current) void engine.addIceCandidate(c);
           pendingIceRef.current = [];
 
-          const offer = await engine.createOffer();
-          emit(SOCKET_EVENTS.WEBRTC_OFFER, {
-            callId,
-            chatId,
-            description: offer as WebRtcSdpPayload["description"],
-          });
+          const offer = pendingOfferRef.current ?? replay?.offer;
+          if (offer) {
+            pendingOfferRef.current = null;
+            await engine.setRemoteDescription(offer.description);
+            const answer = await engine.createAnswer();
+            emit(SOCKET_EVENTS.WEBRTC_ANSWER, {
+              callId,
+              chatId,
+              description: answer as WebRtcSdpPayload["description"],
+            });
+          }
         } catch {
           engineRef.current?.close();
           engineRef.current = null;
@@ -437,10 +520,81 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       })();
     };
 
+    const applySyncResponse = (syncCall: CallSyncActiveCall) => {
+      const state = useCallStore.getState();
+      if (state.phase !== "idle" && state.phase !== "ended") {
+        if (state.callId === syncCall.callId) return;
+        if (state.phase === "active" || state.phase === "connecting") return;
+      }
+      if (state.phase === "ended") useCallStore.getState().reset();
+
+      engineRef.current?.close();
+      engineRef.current = null;
+      earlyStreamRef.current?.getTracks().forEach((t) => t.stop());
+      earlyStreamRef.current = null;
+      pendingOfferRef.current = null;
+      pendingIceRef.current = [];
+      pendingAnswerAfterOfferRef.current = null;
+      if (endTimerRef.current) window.clearTimeout(endTimerRef.current);
+
+      useCallStore.getState().restoreFromSync({
+        callId: syncCall.callId,
+        chatId: syncCall.chatId,
+        media: syncCall.media,
+        peer: syncCall.peer,
+        role: syncCall.role,
+        phase: syncCall.phase,
+        ringing: syncCall.ringing,
+      });
+
+      const { replay } = syncCall;
+      if (syncCall.role === "caller" && syncCall.phase === "connecting" && replay?.accepted) {
+        if (replay.answer) pendingAnswerAfterOfferRef.current = replay.answer;
+        void (async () => {
+          const mic = await requestMicAccess();
+          if (!mic.ok) {
+            emit(SOCKET_EVENTS.CALL_END, { callId: syncCall.callId, chatId: syncCall.chatId });
+            useCallStore.getState().endCall("no-mic");
+            window.setTimeout(() => useCallStore.getState().reset(), 1400);
+            return;
+          }
+          earlyStreamRef.current = mic.stream;
+          beginCallerConnect();
+        })();
+        return;
+      }
+      if (syncCall.role === "callee" && syncCall.phase === "connecting") {
+        restoreCalleeConnecting(syncCall);
+      }
+    };
+
+    const runCallSync = () => {
+      if (!socket.connected) return;
+      socket.emit(SOCKET_EVENTS.CALL_SYNC, {}, (res?: CallSyncResponse) => {
+        if (res?.call) {
+          applySyncResponse(res.call);
+          return;
+        }
+        const phase = useCallStore.getState().phase;
+        if (phase === "idle" || phase === "ended") {
+          socket.emit(SOCKET_EVENTS.CALL_CLEAR_STALE);
+          if (phase === "ended") useCallStore.getState().reset();
+        }
+      });
+    };
+
+    runCallSync();
+    socket.on("connect", runCallSync);
+
     // Caller received the answer.
     const onAnswer = (payload: WebRtcSdpPayload) => {
       if (payload.callId !== useCallStore.getState().callId) return;
-      void engineRef.current?.setRemoteDescription(payload.description);
+      const engine = engineRef.current;
+      if (!engine) {
+        pendingAnswerAfterOfferRef.current = payload;
+        return;
+      }
+      void engine.setRemoteDescription(payload.description);
     };
 
     // Callee received the offer (buffer if the engine isn't ready yet).
@@ -491,6 +645,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     socket.on(SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, onIce);
 
     return () => {
+      socket.off("connect", runCallSync);
       socket.off(SOCKET_EVENTS.CALL_INCOMING, onIncoming);
       socket.off(SOCKET_EVENTS.CALL_ACCEPT, onAccept);
       socket.off(SOCKET_EVENTS.CALL_REJECT, onReject);
