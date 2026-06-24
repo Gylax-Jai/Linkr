@@ -51,6 +51,7 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Mobile audio dropdown + earpiece default + mic gate | ✅ Done (Sprint 3.1.5) |
 | Call resync after refresh (ghost BUSY + Ringing/Connecting desync) | ✅ Done (Sprint 3.1.6) |
 | Reliable incoming-call delivery (ack + retry, accurate Ringing) | ✅ Done (Sprint 3.1.7) |
+| Call delivery fix (fetchSockets, pending retry, sync poll) | ✅ Done (Sprint 3.1.8) |
 | Mute notifications + archive chats (per-user) | ✅ Done (Phase 4) |
 | Privacy settings UI (last seen / profile / requests) | ✅ Done (Phase 4) |
 | Forward message (friends only) + share contact | ✅ Done (Phase 4) |
@@ -224,6 +225,21 @@ Five self-contained sprints layering social/UX controls and account lifecycle on
   - **Rules:** `@username` always visible. **Picture → Everyone:** all see thumbnail, **only friends zoom**. **Picture → Friends:** strangers see no photo; friends see + zoom. **Picture → Nobody:** photo hidden. **Details → Everyone/Friends/Nobody:** gates name/status/bio independently (display name no longer tied to avatar visibility).
   - **Live sync:** `notifyProfileChanged()` emits **`user:profile-changed`** to friends + 1:1 chat partners on profile/privacy/avatar updates. Client `profileCache.ts` **merges** the refreshed `GET /users/:id/profile` into search, contact card, chat list, and friends caches (no invalidate → no flicker). **15s silent refetch** on `useUserSearch` / `useUserProfile` as fallback for strangers not in a chat.
 
+### Sprint 3.1.8 — Call delivery fix (fetchSockets + pending retry + sync poll) 📞🔧
+Fixes production bug where Render logs showed **`call:initiate` + `peerOnline: true`** but **never** `call:incoming acked` — callee UI stayed blank while caller showed **Ringing…** (optimistically).
+- **Root cause:** `call:initiate` used `fetchSockets()` (peer online) but delivery used `userHasLiveSockets()` (local registry). Registry could desync from Socket.IO rooms → invite **buffered silently** with no retry while callee was already connected.
+- **Unified online check:** delivery now uses **`fetchSockets()` only**; logs every attempt (`call:delivery attempt`, `call:delivery callback`, `call:incoming buffered`).
+- **Retry while buffered:** offline/ failed ack keeps retrying (2s, up to 12×) instead of stopping forever.
+- **`deliverPendingCalls` on every reconnect** (not only first socket) + registry sync in `auth.socket.ts`.
+- **Caller UI:** **Calling…** until `call:ringing`; initiate ack always `ringing: false`.
+- **Client:** ack only **after** `receiveIncoming`; **4s `call:sync` poll** while idle; skip visibility reconnect if socket already connected.
+- **`call:clear-stale`:** only clears **outgoing** (caller) ghosts — never drops callee incoming rings.
+
+**Test matrix:**
+1. Gylax → Test (both foreground) → Render shows `call:delivery attempt` → `call:incoming acked` → Test rings.
+2. Caller shows **Calling…** then **Ringing…** only after ack.
+3. Missed socket event → sync poll restores incoming within ~4s.
+
 ### Sprint 3.1.7 — Reliable incoming-call delivery (ack + retry) 📞✅
 Fixes the intermittent **"call goes from this side but nothing shows on the other end"** (then a **missed voice call** log when the caller hangs up). Root cause: Socket.IO is **at-most-once** — a single `call:incoming` emit can be missed if the callee's socket is reconnecting, stale, backgrounded, or its handler isn't mounted yet, and the server never retries.
 - **Ack-based delivery (`calls.socket.ts`):** `call:incoming` is now emitted with a **server-side acknowledgement** (`io.to(room).timeout(1.8s).emit(..., cb)`). If the callee's device doesn't ack, the server **retries** (every 2s, up to 12 attempts) until the call is acked, accepted, ended, or rings out. Works cluster-wide via the Redis adapter.
@@ -232,7 +248,7 @@ Fixes the intermittent **"call goes from this side but nothing shows on the othe
 - **Client ack (`CallProvider.tsx`):** the callee acks `call:incoming` **on receipt** (idempotent — dedupes repeats), stopping retries immediately.
 - **Diagnostics:** server logs `call:initiate`, `call:incoming acked` (with attempt count), and `call:incoming not acked after retries` for visibility in Render logs.
 
-> **Note on WhatsApp/Discord-level reliability:** for incoming calls to arrive when the tab is **closed or the phone is locked**, browser sockets aren't enough — that needs **Web Push + a service worker (PWA)** and/or native FCM/APNs. Current call state is also **in-memory** per server instance; moving it to **Redis/Mongo with TTL** is the next step for true multi-instance durability. Both are tracked as follow-ups (3.1.8 Web Push calls, 3.1.9 durable call store).
+> **Follow-ups:** Web Push for tab-closed rings (3.2); durable call store in Redis/Mongo (3.1.9).
 
 **Test matrix:**
 1. Test → Galaxy while Galaxy tab is foreground → rings within ~1–2s.

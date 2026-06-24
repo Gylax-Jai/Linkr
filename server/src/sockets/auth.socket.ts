@@ -1,6 +1,7 @@
 import type { ExtendedError, Socket } from "socket.io";
 import { UserModel } from "../models/User.js";
 import { verifyAccessToken } from "../utils/jwt.js";
+import { registerUserSocket } from "./socket-registry.js";
 
 /** Optional JWT auth for Socket.IO — attaches `socket.data.userId` and joins a per-user room. */
 export async function socketAuthMiddleware(
@@ -30,6 +31,7 @@ export async function socketAuthMiddleware(
 
     socket.data.userId = userId;
     await socket.join(`user:${userId}`);
+    registerUserSocket(userId, socket.id);
     next();
   } catch {
     next(new Error("Unauthorized"));

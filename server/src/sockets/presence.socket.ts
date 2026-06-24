@@ -56,19 +56,23 @@ export function registerPresenceHandlers(io: Server, socket: Socket): void {
     }
     sockets.add(socket.id);
 
-    if (sockets.size === 1) {
+    const isFirstSocket = sockets.size === 1;
+
+    if (isFirstSocket) {
       const user = await UserModel.findById(userId).select("privacy");
       await UserModel.findByIdAndUpdate(userId, { online: true, lastSeen: new Date() });
       if (user && allowsPresenceBroadcast(user.privacy)) {
         await broadcastToFriends(io, userId, SOCKET_EVENTS.USER_ONLINE, { userId });
       }
-      deliverPendingCalls(io, userId);
 
       const delivered = await deliverAllPendingMessagesForUser(userId);
       for (const message of delivered) {
         io.to(`user:${message.sender}`).emit(SOCKET_EVENTS.MESSAGE_DELIVERED, { message });
       }
     }
+
+    // Every reconnect may have missed a call:incoming while handlers were mounting (Phase 3.1.8).
+    deliverPendingCalls(io, userId);
   })();
 
   socket.on("disconnect", () => {

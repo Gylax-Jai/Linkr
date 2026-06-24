@@ -226,6 +226,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       if (document.visibilityState !== "visible") return;
       const callPhase = useCallStore.getState().phase;
       if (callPhase !== "idle" && callPhase !== "ended") return;
+      // Skip forced reconnect when the socket is already healthy (Phase 3.1.8).
+      if (getSocket()?.connected) return;
       reconnectSocket(accessToken);
     };
     document.addEventListener("visibilitychange", onVisible);

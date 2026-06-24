@@ -254,7 +254,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           { callId, chatId, media },
           (res?: CallInitiateAck) => {
             if (res?.ok) {
-              useCallStore.getState().setRinging(Boolean(res.ringing));
+              // "Ringing…" only after server emits call:ringing (callee acked) — Phase 3.1.8.
+              useCallStore.getState().setRinging(false);
               return;
             }
             const reason: CallEndReason =
@@ -358,17 +359,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const emit = (event: string, payload: unknown) => socket.emit(event, payload);
 
     const onIncoming = (payload: CallIncomingPayload, ack?: (res: { ok: boolean }) => void) => {
-      // Ack on receipt so the server stops retrying (reliable delivery, Phase 3.1.7).
-      ack?.({ ok: true });
-
       const state = useCallStore.getState();
       const hasLiveEngine = Boolean(engineRef.current);
 
       if (state.phase !== "idle") {
-        if (state.callId === payload.callId && state.phase === "incoming") return;
+        if (state.callId === payload.callId && state.phase === "incoming") {
+          ack?.({ ok: true });
+          return;
+        }
 
         if (state.phase === "active" || (state.phase === "connecting" && hasLiveEngine)) {
           emit(SOCKET_EVENTS.CALL_REJECT, { callId: payload.callId, chatId: payload.chatId });
+          ack?.({ ok: true });
           return;
         }
 
@@ -388,6 +390,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         media: payload.media,
         peer: payload.from,
       });
+      ack?.({ ok: true });
     };
 
     // Callee accepted → caller creates the offer (also used after call:sync restore).
@@ -589,6 +592,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     runCallSync();
     socket.on("connect", runCallSync);
 
+    // Fallback when a call:incoming socket frame is missed (Phase 3.1.8).
+    const syncPollId = window.setInterval(() => {
+      const phase = useCallStore.getState().phase;
+      if (phase !== "idle" && phase !== "ended") return;
+      runCallSync();
+    }, 4_000);
+
     // Caller received the answer.
     const onAnswer = (payload: WebRtcSdpPayload) => {
       if (payload.callId !== useCallStore.getState().callId) return;
@@ -655,6 +665,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     socket.on(SOCKET_EVENTS.WEBRTC_ICE_CANDIDATE, onIce);
 
     return () => {
+      window.clearInterval(syncPollId);
       socket.off("connect", runCallSync);
       socket.off(SOCKET_EVENTS.CALL_INCOMING, onIncoming);
       socket.off(SOCKET_EVENTS.CALL_RINGING, onRinging);

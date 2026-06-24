@@ -187,8 +187,9 @@ function finalizeAllUserCalls(io: Server, userId: string): void {
 }
 
 /** Cancel disconnect grace when a user reconnects (Phase 3.1.6). */
-export function onUserSocketConnected(_io: Server, userId: string): void {
+export function onUserSocketConnected(io: Server, userId: string): void {
   cancelDisconnectGrace(userId);
+  deliverPendingCalls(io, userId);
 }
 
 /** Schedule call cleanup when the user's last socket disconnects (Phase 3.1.6). */
@@ -224,11 +225,15 @@ function scheduleRingTimeout(io: Server, callId: string, record: CallRecord): vo
   }, RING_TIMEOUT_MS);
 }
 
+/** Authoritative online check — same source as call:initiate (Phase 3.1.8). */
+async function peerSocketCount(io: Server, userId: string): Promise<number> {
+  return (await io.in(`user:${userId}`).fetchSockets()).length;
+}
+
 /**
- * Reliable incoming delivery (Phase 3.1.7). Socket.IO is at-most-once, so a single emit can be
- * missed if the callee's socket is reconnecting, stale, or its handler isn't ready. We emit with a
- * server-side acknowledgement and retry until the callee's device acks, the call is accepted/ended,
- * or the peer goes offline (then it's buffered as pending for their next connect).
+ * Reliable incoming delivery (Phase 3.1.7 / 3.1.8). Uses fetchSockets (not the local registry) so
+ * delivery matches call:initiate peerOnline. Retries while the call is ringing even if the callee
+ * was briefly offline or already connected when the invite was first buffered.
  */
 function deliverIncomingWithRetry(
   io: Server,
@@ -237,49 +242,83 @@ function deliverIncomingWithRetry(
   callerId: string,
   incoming: CallIncomingPayload,
 ): void {
-  let attempt = 0;
+  void runIncomingDelivery(io, callId, peerId, callerId, incoming, 1);
+}
 
-  const attemptDelivery = (): void => {
-    const record = callsById.get(callId);
-    if (!record || record.acceptedAt || record.delivered) return;
+async function runIncomingDelivery(
+  io: Server,
+  callId: string,
+  peerId: string,
+  callerId: string,
+  incoming: CallIncomingPayload,
+  attempt: number,
+): Promise<void> {
+  const record = callsById.get(callId);
+  if (!record || record.acceptedAt || record.delivered) return;
 
-    if (!userHasLiveSockets(peerId)) {
-      // Peer dropped mid-ring — buffer so their next connect re-rings (deliverPendingCalls).
-      pendingIncoming.set(callId, {
-        calleeId: peerId,
-        payload: incoming,
-        expiresAt: Date.now() + RING_TIMEOUT_MS,
-      });
-      return;
+  const socketCount = await peerSocketCount(io, peerId);
+  logger.info("call:delivery attempt", {
+    callId,
+    peerId,
+    callerId,
+    attempt,
+    socketCount,
+    registrySockets: userHasLiveSockets(peerId),
+  });
+
+  if (socketCount === 0) {
+    pendingIncoming.set(callId, {
+      calleeId: peerId,
+      payload: incoming,
+      expiresAt: Date.now() + RING_TIMEOUT_MS,
+    });
+    logger.info("call:incoming buffered (peer offline)", { callId, peerId, attempt });
+    if (attempt < INCOMING_MAX_ATTEMPTS) {
+      setTimeout(
+        () => void runIncomingDelivery(io, callId, peerId, callerId, incoming, attempt + 1),
+        INCOMING_RETRY_MS,
+      );
     }
+    return;
+  }
 
-    attempt += 1;
-    io.to(`user:${peerId}`)
-      .timeout(INCOMING_ACK_TIMEOUT_MS)
-      .emit(SOCKET_EVENTS.CALL_INCOMING, incoming, (err: Error | null, responses?: CallIncomingAck[]) => {
-        const rec = callsById.get(callId);
-        if (!rec || rec.acceptedAt || rec.delivered) return;
+  pendingIncoming.delete(callId);
 
-        const acked = !err && Array.isArray(responses) && responses.some((r) => r?.ok);
-        if (acked) {
-          rec.delivered = true;
-          io.to(`user:${callerId}`).emit(SOCKET_EVENTS.CALL_RINGING, {
-            callId,
-            chatId: rec.chatId,
-          } satisfies CallSignalPayload);
-          logger.info("call:incoming acked", { callId, peerId, attempt });
-          return;
-        }
+  io.to(`user:${peerId}`)
+    .timeout(INCOMING_ACK_TIMEOUT_MS)
+    .emit(SOCKET_EVENTS.CALL_INCOMING, incoming, (err: Error | null, responses?: CallIncomingAck[]) => {
+      const rec = callsById.get(callId);
+      if (!rec || rec.acceptedAt || rec.delivered) return;
 
-        if (attempt < INCOMING_MAX_ATTEMPTS) {
-          setTimeout(attemptDelivery, INCOMING_RETRY_MS);
-        } else {
-          logger.warn("call:incoming not acked after retries", { callId, peerId, attempt });
-        }
+      const acked = !err && Array.isArray(responses) && responses.some((r) => r?.ok);
+      logger.info("call:delivery callback", {
+        callId,
+        peerId,
+        attempt,
+        acked,
+        err: err?.message ?? null,
+        responseCount: responses?.length ?? 0,
       });
-  };
 
-  attemptDelivery();
+      if (acked) {
+        rec.delivered = true;
+        io.to(`user:${callerId}`).emit(SOCKET_EVENTS.CALL_RINGING, {
+          callId,
+          chatId: rec.chatId,
+        } satisfies CallSignalPayload);
+        logger.info("call:incoming acked", { callId, peerId, attempt });
+        return;
+      }
+
+      if (attempt < INCOMING_MAX_ATTEMPTS) {
+        setTimeout(
+          () => void runIncomingDelivery(io, callId, peerId, callerId, incoming, attempt + 1),
+          INCOMING_RETRY_MS,
+        );
+      } else {
+        logger.warn("call:incoming not acked after retries", { callId, peerId, attempt });
+      }
+    });
 }
 
 /** Deliver a call that was initiated while the callee's socket was offline (Phase 4.2 / 3.1.7). */
@@ -337,7 +376,7 @@ function pickActiveCallForUser(userId: string): { callId: string; record: CallRe
 }
 
 async function buildSyncPayload(
-  io: Server,
+  _io: Server,
   userId: string,
   callId: string,
   record: CallRecord,
@@ -357,8 +396,9 @@ async function buildSyncPayload(
 
   let ringing: boolean | undefined;
   if (phase === "outgoing") {
-    const peerSockets = await io.in(`user:${peerId}`).fetchSockets();
-    ringing = peerSockets.length > 0;
+    ringing = !!record.delivered;
+  } else if (phase === "incoming" && role === "callee") {
+    ringing = true;
   }
 
   const replay: CallSyncActiveCall["replay"] = {};
@@ -378,7 +418,7 @@ async function buildSyncPayload(
   };
 }
 
-/** Drop unanswered calls for a user who reconnected idle (Phase 3.1.6). */
+/** Drop unanswered outgoing calls for a caller who reconnected idle (Phase 3.1.6 / 3.1.8). */
 function clearStaleCallsForUser(io: Server, userId: string): void {
   pruneStaleCalls();
   const set = callsByUser.get(userId);
@@ -387,8 +427,9 @@ function clearStaleCallsForUser(io: Server, userId: string): void {
   for (const callId of [...set]) {
     const record = callsById.get(callId);
     if (!record || record.acceptedAt) continue;
-    const outcome: CallOutcome = record.caller === userId ? "cancelled" : "missed";
-    endCallForPeer(io, callId, record, userId, outcome);
+    // Never drop incoming rings for the callee — call:sync should restore those instead.
+    if (record.caller !== userId) continue;
+    endCallForPeer(io, callId, record, userId, "cancelled");
   }
 }
 
@@ -460,7 +501,8 @@ export function registerCallHandlers(io: Server, socket: Socket): void {
         scheduleRingTimeout(io, callId, record);
 
         logger.info("call:initiate", { callId, callerId: userId, peerId, peerOnline });
-        ack?.({ ok: true, ringing: peerOnline });
+        // True "Ringing…" only after call:ringing (callee acked) — Phase 3.1.8.
+        ack?.({ ok: true, ringing: false });
       } catch (err) {
         logger.warn("call:initiate failed", {
           userId,
