@@ -1,5 +1,6 @@
 import type { CallMedia } from "@linkr/shared";
 import { applyAudioBitrate, mediaConstraints, tuneOpus } from "./callConfig";
+import { isMobilePhone } from "./audioRoute";
 
 interface CallEngineCallbacks {
   /** A locally-gathered ICE candidate to relay to the peer (trickle ICE). */
@@ -9,6 +10,8 @@ interface CallEngineCallbacks {
   /** The first remote track arrived (call is producing media). */
   onRemoteStream: (stream: MediaStream) => void;
 }
+
+type SinkCapable = { setSinkId?: (id: string) => Promise<void> };
 
 /**
  * Thin, quality-tuned wrapper around RTCPeerConnection for 1:1 calls. Handles local capture,
@@ -20,8 +23,13 @@ export class CallEngine {
   private localStream: MediaStream | null = null;
   private remoteStream = new MediaStream();
   private remoteAudio: HTMLAudioElement | null = null;
-  /** Desired output device id; re-applied whenever the remote audio element is (re)created. */
+  private audioCtx: AudioContext | null = null;
+  private audioSource: MediaStreamAudioSourceNode | null = null;
+  /** Last sink id that applied successfully. */
   private sinkId = "";
+  /** Ordered sink ids to try (from resolveSinkCandidates). */
+  private sinkCandidates: string[] = [""];
+  private readonly useWebAudio = isMobilePhone();
   private readonly media: CallMedia;
   private readonly cb: CallEngineCallbacks;
 
@@ -106,21 +114,17 @@ export class CallEngine {
   }
 
   /**
-   * Route remote audio to a specific output device (Sprint 3.1.2). `deviceId` comes from the
-   * audioRoute manager; "" = system default. Best-effort: `setSinkId` is Chromium-only, so on
-   * unsupported browsers this no-ops and the OS handles routing. Always keeps full volume.
+   * Apply an ordered list of sink ids until one succeeds. On mobile we route through Web Audio
+   * (`AudioContext.setSinkId`) because Android Chrome often ignores `HTMLAudioElement.setSinkId`.
    */
+  async applyOutputRoute(candidates: string[]): Promise<void> {
+    this.sinkCandidates = candidates.length ? candidates : [""];
+    await this.applySinkCandidates();
+  }
+
+  /** Single sink id — wraps applyOutputRoute for callers that only have one id. */
   async setSinkId(deviceId: string): Promise<void> {
-    this.sinkId = deviceId;
-    const el = this.remoteAudio as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
-    if (!el) return;
-    el.volume = 1;
-    if (typeof el.setSinkId !== "function") return;
-    try {
-      await el.setSinkId(deviceId);
-    } catch {
-      // setSinkId can reject (no permission / device gone); keep the current sink.
-    }
+    await this.applyOutputRoute([deviceId]);
   }
 
   /** A simple connection-quality read for the in-call indicator (RTT in ms, or null). */
@@ -139,7 +143,70 @@ export class CallEngine {
     }
   }
 
+  private async applySinkCandidates(): Promise<void> {
+    for (const id of this.sinkCandidates) {
+      if (await this.trySetSink(id)) {
+        this.sinkId = id;
+        return;
+      }
+    }
+  }
+
+  private async trySetSink(deviceId: string): Promise<boolean> {
+    if (this.useWebAudio && this.audioCtx) {
+      const ctx = this.audioCtx as AudioContext & SinkCapable;
+      if (typeof ctx.setSinkId === "function") {
+        try {
+          await ctx.setSinkId(deviceId);
+          return true;
+        } catch {
+          /* try next candidate / fallback path */
+        }
+      }
+    }
+
+    const el = this.remoteAudio as (HTMLAudioElement & SinkCapable) | null;
+    if (el) {
+      el.volume = 1;
+      if (typeof el.setSinkId === "function") {
+        try {
+          await el.setSinkId(deviceId);
+          return true;
+        } catch {
+          /* try next candidate */
+        }
+      }
+    }
+
+    return false;
+  }
+
   private playRemote(): void {
+    if (this.useWebAudio) {
+      this.playRemoteViaWebAudio();
+    } else {
+      this.playRemoteViaElement();
+    }
+    void this.applySinkCandidates();
+  }
+
+  private playRemoteViaWebAudio(): void {
+    if (!this.audioCtx) {
+      this.audioCtx = new AudioContext();
+    }
+    if (this.audioSource) {
+      try {
+        this.audioSource.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    this.audioSource = this.audioCtx.createMediaStreamSource(this.remoteStream);
+    this.audioSource.connect(this.audioCtx.destination);
+    void this.audioCtx.resume();
+  }
+
+  private playRemoteViaElement(): void {
     if (!this.remoteAudio) {
       this.remoteAudio = new Audio();
       this.remoteAudio.autoplay = true;
@@ -148,14 +215,24 @@ export class CallEngine {
     void this.remoteAudio.play().catch(() => {
       /* Autoplay may be blocked until a user gesture; the accept/start click satisfies it. */
     });
-    // Re-apply the desired output device now that the element exists.
-    if (this.sinkId) void this.setSinkId(this.sinkId);
   }
 
   /** Tear everything down: stop local capture, stop playback, close the connection. */
   close(): void {
     this.localStream?.getTracks().forEach((t) => t.stop());
     this.remoteStream.getTracks().forEach((t) => t.stop());
+    if (this.audioSource) {
+      try {
+        this.audioSource.disconnect();
+      } catch {
+        /* ignore */
+      }
+      this.audioSource = null;
+    }
+    if (this.audioCtx) {
+      void this.audioCtx.close();
+      this.audioCtx = null;
+    }
     if (this.remoteAudio) {
       this.remoteAudio.srcObject = null;
       this.remoteAudio = null;

@@ -16,7 +16,7 @@ import { CallEngine } from "./CallEngine";
 import { fetchIceConfig } from "./useIceConfig";
 import { startCallTone, stopCallTone, playEndTone } from "./callSounds";
 import { audioConstraints } from "./callConfig";
-import { listAudioRoutes, nextRoute, pickPreferredRoute, findRoute, resolveSinkId, type AudioRoute } from "./audioRoute";
+import { listAudioRoutes, nextRoute, pickPreferredRoute, findRoute, resolveSinkCandidates, type AudioRoute } from "./audioRoute";
 import { CallOverlay } from "./CallOverlay";
 import { CallBar } from "./CallBar";
 import { IncomingCallModal } from "./IncomingCallModal";
@@ -91,12 +91,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       endTimerRef.current = window.setTimeout(() => useCallStore.getState().reset(), 1400);
     };
 
-    /** Apply a route to the store + engine (resolves logical ids to real sink ids). */
+    /** Apply a route to the store + engine (tries real sink ids until output switches). */
     const applyRoute = (route: AudioRoute) => {
       useCallStore.getState().setAudioRoute(route.kind, route.deviceId);
       void (async () => {
-        const sinkId = await resolveSinkId(route);
-        void engineRef.current?.setSinkId(sinkId);
+        const candidates = await resolveSinkCandidates(route);
+        await engineRef.current?.applyOutputRoute(candidates);
       })();
     };
 
