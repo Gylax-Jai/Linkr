@@ -3,7 +3,7 @@
 > **Living document:** everything built so far, how to run it, and what's next.  
 > For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
 
-**Last updated:** June 25, 2026 — **Phase 6C (in-chat search, v1)**: search within the open chat — **desktop** header Search icon, **mobile** ⋮ → Search, compact header search bar with **↑/↓ match navigation**, **highlight + scroll-to-match**; searches **decrypted text client-side** over **loaded messages** (~50 most recent per chat today; **full-history pagination** is a follow-up). Earlier — **Sprint 3.2.3 (mobile chat UX)**: **`user:typing-stop`** clears typing instantly on send/idle; typing pill moved **inside the scroll area** (below timestamps); **mobile keyboard scroll-to-bottom** on composer focus; tighter composer (90% width, aligned icons/text); self chat icon → **NotepadText**. Earlier — **Sprint 3.2.2 (call fix + chat polish)**: fixes the **~3-minute auto hangup** (calls were force-ended by a 3-min "safety TTL" that started at dial — now **30s ring cap** for unanswered + **2h cap** for connected calls, started on accept); adds **rear/front camera flip** in video calls (mobile, `replaceTrack`); fixes the **typing flicker** (typing↔online) and moves the typing indicator to the **bottom of the chat** (WhatsApp-style); the image **⋮ menu shows Download** (not "Copy text") and tapping an image opens it **inside LINKr's lightbox** instead of a new browser tab. **Production infra:** **Cloudinary** media + avatars, **Redis** for multi-instance Socket.IO, **Vercel + Render + Atlas** deploy — all live.
+**Last updated:** June 25, 2026 — **Sprint 6E (group admin & management)**: leave group (sole admin picks successor), admin **rename**, **group avatar** upload, **add/remove members**, **promote/demote admin**; realtime `group:updated` / `group:deleted` socket events. Earlier — **Phase 6A–6D group chat v1** (create group, plaintext messaging, member list, honest **Not E2EE** badge, no group voice/video). Earlier — **Phase 6C (in-chat search, v1)**… **`user:typing-stop`** clears typing instantly on send/idle; typing pill moved **inside the scroll area** (below timestamps); **mobile keyboard scroll-to-bottom** on composer focus; tighter composer (90% width, aligned icons/text); self chat icon → **NotepadText**. Earlier — **Sprint 3.2.2 (call fix + chat polish)**: fixes the **~3-minute auto hangup** (calls were force-ended by a 3-min "safety TTL" that started at dial — now **30s ring cap** for unanswered + **2h cap** for connected calls, started on accept); adds **rear/front camera flip** in video calls (mobile, `replaceTrack`); fixes the **typing flicker** (typing↔online) and moves the typing indicator to the **bottom of the chat** (WhatsApp-style); the image **⋮ menu shows Download** (not "Copy text") and tapping an image opens it **inside LINKr's lightbox** instead of a new browser tab. **Production infra:** **Cloudinary** media + avatars, **Redis** for multi-instance Socket.IO, **Vercel + Render + Atlas** deploy — all live.
 
 Earlier (Sprint C.2.2 — Contact info button now toggles the profile pane open/closed; self chat renamed "Self chat" everywhere and now shows your own custom-status chip)
 
@@ -60,6 +60,8 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Chat polish: bottom typing, no flicker, image download + lightbox | ✅ Done (Sprint 3.2.2) |
 | Mobile chat UX (typing-stop, keyboard scroll, composer align) | ✅ Done (Sprint 3.2.3) |
 | In-chat search (loaded messages, client-side decrypt) | ✅ Done v1 (Phase 6C) |
+| Group chats (create, message, member list) | ✅ Done v1 (Phase 6A–6D) |
+| Group admin (leave, rename, avatar, members, promote/demote) | ✅ Done (Sprint 6E) |
 | Cloudinary media + avatar storage | ✅ Done (production) |
 | Redis (multi-instance Socket.IO adapter) | ✅ Done (production) |
 | Deploy (Vercel client + Render server + Atlas) | ✅ Done |
@@ -68,10 +70,9 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Forward message (friends only) + share contact | ✅ Done (Phase 4) |
 | Report user | ✅ Done (Phase 4) |
 | Account deletion (15-day soft + immediate purge) | ✅ Done (Phase 4) |
-| Screen share, groups | ❌ Phase 3 (3.3+) / Phase 6 |
-| Group voice/video calls | ❌ Phase 6 (deferred — SFU TBD) |
+| Screen share, group calls | ❌ Phase 3.3 / Phase 6 (deferred — SFU TBD) |
 
-**You are here:** **MVP complete** — Sprints 0–5, Phase 2 E2EE, Phase 4 account/social controls, Sprints D–J, Phase 3 voice + video (through 3.2.3), and **Phase 6C in-chat search v1** are shipped. **Next up: Phase 6 group chats** (create group from sidebar icon → multi-select friends → admin controls; groups **plaintext at rest** with an honest "not E2EE" badge for v1). Group calls and full-history search are planned follow-ups. Production runs on **Vercel + Render + Atlas** with **Cloudinary** and **Redis**.
+**You are here:** **Phase 6 group chats v1 + Sprint 6E admin controls** are shipped (plaintext at rest, honest badge, no group calls). **Next:** full-history in-chat search pagination, optional group settings (admin-only messaging, voice/video toggles), then group calls (SFU TBD). Production runs on **Vercel + Render + Atlas** with **Cloudinary** and **Redis**.
 
 ---
 
@@ -928,11 +929,13 @@ pnpm build        # production build
 - ✅ Client-side decrypt-then-search (E2EE-safe)
 - ⏭️ **Full history:** paginate `GET /api/chat/:chatId/messages?before=&limit=100` until empty when search opens
 
-### Phase 6 — Group chats (next build)
-- Create group from **sidebar icon** → multi-select friends (min 1) → name → create
-- Group messaging, member list, admin promote/demote, admin toggles (voice/video off, admin-only messaging)
-- **Plaintext at rest for v1** — honest **"Not end-to-end encrypted"** badge on group chats
-- **Group calls** deferred (voice up to ~15 members → SFU evaluation later)
+### Phase 6 — Group chats ✅ v1 Done (6A–6E)
+- ✅ Create group from **sidebar icon** → multi-select friends → name → create (max 16 members)
+- ✅ Group messaging (plaintext at rest), member list, **Not E2EE** badge
+- ✅ **Sprint 6E:** leave group (sole admin picks successor; last member deletes group), admin **rename**, **group avatar**, **add/remove members**, **promote/demote admin**
+- ✅ Realtime `group:updated` / `group:deleted` keeps all members in sync
+- ❌ **Group voice/video calls** deferred (SFU evaluation later)
+- ⏭️ Optional: admin-only messaging toggle, voice/video off toggles per group
 
 ### Future / backlog (not scheduled)
 - Key fingerprint verification UI (optional)
@@ -970,6 +973,16 @@ pnpm build        # production build
 3. **Escape** or **✕** closes search and restores the normal header.
 4. **E2EE chat:** search waits for decrypt (same as bubble render) — if a message shows "Decrypting…" in the thread, it won't match until decrypted.
 5. **Scope:** only the **~50 most recently loaded** messages are searched today; older history (e.g. January) requires the planned full-pagination follow-up.
+
+---
+
+## How to test Sprint 6E — Group admin & management
+1. Open a group → **Contact info** (desktop right pane or mobile sheet) → as **admin**, tap the **pencil** to rename or the **camera** on the avatar to upload a photo.
+2. **Add member:** tap **Add** → pick a friend not already in the group.
+3. **Member actions (⋮):** promote to admin, demote (if not the only admin), or remove a member.
+4. **Leave group:** footer **Leave group** button (or header **⋮ → Leave group**). Regular members get a confirm dialog; the **sole admin** must pick a successor in the modal.
+5. **Last member leaving** deletes the group for everyone (`group:deleted` closes the chat).
+6. Other members should see renames, avatar, and membership changes without refresh (`group:updated`).
 
 ---
 

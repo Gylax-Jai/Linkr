@@ -9,6 +9,8 @@ import {
   Clock,
   Image,
   Info,
+  Loader2,
+  LogOut,
   Share2,
   ShieldCheck,
   ShieldOff,
@@ -30,6 +32,9 @@ import {
   useUnblockUserMutation,
 } from "@/features/friends";
 import { MessageMedia, useArchiveChatMutation, useChatById, useMessages, useMuteChatMutation } from "@/features/chat";
+import { GroupProfilePanel } from "@/features/chat/GroupProfilePanel";
+import { LeaveGroupModal } from "@/features/chat/LeaveGroupModal";
+import { useLeaveGroupMutation } from "@/features/chat/useGroupAdmin";
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { shareContact } from "@/lib/utils/share";
@@ -107,6 +112,7 @@ function DetailsContent() {
   const onlineOverrides = useUIStore((s) => s.onlineOverrides);
   const chat = useChatById(activeChatId);
   const [tab, setTab] = useState<TabId>("profile");
+  const [groupTab, setGroupTab] = useState<"media" | "files">("media");
 
   const participant = chat?.participant;
   const isSelf = chat ? isSelfChatItem(chat) : false;
@@ -129,6 +135,78 @@ function DetailsContent() {
   const blocked = participant?.friendship?.status === "blocked";
   const blockedByMe = Boolean(participant?.friendship?.blockedByMe);
   const blockPending = block.isPending || unblock.isPending;
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const leaveGroup = useLeaveGroupMutation(activeChatId);
+
+  const handleLeaveGroup = () => {
+    if (!chat?.group || !sessionUser) return;
+    const admins = chat.group.admins;
+    const isSoleAdmin = chat.group.isAdmin && admins.length === 1 && admins.includes(sessionUser._id);
+    const hasOthers = chat.group.members.some((m) => m._id !== sessionUser._id);
+    if (isSoleAdmin && hasOthers) {
+      setLeaveOpen(true);
+      return;
+    }
+    if (window.confirm("Leave this group? You won't receive its messages anymore.")) {
+      void leaveGroup.mutateAsync(undefined);
+    }
+  };
+
+  if (isGroup && chat) {
+    return (
+      <div className="flex h-full flex-col overflow-hidden">
+        <GroupProfilePanel
+          chat={chat}
+          avatarSrc={avatarSrc}
+          displayName={displayName ?? "Group"}
+          onlineOverrides={onlineOverrides}
+        />
+        <EncryptedBadge className="mx-auto mb-2 hidden sm:inline-flex" group />
+        <div className="flex border-b border-border px-2">
+          {(["media", "files"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setGroupTab(id)}
+              className={cn(
+                "flex-1 px-3 py-2.5 text-xs font-semibold capitalize transition-colors",
+                groupTab === id ? "border-b-2 border-primary text-text" : "text-text-muted hover:text-text",
+              )}
+            >
+              {id}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {groupTab === "media" ? <MediaTab chatId={activeChatId} /> : null}
+          {groupTab === "files" ? <FilesTab chatId={activeChatId} /> : null}
+        </div>
+        <div className="shrink-0 space-y-2 border-t border-border p-4">
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" disabled={!chat} className="flex-1" onClick={() => muteChat.mutate({ chatId: chat._id, muted: !chat.muted })}>
+              {chat.muted ? <Bell className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              {chat.muted ? "Unmute" : "Mute"}
+            </Button>
+            <Button variant="ghost" size="sm" disabled={!chat} className="flex-1" onClick={() => archiveChat.mutate({ chatId: chat._id, archived: !chat.archived })}>
+              {chat.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+              {chat.archived ? "Unarchive" : "Archive"}
+            </Button>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={leaveGroup.isPending}
+            className="w-full text-red-500 hover:bg-red-500/10 hover:text-red-500"
+            onClick={handleLeaveGroup}
+          >
+            {leaveGroup.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+            Leave group
+          </Button>
+        </div>
+        <LeaveGroupModal chat={chat} open={leaveOpen} onClose={() => setLeaveOpen(false)} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">

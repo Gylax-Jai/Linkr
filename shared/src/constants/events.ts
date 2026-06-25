@@ -60,6 +60,11 @@ export const SOCKET_EVENTS = {
   // Screen share (Phase 3)
   SCREEN_START: "screen:start",
   SCREEN_STOP: "screen:stop",
+
+  /** Group metadata changed (Phase 6E) — members should refetch the chat list. */
+  GROUP_UPDATED: "group:updated",
+  /** Group was deleted (last member left) — remove from lists and close the active chat. */
+  GROUP_DELETED: "group:deleted",
 } as const;
 
 export type SocketEventName = (typeof SOCKET_EVENTS)[keyof typeof SOCKET_EVENTS];

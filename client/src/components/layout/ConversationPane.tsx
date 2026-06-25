@@ -16,6 +16,7 @@ import {
   Forward,
   Info,
   Loader2,
+  LogOut,
   MoreVertical,
   NotepadText,
   Paperclip,
@@ -51,11 +52,13 @@ import {
   emitTyping,
   emitTypingStop,
   ForwardMessageModal,
+  LeaveGroupModal,
   MessageMedia,
   useArchiveChatMutation,
   useChatById,
   useDeleteMessageMutation,
   useEditMessageMutation,
+  useLeaveGroupMutation,
   useMarkReadMutation,
   useMessages,
   useMuteChatMutation,
@@ -686,6 +689,9 @@ function HeaderMenu({
   const muteChat = useMuteChatMutation();
   const archiveChat = useArchiveChatMutation();
   const [reportOpen, setReportOpen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const sessionUser = useAuthStore((s) => s.user);
+  const leaveGroup = useLeaveGroupMutation(chat._id);
 
   const isGroup = isGroupChat(chat);
   const isSelf = isSelfChatItem(chat);
@@ -715,6 +721,20 @@ function HeaderMenu({
   const run = (fn: () => void) => {
     fn();
     setOpen(false);
+  };
+
+  const handleLeaveGroup = () => {
+    if (!chat.group || !sessionUser) return;
+    const admins = chat.group.admins;
+    const isSoleAdmin = chat.group.isAdmin && admins.length === 1 && admins.includes(sessionUser._id);
+    const hasOthers = chat.group.members.some((m) => m._id !== sessionUser._id);
+    if (isSoleAdmin && hasOthers) {
+      setLeaveOpen(true);
+      return;
+    }
+    if (window.confirm("Leave this group? You won't receive its messages anymore.")) {
+      void leaveGroup.mutateAsync(undefined);
+    }
   };
 
   return (
@@ -757,6 +777,15 @@ function HeaderMenu({
             label={chat.archived ? "Unarchive" : "Archive chat"}
             onClick={() => run(() => archiveChat.mutate({ chatId: chat._id, archived: !chat.archived }))}
           />
+          {isGroup ? (
+            <HeaderMenuItem
+              icon={<LogOut className="h-4 w-4" />}
+              label="Leave group"
+              danger
+              disabled={leaveGroup.isPending}
+              onClick={() => run(handleLeaveGroup)}
+            />
+          ) : null}
           {/* Friend/block/share actions are meaningless for the self ("Saved messages") chat. */}
           {!isSelf && !isGroup && isFriend && participant ? (
             <HeaderMenuItem
@@ -808,6 +837,7 @@ function HeaderMenu({
         target={reportOpen && participant ? { userId: participant._id, name: participant.displayName } : null}
         onClose={() => setReportOpen(false)}
       />
+      {isGroup ? <LeaveGroupModal chat={chat} open={leaveOpen} onClose={() => setLeaveOpen(false)} /> : null}
     </div>
   );
 }

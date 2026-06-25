@@ -19,7 +19,7 @@ import { ApiError } from "../../utils/ApiError.js";
 import { getSocketServer } from "../../sockets/io.js";
 import { areFriends } from "../friends/friendship.helpers.js";
 import { createNotification } from "../notifications/notifications.service.js";
-import { resolveAvatarUrl } from "../users/avatar.helpers.js";
+import { resolveAvatarUrl, resolveGroupAvatarUrl } from "../users/avatar.helpers.js";
 import {
   canViewAvatarThumbnail,
   canViewLastSeen,
@@ -159,7 +159,6 @@ function isSelfChat(chat: ChatDocument): boolean {
   return chat.type === "self" || chat.members.length === 1;
 }
 
-/** Group chats (Phase 6): plaintext at rest, multi-member. */
 function isGroupChat(chat: ChatDocument): boolean {
   return chat.type === "group";
 }
@@ -462,7 +461,7 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
         name: typeof chat.name === "string" && chat.name.trim() ? chat.name.trim() : "Group",
         avatar:
           typeof chat.avatar === "string" && chat.avatar
-            ? resolveAvatarUrl(chat.avatar, chat._id.toString())
+            ? resolveGroupAvatarUrl(chat.avatar, chat._id.toString())
             : undefined,
         memberCount: memberIds.length,
         members,
@@ -978,3 +977,4 @@ export async function markMessagesRead(chatId: string, userId: string): Promise<
 }
 
 export { getChatForUser, getMessageForUser, getOtherMemberId, toMessageDTO, emitToChatMembers };
+export { isGroupChat };

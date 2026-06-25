@@ -8,6 +8,26 @@ export const createGroupSchema = z.object({
   memberIds: z.array(z.string().min(1)).min(1).max(15),
 });
 
+/** PATCH /api/chat/group/:chatId — rename a group (admin only). */
+export const updateGroupSchema = z.object({
+  name: z.string().trim().min(1).max(50),
+});
+
+/** POST /api/chat/group/:chatId/members — add a friend to the group (admin only). */
+export const addGroupMemberSchema = z.object({
+  userId: z.string().min(1),
+});
+
+/** POST /api/chat/group/:chatId/leave — sole admin may pass a successor before leaving. */
+export const leaveGroupSchema = z.object({
+  newAdminId: z.string().min(1).optional(),
+});
+
+export const groupMemberParamSchema = z.object({
+  chatId: z.string().min(1),
+  userId: z.string().min(1),
+});
+
 export const createChatSchema = z.object({
   /** Friend's user id — server creates or returns the existing 1:1 chat. */
   participantId: z.string().min(1),
@@ -104,6 +124,9 @@ export const uploadMediaBodySchema = z.object({
 });
 
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;
+export type UpdateGroupInput = z.infer<typeof updateGroupSchema>;
+export type AddGroupMemberInput = z.infer<typeof addGroupMemberSchema>;
+export type LeaveGroupInput = z.infer<typeof leaveGroupSchema>;
 export type CreateChatInput = z.infer<typeof createChatSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;
 export type EditMessageInput = z.infer<typeof editMessageSchema>;

@@ -201,6 +201,24 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       void refreshPeerProfileInCaches(queryClient, userId);
     };
 
+    const onGroupUpdated = ({ chatId }: { chatId: string }) => {
+      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.messages(chatId) });
+    };
+
+    const onGroupDeleted = ({ chatId }: { chatId: string }) => {
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+        if (!old) return old;
+        const next = old.filter((c) => c._id !== chatId);
+        writeCachedChatList(next);
+        return next;
+      });
+      queryClient.removeQueries({ queryKey: chatKeys.messages(chatId) });
+      if (useUIStore.getState().activeChatId === chatId) {
+        useUIStore.getState().setActiveChat(null);
+      }
+    };
+
     socket.on(SOCKET_EVENTS.MESSAGE_NEW, onNewMessage);
     socket.on(SOCKET_EVENTS.MESSAGE_DELIVERED, onDelivered);
     socket.on(SOCKET_EVENTS.MESSAGE_READ, onRead);
@@ -216,6 +234,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     socket.on(SOCKET_EVENTS.FRIEND_ACCEPTED, onFriendChanged);
     socket.on(SOCKET_EVENTS.NOTIFICATION_NEW, onNotification);
     socket.on(SOCKET_EVENTS.USER_PROFILE_CHANGED, onProfileChanged);
+    socket.on(SOCKET_EVENTS.GROUP_UPDATED, onGroupUpdated);
+    socket.on(SOCKET_EVENTS.GROUP_DELETED, onGroupDeleted);
 
     return () => {
       socket.off("connect", bindCallEarly);
@@ -235,6 +255,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       socket.off(SOCKET_EVENTS.FRIEND_ACCEPTED, onFriendChanged);
       socket.off(SOCKET_EVENTS.NOTIFICATION_NEW, onNotification);
       socket.off(SOCKET_EVENTS.USER_PROFILE_CHANGED, onProfileChanged);
+      socket.off(SOCKET_EVENTS.GROUP_UPDATED, onGroupUpdated);
+      socket.off(SOCKET_EVENTS.GROUP_DELETED, onGroupDeleted);
       for (const t of typingTimeouts.values()) clearTimeout(t);
       typingTimeouts.clear();
     };

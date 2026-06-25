@@ -7,13 +7,18 @@ import {
   deleteMessageSchema,
   editMessageSchema,
   forwardMessageSchema,
+  groupMemberParamSchema,
+  addGroupMemberSchema,
+  leaveGroupSchema,
   listMessagesQuerySchema,
   MEDIA_FILE_MAX_BYTES,
+  AVATAR_MAX_BYTES,
   messageIdParamSchema,
   muteChatSchema,
   pinChatSchema,
   postMessageBodySchema,
   reactMessageSchema,
+  updateGroupSchema,
   uploadMediaBodySchema,
 } from "@linkr/shared";
 import { requireAuth } from "../../middleware/auth.js";
@@ -37,9 +42,20 @@ import {
   reactMessage,
   removeMessage,
 } from "./chat.controller.js";
+import {
+  deleteGroupAdmin,
+  deleteGroupMember,
+  getGroupAvatar,
+  patchGroup,
+  postGroupAdmin,
+  postGroupAvatar,
+  postGroupMember,
+  postLeaveGroup,
+} from "./group.controller.js";
 
 /** In-memory multipart upload for media (Sprint 5); a hard byte cap is the first DoS defense. */
 const uploadSingle = singleFileUpload("file", MEDIA_FILE_MAX_BYTES);
+const uploadAvatar = singleFileUpload("file", AVATAR_MAX_BYTES);
 
 /**
  * Chat module (blueprint §10, §12): 1:1 chats and messages.
@@ -50,6 +66,59 @@ export const chatRouter: Router = Router();
 chatRouter.get("/", requireAuth, getChats);
 chatRouter.post("/", requireAuth, validate(createChatSchema), createChat);
 chatRouter.post("/group", requireAuth, validate(createGroupSchema), createGroupChat);
+
+chatRouter.patch(
+  "/group/:chatId",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  validate(updateGroupSchema),
+  patchGroup,
+);
+chatRouter.post(
+  "/group/:chatId/avatar",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  uploadAvatar,
+  postGroupAvatar,
+);
+chatRouter.get(
+  "/group/:chatId/avatar",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  getGroupAvatar,
+);
+chatRouter.post(
+  "/group/:chatId/members",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  validate(addGroupMemberSchema),
+  postGroupMember,
+);
+chatRouter.delete(
+  "/group/:chatId/members/:userId",
+  requireAuth,
+  validate(groupMemberParamSchema, "params"),
+  deleteGroupMember,
+);
+chatRouter.post(
+  "/group/:chatId/admins/:userId",
+  requireAuth,
+  validate(groupMemberParamSchema, "params"),
+  postGroupAdmin,
+);
+chatRouter.delete(
+  "/group/:chatId/admins/:userId",
+  requireAuth,
+  validate(groupMemberParamSchema, "params"),
+  deleteGroupAdmin,
+);
+chatRouter.post(
+  "/group/:chatId/leave",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  validate(leaveGroupSchema),
+  postLeaveGroup,
+);
 
 // Per-message actions (declared before /:chatId routes is unnecessary — paths don't collide).
 chatRouter.patch(

@@ -38,3 +38,17 @@ export function resolveAvatarUrl(
   }
   return avatar;
 }
+
+/** Resolve a group avatar ref to a client-usable URL (mirrors user avatar resolution). */
+export function resolveGroupAvatarUrl(
+  avatar: string | null | undefined,
+  chatId: string,
+): string | undefined {
+  if (!avatar) return undefined;
+  if (avatar.startsWith(LOCAL_MEDIA_PREFIX)) {
+    const base = `/chat/group/${chatId}/avatar`;
+    const version = avatarVersionFromRef(avatar);
+    return version ? `${base}?v=${version}` : base;
+  }
+  return avatar;
+}
