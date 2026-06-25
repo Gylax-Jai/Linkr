@@ -95,16 +95,17 @@ export const postMedia = asyncHandler(async (req, res) => {
   const userId = requireUserId(req);
 
   const validated = validateUpload(file.originalname, file.buffer);
-  const url = await storeMedia(validated, file.buffer);
+  const stored = await storeMedia(validated, file.buffer);
 
   const message = await sendMessage(chatId, userId, {
     content: caption,
     media: {
       type: validated.type,
-      url,
+      url: stored.url,
       name: validated.displayName,
-      size: file.buffer.length,
+      size: stored.size,
       mime: validated.mime,
+      cloudinaryPublicId: stored.cloudinaryPublicId,
     },
   });
 

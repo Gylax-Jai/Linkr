@@ -1,5 +1,5 @@
 import { Schema, model, Types, type InferSchemaType } from "mongoose";
-import { CHAT_TYPES } from "@linkr/shared";
+import { CHAT_TYPES, GROUP_MESSAGE_PERMISSION_VALUES } from "@linkr/shared";
 
 /** Chat model (blueprint §12): 1:1 or group conversation. */
 const chatSchema = new Schema(
@@ -9,6 +9,12 @@ const chatSchema = new Schema(
     admins: [{ type: Types.ObjectId, ref: "User" }],
     name: { type: String },
     avatar: { type: String },
+    /** Who may send messages in this group (admin-only setting). */
+    messagePermission: {
+      type: String,
+      enum: GROUP_MESSAGE_PERMISSION_VALUES,
+      default: "everyone",
+    },
     pinnedBy: [{ type: Types.ObjectId, ref: "User" }],
     /** Per-user mute: members who silenced notifications for this chat (Phase 4). */
     mutedBy: [{ type: Types.ObjectId, ref: "User" }],

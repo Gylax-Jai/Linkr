@@ -200,44 +200,125 @@ async function ensureUploadDir(): Promise<void> {
 
 let cloudinaryConfigured = false;
 
+export function ensureCloudinaryConfigured(): void {
+  if (!cloudinaryConfig.enabled || cloudinaryConfigured) return;
+  cloudinary.config({ secure: true });
+  cloudinaryConfigured = true;
+}
+
+/** Result of storing an uploaded attachment (URL + optional Cloudinary id for lifecycle deletes). */
+export interface StoredMediaRef {
+  url: string;
+  cloudinaryPublicId?: string;
+  /** Byte size of the stored payload (after compression). */
+  size: number;
+}
+
+const IMAGE_MAX_DIMENSION = 2048;
+const JPEG_QUALITY = 85;
+
+/**
+ * Compress raster images before upload (PNG/JPG/WEBP). GIFs are left as-is to preserve animation.
+ * Falls back to the original buffer if sharp is unavailable or processing fails.
+ */
+async function compressImageBuffer(
+  media: ValidatedMedia,
+  buffer: Buffer,
+): Promise<{ buffer: Buffer; mime: string }> {
+  if (media.type !== "image" || media.ext === ".gif") {
+    return { buffer, mime: media.mime };
+  }
+  try {
+    const { Jimp } = await import("jimp");
+    const img = await Jimp.read(buffer);
+    const w = img.width;
+    const h = img.height;
+    if (w > IMAGE_MAX_DIMENSION || h > IMAGE_MAX_DIMENSION) {
+      img.scaleToFit({ w: IMAGE_MAX_DIMENSION, h: IMAGE_MAX_DIMENSION });
+    }
+    if (media.ext === ".png") {
+      return { buffer: await img.getBuffer("image/png"), mime: "image/png" };
+    }
+    if (media.ext === ".webp") {
+      return { buffer: await img.getBuffer("image/jpeg", { quality: JPEG_QUALITY }), mime: "image/jpeg" };
+    }
+    return { buffer: await img.getBuffer("image/jpeg", { quality: JPEG_QUALITY }), mime: "image/jpeg" };
+  } catch (err) {
+    logger.warn("Image compression skipped", { err: err instanceof Error ? err.message : String(err) });
+    return { buffer, mime: media.mime };
+  }
+}
+
+/** Best-effort public_id extraction from a legacy Cloudinary secure URL (for purge of old rows). */
+export function extractCloudinaryPublicId(url: string): string | undefined {
+  if (!url.startsWith("http") || !url.includes("cloudinary.com")) return undefined;
+  const marker = "/upload/";
+  const idx = url.indexOf(marker);
+  if (idx === -1) return undefined;
+  let tail = url.slice(idx + marker.length);
+  tail = tail.replace(/^v\d+\//, "");
+  const dot = tail.lastIndexOf(".");
+  if (dot > tail.lastIndexOf("/")) tail = tail.slice(0, dot);
+  return tail || undefined;
+}
+
+/** Delete a stored attachment from Cloudinary or local disk. */
+export async function deleteStoredMedia(mediaRef: string, cloudinaryPublicId?: string): Promise<void> {
+  if (mediaRef.startsWith(LOCAL_MEDIA_PREFIX)) {
+    const filePath = await resolveLocalMediaPath(mediaRef);
+    if (filePath) await fs.unlink(filePath).catch(() => {});
+    return;
+  }
+  if (!cloudinaryConfig.enabled) return;
+  const publicId = cloudinaryPublicId ?? extractCloudinaryPublicId(mediaRef);
+  if (!publicId) return;
+  ensureCloudinaryConfigured();
+  await cloudinary.uploader.destroy(publicId, { resource_type: "auto" }).catch((err) => {
+    logger.warn("Cloudinary destroy failed", { publicId, err: err instanceof Error ? err.message : String(err) });
+  });
+}
+
 /**
  * Store the validated buffer. Returns the internal DB reference for `mediaUrl`:
  *  - Cloudinary enabled → the returned absolute secure URL (public).
  *  - Otherwise → `local:<uuid><ext>`, resolved to an authenticated download route in the DTO.
  */
-export async function storeMedia(media: ValidatedMedia, buffer: Buffer): Promise<string> {
+export async function storeMedia(media: ValidatedMedia, buffer: Buffer): Promise<StoredMediaRef> {
+  const { buffer: payload, mime } = await compressImageBuffer(media, buffer);
+  const storedMedia: ValidatedMedia = media.type === "image" ? { ...media, mime } : media;
+
   if (cloudinaryConfig.enabled) {
-    if (!cloudinaryConfigured) {
-      // Reads CLOUDINARY_URL from the environment (loaded by config/env.ts); never hardcoded.
-      cloudinary.config({ secure: true });
-      cloudinaryConfigured = true;
-    }
+    ensureCloudinaryConfigured();
     const result = await new Promise<UploadApiResponse>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
-        { resource_type: "auto", folder: "linkr" },
+        {
+          resource_type: "auto",
+          folder: "linkr",
+          quality: "auto:good",
+          fetch_format: "auto",
+        },
         (error, res) => {
           if (error || !res) reject(error ?? new Error("Cloudinary upload failed"));
           else resolve(res);
         },
       );
-      stream.end(buffer);
+      stream.end(payload);
     });
-    return result.secure_url;
+    return { url: result.secure_url, cloudinaryPublicId: result.public_id, size: payload.length };
   }
 
   // Local-disk fallback (dev): random UUID filename, outside the web root.
-  const filename = `${randomUUID()}${media.ext}`;
+  const filename = `${randomUUID()}${storedMedia.ext}`;
   try {
     await ensureUploadDir();
-    await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
+    await fs.writeFile(path.join(UPLOAD_DIR, filename), payload);
   } catch (err) {
-    // Never leak the absolute path / contents to the client; log a redacted reason only.
     logger.error("Failed to store uploaded file", {
       err: err instanceof Error ? err.message : String(err),
     });
     throw ApiError.internal("We couldn't save your file. Please try again.");
   }
-  return `${LOCAL_MEDIA_PREFIX}${filename}`;
+  return { url: `${LOCAL_MEDIA_PREFIX}${filename}`, size: payload.length };
 }
 
 /**

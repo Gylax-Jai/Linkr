@@ -183,6 +183,19 @@ export async function demoteGroupAdmin(chatId: string, adminId: string, targetUs
   await notifyGroupUpdated(chat);
 }
 
+/** PATCH — who may send messages (admin). */
+export async function updateGroupMessagePermission(
+  chatId: string,
+  userId: string,
+  messagePermission: "everyone" | "admins",
+): Promise<void> {
+  const chat = await requireGroup(chatId, userId);
+  requireAdmin(chat, userId);
+  chat.messagePermission = messagePermission;
+  await chat.save();
+  await notifyGroupUpdated(chat);
+}
+
 /**
  * POST — leave a group. Sole admin with other members must pass `newAdminId` or promote someone first.
  * Last member deletes the group.

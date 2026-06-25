@@ -126,8 +126,8 @@ export const updateAvatar = asyncHandler(async (req, res) => {
   if (!file) throw ApiError.badRequest("No image uploaded");
 
   const validated = validateAvatarUpload(file.originalname, file.buffer);
-  const ref = await storeMedia(validated, file.buffer);
-  const user = await setUserAvatar(requireUser(req), ref);
+  const stored = await storeMedia(validated, file.buffer);
+  const user = await setUserAvatar(requireUser(req), stored.url);
   res.status(200).json({ user: toSessionUser(user) });
 });
 

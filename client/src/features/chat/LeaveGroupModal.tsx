@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Loader2, LogOut } from "lucide-react";
 import type { ChatListItem } from "@linkr/shared";
+import { Portal } from "@/components/ui/Portal";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/lib/store";
 import { useLeaveGroupMutation } from "./useGroupAdmin";
@@ -40,6 +41,7 @@ export function LeaveGroupModal({
   };
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <button type="button" aria-label="Close" className="absolute inset-0 bg-bg/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-elevated">
@@ -79,5 +81,6 @@ export function LeaveGroupModal({
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

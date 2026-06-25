@@ -26,6 +26,7 @@ export { CreateGroupModal } from "./CreateGroupModal";
 export { GroupProfilePanel } from "./GroupProfilePanel";
 export { AddGroupMemberModal } from "./AddGroupMemberModal";
 export { LeaveGroupModal } from "./LeaveGroupModal";
+export { GroupMessagePermissionModal } from "./GroupMessagePermissionModal";
 export {
   useUpdateGroupNameMutation,
   useUploadGroupAvatarMutation,
@@ -33,6 +34,7 @@ export {
   useRemoveGroupMemberMutation,
   usePromoteGroupAdminMutation,
   useDemoteGroupAdminMutation,
+  useUpdateGroupMessagePermissionMutation,
   useLeaveGroupMutation,
 } from "./useGroupAdmin";
 export { SocketProvider, emitTyping, emitTypingStop } from "./SocketProvider";

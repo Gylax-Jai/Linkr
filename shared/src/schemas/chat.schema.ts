@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MEDIA_CAPTION_MAX } from "../constants/limits.js";
+import { GROUP_MESSAGE_PERMISSION_VALUES, MEDIA_CAPTION_MAX } from "../constants/limits.js";
 
 export const createGroupSchema = z.object({
   /** Display name for the group (Phase 6). */
@@ -11,6 +11,11 @@ export const createGroupSchema = z.object({
 /** PATCH /api/chat/group/:chatId — rename a group (admin only). */
 export const updateGroupSchema = z.object({
   name: z.string().trim().min(1).max(50),
+});
+
+/** PATCH /api/chat/group/:chatId/permissions — who may send messages (admin only). */
+export const updateGroupPermissionsSchema = z.object({
+  messagePermission: z.enum(GROUP_MESSAGE_PERMISSION_VALUES),
 });
 
 /** POST /api/chat/group/:chatId/members — add a friend to the group (admin only). */
@@ -125,6 +130,7 @@ export const uploadMediaBodySchema = z.object({
 
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;
 export type UpdateGroupInput = z.infer<typeof updateGroupSchema>;
+export type UpdateGroupPermissionsInput = z.infer<typeof updateGroupPermissionsSchema>;
 export type AddGroupMemberInput = z.infer<typeof addGroupMemberSchema>;
 export type LeaveGroupInput = z.infer<typeof leaveGroupSchema>;
 export type CreateChatInput = z.infer<typeof createChatSchema>;

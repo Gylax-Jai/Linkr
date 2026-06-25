@@ -19,6 +19,7 @@ import {
   postMessageBodySchema,
   reactMessageSchema,
   updateGroupSchema,
+  updateGroupPermissionsSchema,
   uploadMediaBodySchema,
 } from "@linkr/shared";
 import { requireAuth } from "../../middleware/auth.js";
@@ -48,6 +49,7 @@ import {
   getGroupAvatar,
   getGroupMembers,
   patchGroup,
+  patchGroupPermissions,
   postGroupAdmin,
   postGroupAvatar,
   postGroupMember,
@@ -81,6 +83,13 @@ chatRouter.patch(
   validate(chatIdParamSchema, "params"),
   validate(updateGroupSchema),
   patchGroup,
+);
+chatRouter.patch(
+  "/group/:chatId/permissions",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  validate(updateGroupPermissionsSchema),
+  patchGroupPermissions,
 );
 chatRouter.post(
   "/group/:chatId/avatar",

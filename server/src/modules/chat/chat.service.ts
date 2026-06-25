@@ -455,6 +455,8 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
         memberCount: memberIds.length,
         admins: adminIds,
         isAdmin: adminIds.includes(userId),
+        messagePermission:
+          chat.messagePermission === "admins" ? "admins" : "everyone",
       },
       lastMessage: lastMsg,
       pinned,
@@ -561,6 +563,7 @@ export interface SendMessageMedia {
   name: string;
   size: number;
   mime: string;
+  cloudinaryPublicId?: string;
 }
 
 export interface SendMessageOptions {
@@ -607,6 +610,16 @@ export async function sendMessage(
     throw ApiError.badRequest("Group messages are not end-to-end encrypted");
   }
 
+  if (groupChat) {
+    const permission = chat.messagePermission === "admins" ? "admins" : "everyone";
+    if (permission === "admins") {
+      const adminIds = (chat.admins ?? []).map((id) => id.toString());
+      if (!adminIds.includes(senderId)) {
+        throw ApiError.forbidden("ADMINS_ONLY", "Only admins can send messages in this group");
+      }
+    }
+  }
+
   if (!selfChat && !groupChat) {
     const otherId = await getOtherMemberId(chat, senderId);
     if (!(await areFriends(senderId, otherId))) {
@@ -640,7 +653,13 @@ export async function sendMessage(
     ...(encrypted ? { encrypted: true } : {}),
     ...(options.forwarded ? { forwarded: true } : {}),
     ...(media
-      ? { mediaUrl: media.url, mediaName: media.name, mediaSize: media.size, mediaMime: media.mime }
+      ? {
+          mediaUrl: media.url,
+          mediaName: media.name,
+          mediaSize: media.size,
+          mediaMime: media.mime,
+          ...(media.cloudinaryPublicId ? { mediaCloudId: media.cloudinaryPublicId } : {}),
+        }
       : {}),
     status: "sent",
     readBy: [senderId],

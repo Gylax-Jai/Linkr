@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { GroupMessagePermission } from "@linkr/shared";
 import { api } from "@/lib/api";
 import { useUIStore } from "@/lib/store";
 import { chatKeys } from "./useChats";
@@ -72,6 +73,17 @@ export function useDemoteGroupAdminMutation(chatId: string | null) {
     mutationFn: async (userId: string) => {
       if (!chatId) throw new Error("No chat");
       await api.delete(`/chat/group/${chatId}/admins/${userId}`);
+    },
+    onSuccess: () => invalidateChats(queryClient, chatId),
+  });
+}
+
+export function useUpdateGroupMessagePermissionMutation(chatId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (messagePermission: GroupMessagePermission) => {
+      if (!chatId) throw new Error("No chat");
+      await api.patch(`/chat/group/${chatId}/permissions`, { messagePermission });
     },
     onSuccess: () => invalidateChats(queryClient, chatId),
   });

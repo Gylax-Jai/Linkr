@@ -1,5 +1,5 @@
 import type { Request } from "express";
-import type { AddGroupMemberInput, LeaveGroupInput, UpdateGroupInput } from "@linkr/shared";
+import type { AddGroupMemberInput, LeaveGroupInput, UpdateGroupInput, UpdateGroupPermissionsInput } from "@linkr/shared";
 import { ApiError } from "../../utils/ApiError.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { storeMedia, validateAvatarUpload } from "./chat.media.service.js";
@@ -11,6 +11,7 @@ import {
   promoteGroupAdmin,
   removeGroupMember,
   setGroupAvatar,
+  updateGroupMessagePermission,
   updateGroupName,
 } from "./group.service.js";
 import { listGroupMembersForChat } from "./chat.service.js";
@@ -45,8 +46,8 @@ export const postGroupAvatar = asyncHandler(async (req, res) => {
   if (!file) throw ApiError.badRequest("No image uploaded");
 
   const validated = validateAvatarUpload(file.originalname, file.buffer);
-  const ref = await storeMedia(validated, file.buffer);
-  const avatarUrl = await setGroupAvatar(chatId, requireUserId(req), ref);
+  const stored = await storeMedia(validated, file.buffer);
+  const avatarUrl = await setGroupAvatar(chatId, requireUserId(req), stored.url);
   res.status(200).json({ ok: true, avatarUrl });
 });
 
@@ -94,6 +95,15 @@ export const deleteGroupAdmin = asyncHandler(async (req, res) => {
   if (!chatId || !targetUserId) throw ApiError.badRequest("Missing chatId or userId");
   await demoteGroupAdmin(chatId, requireUserId(req), targetUserId);
   res.status(200).json({ ok: true });
+});
+
+/** PATCH /api/chat/group/:chatId/permissions — who may send messages (admin). */
+export const patchGroupPermissions = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  if (!chatId) throw ApiError.badRequest("Missing chatId");
+  const { messagePermission } = req.body as UpdateGroupPermissionsInput;
+  await updateGroupMessagePermission(chatId, requireUserId(req), messagePermission);
+  res.status(200).json({ ok: true, messagePermission });
 });
 
 /** POST /api/chat/group/:chatId/leave — leave group (sole admin may pass newAdminId). */

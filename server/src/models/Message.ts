@@ -17,6 +17,8 @@ const messageSchema = new Schema(
      */
     encrypted: { type: Boolean, default: false },
     mediaUrl: { type: String },
+    /** Cloudinary public_id for lifecycle deletion (not exposed to clients). */
+    mediaCloudId: { type: String },
     /** Sanitized original filename — display metadata only, never used for storage. */
     mediaName: { type: String },
     /** Attachment size in bytes. */

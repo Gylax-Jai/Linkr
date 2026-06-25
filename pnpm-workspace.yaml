@@ -6,3 +6,4 @@ packages:
 # pnpm 11+: allowBuilds replaces onlyBuiltDependencies
 allowBuilds:
   esbuild: true
+  sharp: set this to true or false

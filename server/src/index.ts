@@ -9,6 +9,7 @@ import { registerSocketHandlers } from "./sockets/index.js";
 import { setSocketServer } from "./sockets/io.js";
 import { ensureBotUser } from "./modules/bot/bot.service.js";
 import { startAccountPurgeJob } from "./modules/users/account.service.js";
+import { startMediaPurgeJob } from "./modules/chat/media.purge.service.js";
 import { logger } from "./utils/logger.js";
 
 async function bootstrap(): Promise<void> {
@@ -51,10 +52,12 @@ async function bootstrap(): Promise<void> {
 
   // Background job (Phase 4): permanently purge deactivated accounts past their 15-day grace period.
   const stopAccountPurge = startAccountPurgeJob();
+  const stopMediaPurge = startMediaPurgeJob();
 
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal} — shutting down gracefully`);
     stopAccountPurge();
+    stopMediaPurge();
     io.close();
     httpServer.close();
     await disconnectRedis();

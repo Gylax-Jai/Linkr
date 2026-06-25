@@ -90,6 +90,9 @@ export interface MessageDTO {
   deletedForEveryone: boolean;
 }
 
+/** Who may send messages in a group. */
+export type GroupMessagePermission = "everyone" | "admins";
+
 /** Summary of a group chat embedded in list/detail responses (Phase 6). */
 export interface GroupChatSummary {
   name: string;
@@ -100,6 +103,8 @@ export interface GroupChatSummary {
   admins: ID[];
   /** True when the current user is a group admin. */
   isAdmin: boolean;
+  /** Who can send messages (default everyone for legacy groups). */
+  messagePermission: GroupMessagePermission;
 }
 
 /** Chat list row returned by GET /api/chat. */

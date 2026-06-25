@@ -32,6 +32,7 @@ import {
   Send,
   Share2,
   ShieldOff,
+  MessageSquareLock,
   Smile,
   SmilePlus,
   Trash2,
@@ -53,6 +54,7 @@ import {
   emitTypingStop,
   ForwardMessageModal,
   LeaveGroupModal,
+  GroupMessagePermissionModal,
   MessageMedia,
   useArchiveChatMutation,
   useChatById,
@@ -251,6 +253,8 @@ export function ConversationPane() {
         friendship={chat.participant?.friendship}
         isSelf={isSelf}
         isGroup={isGroup}
+        isGroupAdmin={chat.group?.isAdmin ?? false}
+        messagePermission={chat.group?.messagePermission ?? "everyone"}
         target={target}
         onClearTarget={() => setTarget({ replyTo: null, editing: null })}
         scrollToBottom={() => scrollChatToBottomRef.current()}
@@ -690,6 +694,7 @@ function HeaderMenu({
   const archiveChat = useArchiveChatMutation();
   const [reportOpen, setReportOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [permissionOpen, setPermissionOpen] = useState(false);
   const sessionUser = useAuthStore((s) => s.user);
   const leaveGroup = useLeaveGroupMutation(chat._id);
 
@@ -777,6 +782,14 @@ function HeaderMenu({
             label={chat.archived ? "Unarchive" : "Archive chat"}
             onClick={() => run(() => archiveChat.mutate({ chatId: chat._id, archived: !chat.archived }))}
           />
+          {isGroup && chat.group?.isAdmin ? (
+            <HeaderMenuItem
+              icon={<MessageSquareLock className="h-4 w-4" />}
+              label="Message permission"
+              hint={chat.group.messagePermission === "admins" ? "Admin only" : "Everyone"}
+              onClick={() => run(() => setPermissionOpen(true))}
+            />
+          ) : null}
           {isGroup ? (
             <HeaderMenuItem
               icon={<LogOut className="h-4 w-4" />}
@@ -838,6 +851,9 @@ function HeaderMenu({
         onClose={() => setReportOpen(false)}
       />
       {isGroup ? <LeaveGroupModal chat={chat} open={leaveOpen} onClose={() => setLeaveOpen(false)} /> : null}
+      {isGroup ? (
+        <GroupMessagePermissionModal chat={chat} open={permissionOpen} onClose={() => setPermissionOpen(false)} />
+      ) : null}
     </div>
   );
 }
@@ -1609,6 +1625,8 @@ function Composer({
   friendship,
   isSelf = false,
   isGroup = false,
+  isGroupAdmin = false,
+  messagePermission = "everyone",
   target,
   onClearTarget,
   scrollToBottom,
@@ -1619,6 +1637,8 @@ function Composer({
   friendship?: ChatParticipantFriendship;
   isSelf?: boolean;
   isGroup?: boolean;
+  isGroupAdmin?: boolean;
+  messagePermission?: "everyone" | "admins";
   target: ComposerTarget;
   onClearTarget: () => void;
   /** Scroll the message list when the input is focused (mobile keyboard — WhatsApp-style). */
@@ -1829,6 +1849,17 @@ function Composer({
         participantName={participantName}
         friendship={friendship}
       />
+    );
+  }
+
+  if (isGroup && messagePermission === "admins" && !isGroupAdmin) {
+    return (
+      <div
+        className="flex shrink-0 flex-col items-center gap-2 border-t border-border bg-surface/80 p-4 text-center backdrop-blur-sm"
+        style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+      >
+        <p className="text-sm text-text-muted">Only admins can send messages in this group.</p>
+      </div>
     );
   }
 

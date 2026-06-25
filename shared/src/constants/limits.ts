@@ -27,6 +27,10 @@ export const MESSAGE_STATUSES = ["sent", "delivered", "read"] as const;
 export const CHAT_TYPES = ["1:1", "group", "self"] as const;
 export const GROUP_MAX_MEMBERS = 16;
 export const GROUP_NAME_MAX = 50;
+/** Who may send messages in a group (Phase 6). Default: everyone. */
+export const GROUP_MESSAGE_PERMISSION_VALUES = ["everyone", "admins"] as const;
+/** Chat attachments (Cloudinary / local) are purged this many days after upload. */
+export const MEDIA_RETENTION_DAYS = 30;
 export const VISIBILITY_VALUES = ["everyone", "friends", "nobody"] as const;
 /** Profile bio/status/avatar visibility: everyone, friends only, or hidden. */
 export const PROFILE_VISIBILITY_VALUES = ["everyone", "friends", "nobody"] as const;
