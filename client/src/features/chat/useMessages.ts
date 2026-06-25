@@ -285,19 +285,41 @@ export function useUploadMediaMutation(chatId: string | null) {
   });
 }
 
+/** Optimistically mark peer messages as read in the thread cache (prevents mark-read effect loops). */
+function patchMessagesReadByUser(
+  queryClient: ReturnType<typeof useQueryClient>,
+  chatId: string,
+  userId: string,
+): void {
+  queryClient.setQueryData<MessageDTO[]>(chatKeys.messages(chatId), (old) => {
+    if (!old?.length) return old;
+    let changed = false;
+    const next = old.map((m) => {
+      if (m.sender === userId || m.readBy.includes(userId)) return m;
+      changed = true;
+      return { ...m, readBy: [...m.readBy, userId], status: "read" as const };
+    });
+    return changed ? next : old;
+  });
+}
+
 export function useMarkReadMutation(chatId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      if (!chatId) return;
+      if (!chatId) return [] as MessageDTO[];
       const socket = getSocket();
       if (socket?.connected) {
         socket.emit(SOCKET_EVENTS.MESSAGE_READ, { chatId });
       }
-      await api.patch(`/chat/${chatId}/read`);
+      const res = await api.patch<{ ok: true; messages: MessageDTO[] }>(`/chat/${chatId}/read`);
+      return res.data.messages ?? [];
     },
     onMutate: () => {
       if (!chatId) return;
+      const userId = useAuthStore.getState().user?._id;
+      if (userId) patchMessagesReadByUser(queryClient, chatId, userId);
+
       queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
         if (!old) return old;
         const next = old.map((c) => (c._id === chatId && c.unreadCount ? { ...c, unreadCount: 0 } : c));
@@ -305,8 +327,15 @@ export function useMarkReadMutation(chatId: string | null) {
         return next;
       });
     },
-    onSuccess: () => {
+    onSuccess: (messages) => {
       if (!chatId) return;
+      if (messages.length > 0) {
+        queryClient.setQueryData<MessageDTO[]>(chatKeys.messages(chatId), (old) => {
+          if (!old) return messages;
+          const byId = new Map(messages.map((m) => [m._id, m]));
+          return old.map((m) => byId.get(m._id) ?? m);
+        });
+      }
       queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
         if (!old) return old;
         const next = old.map((c) => (c._id === chatId ? { ...c, unreadCount: 0 } : c));

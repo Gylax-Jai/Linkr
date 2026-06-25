@@ -978,14 +978,14 @@ function MessageList({
   }, [activeMatchId]);
 
   useEffect(() => {
-    if (!messages.length || !userId) return;
+    if (!messages.length || !userId || markRead.isPending) return;
     const hasUnread = isGroup
       ? messages.some((m) => m.sender !== userId && !m.readBy.includes(userId))
       : participant
         ? messages.some((m) => m.sender === participant._id && !m.readBy.includes(userId))
         : false;
     if (hasUnread) markRead.mutate();
-  }, [messages, participant?._id, userId, isGroup, markRead]);
+  }, [messages, participant?._id, userId, isGroup, markRead.isPending, markRead.mutate]);
 
   const grouped = messages.map((m) => ({
     ...m,
