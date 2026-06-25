@@ -25,6 +25,9 @@ import {
   PhoneIncoming,
   PhoneOutgoing,
   Quote,
+  Search,
+  ChevronUp,
+  ChevronDown,
   Send,
   Share2,
   ShieldOff,
@@ -58,6 +61,7 @@ import {
   useReactMessageMutation,
   useSendMessageMutation,
   useUploadMediaMutation,
+  useChatInMessageSearch,
 } from "@/features/chat";
 import {
   ReportUserModal,
@@ -80,6 +84,7 @@ import { canShowProfileDetails, getPresenceLabel, showOnlineDot } from "@/lib/ut
 import { shareContact } from "@/lib/utils/share";
 import { getApiErrorCode } from "@/lib/utils/apiError";
 import { cn } from "@/lib/utils";
+import { highlightText } from "@/lib/utils/highlightText";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -128,13 +133,56 @@ export function ConversationPane() {
   // you scroll up through history, and returns when you're back at the bottom.
   const [statusVisible, setStatusVisible] = useState(true);
   const scrollChatToBottomRef = useRef<() => void>(() => {});
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matchIndex, setMatchIndex] = useState(0);
+  const { data: searchMessages = [] } = useMessages(activeChatId);
+  const { matchIds } = useChatInMessageSearch(activeChatId, searchMessages, searchQuery, searchOpen);
+  const activeMatchId = matchIds[matchIndex] ?? null;
 
   // Reset per-chat UI (reply/edit target + status strip) whenever the active chat changes.
   useEffect(() => {
     setTarget({ replyTo: null, editing: null });
     setForwardTarget(null);
     setStatusVisible(true);
+    setSearchOpen(false);
+    setSearchQuery("");
+    setMatchIndex(0);
   }, [activeChatId]);
+
+  useEffect(() => {
+    setMatchIndex(0);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (matchIds.length === 0) {
+      setMatchIndex(0);
+      return;
+    }
+    if (matchIndex >= matchIds.length) setMatchIndex(matchIds.length - 1);
+  }, [matchIds.length, matchIndex]);
+
+  const openSearch = () => {
+    setSearchOpen(true);
+    setSearchQuery("");
+    setMatchIndex(0);
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setMatchIndex(0);
+  };
+
+  const goNextMatch = () => {
+    if (!matchIds.length) return;
+    setMatchIndex((i) => (i + 1) % matchIds.length);
+  };
+
+  const goPrevMatch = () => {
+    if (!matchIds.length) return;
+    setMatchIndex((i) => (i - 1 + matchIds.length) % matchIds.length);
+  };
 
   if (!activeChatId) {
     return <EmptyState />;
@@ -159,6 +207,15 @@ export function ConversationPane() {
         onBack={() => setActiveChat(null)}
         status={status}
         statusVisible={statusVisible}
+        searchOpen={searchOpen}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        matchCount={matchIds.length}
+        matchIndex={matchIndex}
+        onNextMatch={goNextMatch}
+        onPrevMatch={goPrevMatch}
+        onOpenSearch={openSearch}
+        onCloseSearch={closeSearch}
       />
       <MessageList
         chatId={activeChatId}
@@ -171,6 +228,8 @@ export function ConversationPane() {
         onRegisterScrollToBottom={(fn) => {
           scrollChatToBottomRef.current = fn;
         }}
+        searchQuery={searchOpen ? searchQuery : ""}
+        activeMatchId={searchOpen ? activeMatchId : null}
       />
       <Composer
         chatId={activeChatId}
@@ -250,6 +309,15 @@ function ConversationHeader({
   onBack,
   status,
   statusVisible,
+  searchOpen,
+  searchQuery,
+  onSearchQueryChange,
+  matchCount,
+  matchIndex,
+  onNextMatch,
+  onPrevMatch,
+  onOpenSearch,
+  onCloseSearch,
 }: {
   chat: ChatListItem;
   onBack: () => void;
@@ -257,6 +325,15 @@ function ConversationHeader({
   status: string;
   /** Scroll-linked visibility for the mobile status bubble (Sprint F/G). */
   statusVisible: boolean;
+  searchOpen: boolean;
+  searchQuery: string;
+  onSearchQueryChange: (query: string) => void;
+  matchCount: number;
+  matchIndex: number;
+  onNextMatch: () => void;
+  onPrevMatch: () => void;
+  onOpenSearch: () => void;
+  onCloseSearch: () => void;
 }) {
   const typingByChat = useUIStore((s) => s.typingByChat);
   const onlineOverrides = useUIStore((s) => s.onlineOverrides);
@@ -316,6 +393,18 @@ function ConversationHeader({
         "sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 overflow-visible border-b border-border bg-surface/80 px-3 shadow-soft backdrop-blur-sm safe-top sm:gap-3 sm:px-4",
       )}
     >
+      {searchOpen ? (
+        <ChatHeaderSearchBar
+          query={searchQuery}
+          onQueryChange={onSearchQueryChange}
+          matchCount={matchCount}
+          matchIndex={matchIndex}
+          onNext={onNextMatch}
+          onPrev={onPrevMatch}
+          onClose={onCloseSearch}
+        />
+      ) : (
+        <>
       <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onBack} aria-label="Back to chat list">
         <ArrowLeft className="h-4 w-4" />
       </Button>
@@ -373,7 +462,13 @@ function ConversationHeader({
           disabled={!canCall}
           onClick={canCall ? startVideoCall : undefined}
         />
-        <HeaderMenu chat={chat} onViewInfo={toggleDetails} />
+        <CallButton
+          label="Search in chat"
+          icon={<Search className="h-4 w-4" />}
+          onClick={onOpenSearch}
+          className="hidden sm:grid"
+        />
+        <HeaderMenu chat={chat} onViewInfo={toggleDetails} onOpenSearch={onOpenSearch} />
         <button
           type="button"
           onClick={onBack}
@@ -384,7 +479,104 @@ function ConversationHeader({
           <X className="h-4 w-4" />
         </button>
       </div>
+        </>
+      )}
     </div>
+  );
+}
+
+/**
+ * Compact in-header search bar (Phase 6C): filters the open chat client-side over decrypted text.
+ * Desktop opens via the header Search icon; mobile via the ⋮ menu.
+ */
+function ChatHeaderSearchBar({
+  query,
+  onQueryChange,
+  matchCount,
+  matchIndex,
+  onNext,
+  onPrev,
+  onClose,
+}: {
+  query: string;
+  onQueryChange: (query: string) => void;
+  matchCount: number;
+  matchIndex: number;
+  onNext: () => void;
+  onPrev: () => void;
+  onClose: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  const counter =
+    query.trim() && matchCount > 0
+      ? `${matchIndex + 1}/${matchCount}`
+      : query.trim()
+        ? "0"
+        : "";
+
+  return (
+    <>
+      <Search className="h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />
+      <div className="flex min-w-0 flex-1 items-center gap-1 rounded-xl border border-border bg-surface-2 px-2 py-1">
+        <input
+          ref={inputRef}
+          type="search"
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (e.shiftKey) onPrev();
+              else onNext();
+            }
+            if (e.key === "Escape") onClose();
+          }}
+          placeholder="Search in chat…"
+          aria-label="Search in chat"
+          className="min-w-0 flex-1 bg-transparent text-sm text-text placeholder:text-text-muted focus:outline-none"
+        />
+        {counter ? (
+          <span className="shrink-0 tabular-nums text-xs text-text-muted" aria-live="polite">
+            {counter}
+          </span>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={onPrev}
+        disabled={!matchCount}
+        aria-label="Previous match"
+        title="Previous match"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-40 sm:h-9 sm:w-9"
+      >
+        <ChevronUp className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onNext}
+        disabled={!matchCount}
+        aria-label="Next match"
+        title="Next match"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-40 sm:h-9 sm:w-9"
+      >
+        <ChevronDown className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close search"
+        title="Close search"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-text sm:h-9 sm:w-9"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </>
   );
 }
 
@@ -445,7 +637,15 @@ function StatusChip({ status }: { status: string }) {
  * Overflow (⋮) menu in the chat header (Sprint C.1): contact info, mute (soon), block/unblock,
  * unfriend, and share (soon). Closes on outside-click / Escape / action.
  */
-function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () => void }) {
+function HeaderMenu({
+  chat,
+  onViewInfo,
+  onOpenSearch,
+}: {
+  chat: ChatListItem;
+  onViewInfo: () => void;
+  onOpenSearch: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const block = useBlockUserMutation();
@@ -506,6 +706,13 @@ function HeaderMenu({ chat, onViewInfo }: { chat: ChatListItem; onViewInfo: () =
           role="menu"
           className="absolute right-0 top-full z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-elevated"
         >
+          <div className="sm:hidden">
+            <HeaderMenuItem
+              icon={<Search className="h-4 w-4" />}
+              label="Search"
+              onClick={() => run(onOpenSearch)}
+            />
+          </div>
           <HeaderMenuItem icon={<Info className="h-4 w-4" />} label="Contact info" onClick={() => run(onViewInfo)} />
           <HeaderMenuItem
             icon={chat.muted ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
@@ -650,6 +857,8 @@ function MessageList({
   onForward,
   onAtBottomChange,
   onRegisterScrollToBottom,
+  searchQuery = "",
+  activeMatchId = null,
 }: {
   chatId: string;
   isSelf?: boolean;
@@ -661,6 +870,10 @@ function MessageList({
   onAtBottomChange?: (atBottom: boolean) => void;
   /** Lets the composer scroll the thread when the mobile keyboard opens (WhatsApp-style). */
   onRegisterScrollToBottom?: (fn: () => void) => void;
+  /** Non-empty when in-chat search is active — highlights matches in bubbles. */
+  searchQuery?: string;
+  /** The message id of the currently focused search match (scroll + strong highlight). */
+  activeMatchId?: string | null;
 }) {
   const userId = useAuthStore((s) => s.user?._id);
   const isTyping = useUIStore((s) => s.typingByChat[chatId]);
@@ -695,6 +908,12 @@ function MessageList({
   useEffect(() => {
     if (isTyping) scrollToBottom("smooth");
   }, [isTyping, scrollToBottom]);
+
+  useEffect(() => {
+    if (!activeMatchId) return;
+    const el = scrollRef.current?.querySelector(`[data-message-id="${activeMatchId}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeMatchId]);
 
   useEffect(() => {
     if (!messages.length || !userId) return;
@@ -734,7 +953,7 @@ function MessageList({
         }
 
         return (
-          <div key={message._id}>
+          <div key={message._id} data-message-id={message._id}>
             {showDay ? <DateSeparator label={day} /> : null}
             <MessageBubble
               message={message}
@@ -743,6 +962,8 @@ function MessageList({
               showTimestamp={showTimestamp}
               userId={userId}
               participantName={participant.displayName}
+              searchQuery={searchQuery}
+              isActiveSearchMatch={message._id === activeMatchId}
               onReply={() => onReply(message)}
               onEdit={() => onEdit(message)}
               onForward={() => onForward(message)}
@@ -1053,6 +1274,8 @@ function MessageBubble({
   showTimestamp,
   userId,
   participantName,
+  searchQuery = "",
+  isActiveSearchMatch = false,
   onReply,
   onEdit,
   onForward,
@@ -1065,6 +1288,8 @@ function MessageBubble({
   showTimestamp: boolean;
   userId?: string;
   participantName: string;
+  searchQuery?: string;
+  isActiveSearchMatch?: boolean;
   onReply: () => void;
   onEdit: () => void;
   onForward: () => void;
@@ -1085,6 +1310,7 @@ function MessageBubble({
   // both (Sprint 3.2.2).
   const isImage = message.mediaType === "image" && !!message.mediaUrl;
   const canCopy = !!body.text?.trim();
+  const showSearchHighlight = Boolean(searchQuery.trim() && body.text && body.state !== "pending" && body.state !== "failed");
   const handleDownload = () => {
     void downloadMessageMedia(message).catch(() => {});
   };
@@ -1120,6 +1346,7 @@ function MessageBubble({
             mine
               ? cn("bg-gradient-primary text-primary-foreground shadow-soft", bubbleRadiusClasses(position, true))
               : cn("border border-border bg-surface text-text shadow-soft", bubbleRadiusClasses(position, false)),
+            isActiveSearchMatch && "ring-2 ring-primary ring-offset-2 ring-offset-bg",
           )}
         >
           {!deleted && message.forwarded ? (
@@ -1150,6 +1377,10 @@ function MessageBubble({
                   <span className="italic opacity-60">Decrypting…</span>
                 ) : body.state === "failed" ? (
                   <span className="italic opacity-60">🔒 Can’t decrypt on this device</span>
+                ) : showSearchHighlight ? (
+                  <span className="whitespace-pre-wrap break-words">
+                    {highlightText(body.text, searchQuery, isActiveSearchMatch)}
+                  </span>
                 ) : (
                   <span className="whitespace-pre-wrap break-words">{body.text}</span>
                 )
