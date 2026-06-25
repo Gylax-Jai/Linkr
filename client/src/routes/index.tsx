@@ -7,6 +7,7 @@ import { CallProvider } from "@/features/calls";
 import { OnboardingWizard } from "@/features/onboarding";
 import { ProfilePage } from "@/features/profile";
 import { SettingsPage } from "@/features/settings";
+import { SupportPage } from "@/features/support";
 import { E2EEKeyGuard, E2EESecurityPrompt } from "@/features/security";
 import { useAuthStore } from "@/lib/store";
 import { useE2EEInit } from "@/lib/crypto";
@@ -64,6 +65,16 @@ const router = createBrowserRouter([
       <RequireAuth>
         <RequireOnboarded>
           <SettingsPage />
+        </RequireOnboarded>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: PATHS.support,
+    element: (
+      <RequireAuth>
+        <RequireOnboarded>
+          <SupportPage />
         </RequireOnboarded>
       </RequireAuth>
     ),

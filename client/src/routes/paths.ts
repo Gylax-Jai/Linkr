@@ -5,4 +5,5 @@ export const PATHS = {
   onboarding: "/onboarding",
   profile: "/profile",
   settings: "/settings",
+  support: "/support",
 } as const;

@@ -7,6 +7,12 @@ declare let self: ServiceWorkerGlobalScope;
 precacheAndRoute(self.__WB_MANIFEST);
 clientsClaim();
 
+/** Skip OS notifications when the user already has Linkr open and visible. */
+async function shouldShowPushNotification(): Promise<boolean> {
+  const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  return !clients.some((client) => client.visibilityState === "visible");
+}
+
 self.addEventListener("push", (event) => {
   let payload: { title?: string; body?: string; url?: string } = {};
   try {
@@ -14,12 +20,16 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = { body: event.data?.text() ?? "New notification" };
   }
+
   event.waitUntil(
-    self.registration.showNotification(payload.title ?? "Linkr", {
-      body: payload.body ?? "",
-      icon: "/linkr.svg",
-      badge: "/favicon.svg",
-      data: { url: payload.url ?? "/" },
+    shouldShowPushNotification().then((show) => {
+      if (!show) return;
+      return self.registration.showNotification(payload.title ?? "Linkr", {
+        body: payload.body ?? "",
+        icon: "/linkr.svg",
+        badge: "/favicon.svg",
+        data: { url: payload.url ?? "/" },
+      });
     }),
   );
 });

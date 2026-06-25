@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ChevronDown, LogOut, Palette, Settings, User } from "lucide-react";
+import { ChevronDown, LifeBuoy, LogOut, Palette, Settings, User } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/button";
 import { useLogoutMutation } from "@/features/auth";
@@ -119,6 +119,16 @@ export function UserMenu() {
           <ThemeModeToggle />
 
           <div className="my-1 border-t border-border" />
+
+          <Link
+            to={PATHS.support}
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-text transition-colors hover:bg-surface-2"
+          >
+            <LifeBuoy className="h-4 w-4 text-text-muted" />
+            Support
+          </Link>
 
           <Button
             variant="ghost"

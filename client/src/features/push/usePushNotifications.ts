@@ -26,6 +26,18 @@ export function isPushSupported(): boolean {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window;
 }
 
+/** True when this browser has an active push subscription registered with the push manager. */
+export async function hasPushSubscription(): Promise<boolean> {
+  if (!isPushSupported()) return false;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    return subscription !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** Subscribe this browser for background push (Phase 5 / 7B). */
 export async function subscribeToPush(): Promise<NotificationPermission | "unsupported"> {
   if (!isPushSupported()) return "unsupported";
@@ -86,12 +98,28 @@ export function usePushNotifications() {
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
     isPushSupported() ? Notification.permission : "unsupported",
   );
+  const [subscribed, setSubscribed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isPushSupported()) setPermission(Notification.permission);
+  const refresh = useCallback(async () => {
+    if (!isPushSupported()) {
+      setPermission("unsupported");
+      setSubscribed(false);
+      return;
+    }
+    setPermission(Notification.permission);
+    setSubscribed(await hasPushSubscription());
   }, []);
+
+  useEffect(() => {
+    void refresh();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [refresh]);
 
   const enable = useCallback(async () => {
     setBusy(true);
@@ -99,8 +127,14 @@ export function usePushNotifications() {
     try {
       const result = await subscribeToPush();
       setPermission(result);
-      if (result === "denied") setError("Notifications blocked in browser settings");
+      if (result === "denied") {
+        setSubscribed(false);
+        setError("Notifications blocked in browser settings");
+        return;
+      }
+      setSubscribed(true);
     } catch (err) {
+      setSubscribed(await hasPushSubscription());
       setError(err instanceof Error ? err.message : "Could not enable notifications");
     } finally {
       setBusy(false);
@@ -110,23 +144,41 @@ export function usePushNotifications() {
   const disable = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setSubscribed(false);
     try {
       await unsubscribeFromPush();
       setPermission(Notification.permission);
+      setSubscribed(false);
     } catch (err) {
+      setSubscribed(await hasPushSubscription());
       setError(err instanceof Error ? err.message : "Could not disable notifications");
     } finally {
       setBusy(false);
     }
   }, []);
 
+  const toggle = useCallback(async () => {
+    if (busy) return;
+    if (subscribed && permission === "granted") {
+      await disable();
+    } else {
+      await enable();
+    }
+  }, [busy, subscribed, permission, disable, enable]);
+
+  const enabled = permission === "granted" && subscribed;
+  const blocked = permission === "denied";
+
   return {
     supported: isPushSupported(),
     permission,
+    subscribed,
     busy,
     error,
     enable,
     disable,
-    enabled: permission === "granted",
+    toggle,
+    enabled,
+    blocked,
   };
 }
