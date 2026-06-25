@@ -1,4 +1,5 @@
 import { Download, FileText } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { MessageDTO } from "@linkr/shared";
 import { api } from "@/lib/api";
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
@@ -52,8 +53,13 @@ function formatBytes(bytes?: number): string {
 function ImageMessage({ message }: { message: MessageDTO }) {
   const { src, loading, error } = useAuthedObjectUrl(message.mediaUrl);
   const openLightbox = useUIStore((s) => s.openLightbox);
+  const [imgError, setImgError] = useState(false);
 
-  if (error) {
+  useEffect(() => {
+    setImgError(false);
+  }, [message.mediaUrl]);
+
+  if (error || imgError) {
     return <div className="rounded-xl bg-black/10 px-3 py-2 text-xs opacity-80">Image unavailable</div>;
   }
   if (!src || loading) {
@@ -73,6 +79,7 @@ function ImageMessage({ message }: { message: MessageDTO }) {
         alt={message.mediaName ?? "Shared image"}
         className="max-h-72 max-w-full rounded-xl object-cover"
         loading="lazy"
+        onError={() => setImgError(true)}
       />
     </button>
   );

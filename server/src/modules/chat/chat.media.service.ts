@@ -219,7 +219,7 @@ const JPEG_QUALITY = 85;
 
 /**
  * Compress raster images before upload (PNG/JPG/WEBP). GIFs are left as-is to preserve animation.
- * Falls back to the original buffer if sharp is unavailable or processing fails.
+ * Falls back to the original buffer if jimp is unavailable or processing fails.
  */
 async function compressImageBuffer(
   media: ValidatedMedia,
@@ -289,13 +289,15 @@ export async function storeMedia(media: ValidatedMedia, buffer: Buffer): Promise
 
   if (cloudinaryConfig.enabled) {
     ensureCloudinaryConfigured();
+    const isGif = storedMedia.ext === ".gif";
     const result = await new Promise<UploadApiResponse>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         {
           resource_type: "auto",
           folder: "linkr",
           quality: "auto:good",
-          fetch_format: "auto",
+          // fetch_format:auto converts animated GIFs to static WebP/JPEG — skip for GIF uploads.
+          ...(isGif ? {} : { fetch_format: "auto" as const }),
         },
         (error, res) => {
           if (error || !res) reject(error ?? new Error("Cloudinary upload failed"));

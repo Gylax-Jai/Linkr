@@ -26,7 +26,7 @@ import {
   canViewProfileDetails,
   canZoomAvatar,
 } from "../users/privacy.helpers.js";
-import { LOCAL_MEDIA_PREFIX } from "./chat.media.service.js";
+import { LOCAL_MEDIA_PREFIX, deleteStoredMedia } from "./chat.media.service.js";
 
 type ChatDocument = HydratedDocument<ChatDoc>;
 type MessageDocument = HydratedDocument<MessageDoc>;
@@ -789,6 +789,16 @@ export async function deleteMessage(
   if (scope === "everyone") {
     if (String(message.sender) !== userId) {
       throw ApiError.forbidden("NOT_SENDER", "You can only delete your own messages for everyone");
+    }
+    const mediaUrl = typeof message.mediaUrl === "string" ? message.mediaUrl : "";
+    const mediaCloudId = typeof message.mediaCloudId === "string" ? message.mediaCloudId : undefined;
+    if (mediaUrl) {
+      await deleteStoredMedia(mediaUrl, mediaCloudId);
+      message.set("mediaUrl", undefined);
+      message.set("mediaCloudId", undefined);
+      message.set("mediaName", undefined);
+      message.set("mediaSize", undefined);
+      message.set("mediaMime", undefined);
     }
     message.deletedForEveryone = true;
     message.set("content", undefined);

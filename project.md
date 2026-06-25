@@ -3,7 +3,7 @@
 > **Living document:** everything built so far, how to run it, and what's next.  
 > For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
 
-**Last updated:** June 25, 2026 — **Sprint 6E (group admin & management)**: leave group (sole admin picks successor), admin **rename**, **group avatar** upload, **add/remove members**, **promote/demote admin**; realtime `group:updated` / `group:deleted` socket events. Earlier — **Phase 6A–6D group chat v1** (create group, plaintext messaging, member list, honest **Not E2EE** badge, no group voice/video). Earlier — **Phase 6C (in-chat search, v1)**… **`user:typing-stop`** clears typing instantly on send/idle; typing pill moved **inside the scroll area** (below timestamps); **mobile keyboard scroll-to-bottom** on composer focus; tighter composer (90% width, aligned icons/text); self chat icon → **NotepadText**. Earlier — **Sprint 3.2.2 (call fix + chat polish)**: fixes the **~3-minute auto hangup** (calls were force-ended by a 3-min "safety TTL" that started at dial — now **30s ring cap** for unanswered + **2h cap** for connected calls, started on accept); adds **rear/front camera flip** in video calls (mobile, `replaceTrack`); fixes the **typing flicker** (typing↔online) and moves the typing indicator to the **bottom of the chat** (WhatsApp-style); the image **⋮ menu shows Download** (not "Copy text") and tapping an image opens it **inside LINKr's lightbox** instead of a new browser tab. **Production infra:** **Cloudinary** media + avatars, **Redis** for multi-instance Socket.IO, **Vercel + Render + Atlas** deploy — all live.
+**Last updated:** June 25, 2026 — **Sprint 6F (group polish + media lifecycle)**: **message permission** (admin: everyone vs admin-only send); **lightweight group list** (slim `GET /chat`, lazy member roster); **mark-read infinite loop fix** (React #185); **LeaveGroupModal** portal fix; **delete for everyone** now **permanently removes** attachments from Cloudinary/local disk; **image compression** (jimp, max 2048px) before Cloudinary upload; **GIF send preserved** (no `fetch_format:auto` on GIFs); **30-day media purge** background job; **broken image** fallback in chat. Earlier — **Sprint 6E (group admin & management)**… Earlier — **Phase 6A–6D group chat v1** (plaintext messaging, honest **Not E2EE** badge). **Out of scope permanently:** **group voice/video calls** (1:1 calls only). Earlier — **Phase 6C (in-chat search, v1)**…
 
 Earlier (Sprint C.2.2 — Contact info button now toggles the profile pane open/closed; self chat renamed "Self chat" everywhere and now shows your own custom-status chip)
 
@@ -62,6 +62,10 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | In-chat search (loaded messages, client-side decrypt) | ✅ Done v1 (Phase 6C) |
 | Group chats (create, message, member list) | ✅ Done v1 (Phase 6A–6D) |
 | Group admin (leave, rename, avatar, members, promote/demote) | ✅ Done (Sprint 6E) |
+| Group message permission (everyone / admin-only) | ✅ Done (Sprint 6F) |
+| Lightweight group list + lazy members API | ✅ Done (Sprint 6F) |
+| Media compression before Cloudinary + 30-day purge job | ✅ Done (Sprint 6F) |
+| Delete-for-everyone removes Cloudinary/local attachment | ✅ Done (Sprint 6F) |
 | Cloudinary media + avatar storage | ✅ Done (production) |
 | Redis (multi-instance Socket.IO adapter) | ✅ Done (production) |
 | Deploy (Vercel client + Render server + Atlas) | ✅ Done |
@@ -70,9 +74,12 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Forward message (friends only) + share contact | ✅ Done (Phase 4) |
 | Report user | ✅ Done (Phase 4) |
 | Account deletion (15-day soft + immediate purge) | ✅ Done (Phase 4) |
-| Screen share, group calls | ❌ Phase 3.3 / Phase 6 (deferred — SFU TBD) |
+| Screen share | ❌ Phase 3.3 (deferred) |
+| **Group voice/video calls** | ❌ **Out of scope** (not planned — 1:1 calls only) |
 
-**You are here:** **Phase 6 group chats v1 + Sprint 6E admin controls** are shipped (plaintext at rest, honest badge, no group calls). **Next:** full-history in-chat search pagination, optional group settings (admin-only messaging, voice/video toggles), then group calls (SFU TBD). Production runs on **Vercel + Render + Atlas** with **Cloudinary** and **Redis**.
+**You are here:** **Phase 6 group chats + Sprint 6E/6F** are shipped. **Next:** full-history in-chat search pagination, web push (Phase 5), screen share (3.3). Production runs on **Vercel + Render + Atlas** with **Cloudinary** and **Redis**.
+
+> **Product decision (permanent):** Group **voice and video calls will not be built** — not in Phase 6, not deferred to a later SFU sprint. Realtime calling stays **1:1 only** between accepted friends.
 
 ---
 
@@ -131,7 +138,7 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 ### Sprint 4 — Message actions + pin + dev bot + UX
 - **Reply:** quote a message; preview bar in composer; reply preview rendered inside the bubble.
 - **Edit:** sender-only in-place edit; `(edited)` marker; live broadcast via `message:edit`.
-- **Delete:** *for me* (hidden only for you) and *for everyone* (sender-only; body + reactions cleared, shown as “This message was deleted”); broadcast via `message:delete`.
+- **Delete:** *for me* (hidden only for you) and *for everyone* (sender-only; body + reactions cleared, attachment **permanently deleted** from Cloudinary/local storage, shown as “This message was deleted”); broadcast via `message:delete`.
 - **React:** one emoji per user (toggle), quick-reaction popover + reaction pills; broadcast via `message:react`.
 - **Pin chats:** per-user pin (`PATCH /api/chat/:chatId/pin`), PINNED section + pin indicator, optimistic toggle from the sidebar ··· menu.
 - **Dev test bot (`@linkr_bot`):** dev-only auto-replying account so chat is testable without a second Google login — auto-accepts friend requests and auto-replies (with a typing indicator). Gated off in production and force-disabled before E2EE.
@@ -584,10 +591,10 @@ After deploying (Vercel client + Render server) and testing with a friend, a bat
 - **Sprint H — Full-screen mobile chat + overlay status** ✅ **Done** — the **Linkr top bar hides on phones when a chat is open** (app-like full-screen; returns on the list, unchanged on desktop); the status bubble is now a true **overlay** (fixed `h-16` header + `overflow-visible`), removing the empty `pb-12` strip that made it look like a message.
 - **Sprint I — Mobile soft-keyboard fix** ✅ **Done** — focusing the composer no longer scrolls the header off-screen: `interactive-widget=resizes-content` + a `useVisualViewport` hook driving `--app-vh` on `#root`, plus a `sticky` chat header and `min-h-0 overflow-hidden` flex chain so only the message list shrinks above the keyboard.
 - **Sprint J — Notification reliability + manage** ✅ **Done** — **deduped** friend-request notifications (one row per `friendshipId`), **delete** stale rows on accept/reject/cancel, **instant optimistic** Accept/Reject/Block that purges duplicate rows + shows inline errors, plus **Clear all** and a **per-row delete icon** (`DELETE /api/notifications` + `DELETE /:id`, both optimistic).
-- **Phase 3 — Realtime calling** — ✅ **voice (3.1) + video (3.2) + Metered TURN (3.2.1) + duration-cap fix & camera flip (3.2.2) + mobile chat polish (3.2.3)**; remaining: **screen share (3.3)**, group calls (Phase 6).
+- **Phase 3 — Realtime calling** — ✅ **voice (3.1) + video (3.2)** + polish through **3.2.3**; remaining: **screen share (3.3)** only. **Group calls: out of scope permanently.**
 - **Phase 4 — Chat UX & account controls** ✅ **Done** — mute, archive, forward, report, privacy UI, share contact, account deletion.
 - **Phase 5 — Notifications++** — web push (Service Worker + VAPID) for background alerts (generic content to preserve E2EE).
-- **Phase 6 — Groups & discovery** — **in-chat search v1 ✅**; **next: group chats + admins** (plaintext at rest for v1, honest badge); group calls (voice up to ~15 → likely SFU); full-history search pagination; later stories / disappearing messages / channels / polls.
+- **Phase 6 — Groups** — **in-chat search v1 ✅**; **group chats + admin ✅ (6A–6E)**; **Sprint 6F ✅** (message permission, lightweight list, media lifecycle). **Group voice/video: out of scope.** Next: full-history search pagination; later stories / disappearing messages / channels / polls.
 - **Phase 7 — AI & mobile** — on-device/opt-in AI assistant, voice transcription, spam detection, React Native app.
 - **Phase 8 — Production & scale** ✅ **Done (core)** — MSG91 OTP, **Vercel + Render + Atlas** deploy, **Cloudinary** media, **Redis** socket adapter, HTTPS/WSS. Optional later: monitoring dashboards, formal CI/CD gates. **Contingency:** MSG91-off + phone-confirm onboarding; backup-code-only recovery; self-hosted coturn TURN (see *Infrastructure contingency* below).
 - **Future / backlog (not scheduled)** — key fingerprint verification UI; QR device linking (needs native app); E2EE media; on-device AI; voice transcription; spam detection; React Native app; **infrastructure contingency** (MSG91 / TURN — see below).
@@ -957,7 +964,7 @@ pnpm build        # production build
 | Item | Notes |
 |------|--------|
 | **E2EE** | ✅ **Text is end-to-end encrypted** (Phase 2) — libsodium sealed boxes, server stores ciphertext only, dynamic "End-to-end encrypted" badge. **Media is still in-transit only** (text-only scope); the **dev bot stays plaintext by design** (no published key → automatic fallback). ✅ **Multi-device (Sprint D)** — a recovery-passphrase-encrypted key backup lets a new device restore your key and read history; **E2EE media** is the remaining gap |
-| **Calls** | ✅ **Voice (3.1) + video (3.2) live** in the header for accepted friends (WebRTC, 720p video, camera toggle + local PiP). Remaining: screen share (3.3), **group calls (Phase 6 — SFU TBD for 15-way voice)**, Metered TURN live in production |
+| **Calls** | ✅ **Voice + video (1:1 only)** for accepted friends (WebRTC). Remaining: screen share (3.3). **Group calls: out of scope permanently.** |
 | **Details pane Mute / Share** | ✅ **Wired** (Phase 4) — mute/archive in header ⋮ + details footer; **Share contact** in details pane via `shareContact` |
 | **In-chat search** | ✅ **v1 (Phase 6C)** — client-side over **loaded** messages (~50 recent); E2EE bodies decrypted on device first. ⏭️ **Full history** (paginate all pages when search opens) |
 | **Add friend after unblock/unfriend** | ✅ **Closed** (Sprint 5.7) — reachable from the chat's ⋯ menu, the details pane, and the composer; the composer now gates on **not-friends**, not only blocked |
@@ -988,13 +995,13 @@ pnpm build        # production build
 - ✅ Client-side decrypt-then-search (E2EE-safe)
 - ⏭️ **Full history:** paginate `GET /api/chat/:chatId/messages?before=&limit=100` until empty when search opens
 
-### Phase 6 — Group chats ✅ v1 Done (6A–6E)
+### Phase 6 — Group chats ✅ Done (6A–6F)
 - ✅ Create group from **sidebar icon** → multi-select friends → name → create (max 16 members)
 - ✅ Group messaging (plaintext at rest), member list, **Not E2EE** badge
 - ✅ **Sprint 6E:** leave group (sole admin picks successor; last member deletes group), admin **rename**, **group avatar**, **add/remove members**, **promote/demote admin**
+- ✅ **Sprint 6F:** **message permission** (⋮ → Everyone / Admin only); **lightweight group list** + `GET /group/:chatId/members`; **mark-read loop fix**; LeaveGroupModal **portal** fix; **delete-for-everyone** purges Cloudinary/local attachment; **jimp** image compression before upload; **GIF** uploads preserved (animated); **30-day media purge** job; broken-image **"Image unavailable"** UI
 - ✅ Realtime `group:updated` / `group:deleted` keeps all members in sync
-- ❌ **Group voice/video calls** deferred (SFU evaluation later)
-- ⏭️ Optional: admin-only messaging toggle, voice/video off toggles per group
+- ❌ **Group voice/video calls — out of scope permanently** (1:1 calls only; see product decision above)
 
 ### Future / backlog (not scheduled)
 - Key fingerprint verification UI (optional)
@@ -1035,6 +1042,33 @@ pnpm build        # production build
 3. **Escape** or **✕** closes search and restores the normal header.
 4. **E2EE chat:** search waits for decrypt (same as bubble render) — if a message shows "Decrypting…" in the thread, it won't match until decrypted.
 5. **Scope:** only the **~50 most recently loaded** messages are searched today; older history (e.g. January) requires the planned full-pagination follow-up.
+
+---
+
+## How to test Sprint 6F — Message permission, media lifecycle, GIFs
+
+### Message permission (admin)
+1. Open a group as **admin** → header **⋮ → Message permission**.
+2. Choose **Admin only** → non-admins see "Only admins can send messages"; admins can still send.
+3. Switch back to **Everyone** → all members can send again.
+
+### Delete for everyone + Cloudinary
+1. Send an **image** in a chat.
+2. **Delete for everyone** on that message → attachment disappears for both sides; file is **removed from Cloudinary** (or local disk in dev).
+3. The message row stays as "This message was deleted" — storage is gone, not just hidden.
+
+### GIF send
+1. Paperclip → pick a **`.gif`** (≤ 10 MB).
+2. GIF should upload and **stay animated** in the bubble (Cloudinary must not convert to static WebP).
+
+### Media compression
+1. Upload a large JPG/PNG (e.g. 4000×3000, several MB).
+2. Check `mediaSize` on the message in Mongo or Cloudinary dashboard — should be smaller than the original.
+
+### 30-day purge (manual test)
+1. Upload a test image; in Mongo set that message's `createdAt` to **31+ days ago**.
+2. Restart server; wait **~90 seconds** for the purge job.
+3. Message keeps its row but **media fields are cleared**; file deleted from storage.
 
 ---
 
@@ -1080,6 +1114,6 @@ LINKr/
 
 If context fills up, start a fresh chat with:
 
-> Continue Linkr. Read `project.md` and `projectlinkr.md`. Phase 6C in-chat search v1 is done. Next: Phase 6 group chats (plaintext v1, admin controls). Group calls deferred.
+> Continue Linkr. Read `project.md` and `projectlinkr.md`. Phase 6 group chats + Sprint 6E/6F are done. **Group voice/video calls are out of scope permanently.** Next: full-history in-chat search pagination, web push, screen share (3.3).
 
 Pin or keep `projectlinkr.md` + this `project.md` in the repo root so any new session has full context.
