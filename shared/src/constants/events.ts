@@ -30,6 +30,8 @@ export const SOCKET_EVENTS = {
   MESSAGE_PIN: "message:pin",
   MESSAGE_DELETE: "message:delete",
   MESSAGE_REACT: "message:react",
+  /** Group poll vote changed — carries the updated message (Phase 7A). */
+  MESSAGE_POLL_VOTE: "message:poll-vote",
   MESSAGE_EDIT: "message:edit",
 
   // Calls (Phase 3). Signaling only — media is peer-to-peer (WebRTC). Every event is

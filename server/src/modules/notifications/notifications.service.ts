@@ -6,6 +6,7 @@ import { getSocketServer } from "../../sockets/io.js";
 import { isMongoConnected } from "../../config/db.js";
 import { logger } from "../../utils/logger.js";
 import { resolveAvatarUrl } from "../users/avatar.helpers.js";
+import { pushPayloadForNotification, sendPushToUser } from "../push/push.service.js";
 
 /**
  * In-app notifications (Sprint 5). Persists per-recipient notifications and pushes them live
@@ -89,6 +90,8 @@ export async function createNotification(params: CreateNotificationParams): Prom
         io?.to(`user:${userId}`).emit(SOCKET_EVENTS.NOTIFICATION_NEW, {
           notification: toNotificationDTO(existing),
         });
+        const pushPayload = pushPayloadForNotification(type, messagePreview, chatId);
+        if (pushPayload) void sendPushToUser(userId, pushPayload);
         return;
       }
     }
@@ -108,6 +111,11 @@ export async function createNotification(params: CreateNotificationParams): Prom
     io?.to(`user:${userId}`).emit(SOCKET_EVENTS.NOTIFICATION_NEW, {
       notification: toNotificationDTO(doc),
     });
+
+    const pushPayload = pushPayloadForNotification(type, messagePreview, chatId);
+    if (pushPayload) {
+      void sendPushToUser(userId, pushPayload);
+    }
   } catch (err) {
     logger.warn("Failed to create notification", {
       type,

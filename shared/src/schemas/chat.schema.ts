@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { GROUP_MESSAGE_PERMISSION_VALUES, MEDIA_CAPTION_MAX } from "../constants/limits.js";
+import {
+  GROUP_MESSAGE_PERMISSION_VALUES,
+  MEDIA_CAPTION_MAX,
+  POLL_MAX_OPTIONS,
+  POLL_MIN_OPTIONS,
+  POLL_OPTION_TEXT_MAX,
+  POLL_QUESTION_MAX,
+} from "../constants/limits.js";
 
 export const createGroupSchema = z.object({
   /** Display name for the group (Phase 6). */
@@ -128,6 +135,20 @@ export const uploadMediaBodySchema = z.object({
   caption: z.string().trim().max(MEDIA_CAPTION_MAX).optional(),
 });
 
+/** POST /api/chat/:chatId/poll — create a group poll (Phase 7A). */
+export const createPollSchema = z.object({
+  question: z.string().trim().min(1).max(POLL_QUESTION_MAX),
+  options: z
+    .array(z.string().trim().min(1).max(POLL_OPTION_TEXT_MAX))
+    .min(POLL_MIN_OPTIONS)
+    .max(POLL_MAX_OPTIONS),
+});
+
+/** POST /api/chat/messages/:messageId/vote — vote on a poll option (toggle). */
+export const votePollSchema = z.object({
+  optionId: z.string().trim().min(1),
+});
+
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;
 export type UpdateGroupInput = z.infer<typeof updateGroupSchema>;
 export type UpdateGroupPermissionsInput = z.infer<typeof updateGroupPermissionsSchema>;
@@ -143,3 +164,5 @@ export type MuteChatInput = z.infer<typeof muteChatSchema>;
 export type ArchiveChatInput = z.infer<typeof archiveChatSchema>;
 export type ForwardMessageInput = z.infer<typeof forwardMessageSchema>;
 export type UploadMediaInput = z.infer<typeof uploadMediaBodySchema>;
+export type CreatePollInput = z.infer<typeof createPollSchema>;
+export type VotePollInput = z.infer<typeof votePollSchema>;

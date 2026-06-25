@@ -8,4 +8,5 @@ export * from "./message.js";
 export * from "./notification.js";
 export * from "./keys.js";
 export * from "./call.js";
+export * from "./poll.js";
 export * from "./otp.js";

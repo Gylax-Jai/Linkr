@@ -15,6 +15,8 @@ export {
   useEditMessageMutation,
   useDeleteMessageMutation,
   useReactMessageMutation,
+  useCreatePollMutation,
+  useVotePollMutation,
   useForwardMessageMutation,
   useUploadMediaMutation,
   useMarkReadMutation,

@@ -3,6 +3,7 @@ import type {
   ArchiveChatInput,
   CreateChatInput,
   CreateGroupInput,
+  CreatePollInput,
   DeleteMessageInput,
   EditMessageInput,
   ForwardMessageInput,
@@ -11,6 +12,7 @@ import type {
   ReactMessageInput,
   SendMessageInput,
   UploadMediaInput,
+  VotePollInput,
 } from "@linkr/shared";
 import { SOCKET_EVENTS } from "@linkr/shared";
 import { ApiError } from "../../utils/ApiError.js";
@@ -18,6 +20,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { getSocketServer } from "../../sockets/io.js";
 import {
   createGroup,
+  createPoll,
   deleteChatForUser,
   deleteMessage,
   editMessage,
@@ -34,6 +37,7 @@ import {
   setChatMuted,
   setChatPinned,
   emitToChatMembers,
+  votePoll,
 } from "./chat.service.js";
 import { resolveLocalMediaPath, storeMedia, validateUpload } from "./chat.media.service.js";
 
@@ -173,6 +177,24 @@ export const reactMessage = asyncHandler(async (req, res) => {
   if (!messageId) throw ApiError.badRequest("Missing messageId");
   const { emoji } = req.body as ReactMessageInput;
   const message = await reactToMessage(messageId, requireUserId(req), emoji);
+  res.status(200).json({ message });
+});
+
+/** POST /api/chat/:chatId/poll — create a group poll (Phase 7A). */
+export const postPoll = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  if (!chatId) throw ApiError.badRequest("Missing chatId");
+  const { question, options } = req.body as CreatePollInput;
+  const message = await createPoll(chatId, requireUserId(req), { question, options });
+  res.status(201).json({ message });
+});
+
+/** POST /api/chat/messages/:messageId/vote — vote on a poll option. */
+export const votePollMessage = asyncHandler(async (req, res) => {
+  const { messageId } = req.params;
+  if (!messageId) throw ApiError.badRequest("Missing messageId");
+  const { optionId } = req.body as VotePollInput;
+  const message = await votePoll(messageId, requireUserId(req), optionId);
   res.status(200).json({ message });
 });
 

@@ -226,6 +226,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     socket.on(SOCKET_EVENTS.MESSAGE_EDIT, onMessageUpdated);
     socket.on(SOCKET_EVENTS.MESSAGE_DELETE, onMessageUpdated);
     socket.on(SOCKET_EVENTS.MESSAGE_REACT, onMessageUpdated);
+    socket.on(SOCKET_EVENTS.MESSAGE_POLL_VOTE, onMessageUpdated);
     socket.on(SOCKET_EVENTS.USER_ONLINE, onOnline);
     socket.on(SOCKET_EVENTS.USER_OFFLINE, onOffline);
     socket.on(SOCKET_EVENTS.USER_TYPING, onTyping);
@@ -247,6 +248,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       socket.off(SOCKET_EVENTS.MESSAGE_EDIT, onMessageUpdated);
       socket.off(SOCKET_EVENTS.MESSAGE_DELETE, onMessageUpdated);
       socket.off(SOCKET_EVENTS.MESSAGE_REACT, onMessageUpdated);
+      socket.off(SOCKET_EVENTS.MESSAGE_POLL_VOTE, onMessageUpdated);
       socket.off(SOCKET_EVENTS.USER_ONLINE, onOnline);
       socket.off(SOCKET_EVENTS.USER_OFFLINE, onOffline);
       socket.off(SOCKET_EVENTS.USER_TYPING, onTyping);

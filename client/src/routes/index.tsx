@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import { AppShell } from "@/components/layout";
 import { LoginPage } from "@/features/auth";
@@ -9,6 +10,7 @@ import { SettingsPage } from "@/features/settings";
 import { E2EEKeyGuard, E2EESecurityPrompt } from "@/features/security";
 import { useAuthStore } from "@/lib/store";
 import { useE2EEInit } from "@/lib/crypto";
+import { syncPushSubscription } from "@/features/push";
 import { PATHS } from "./paths";
 import { RequireAuth, RequireOnboarded } from "./guards";
 
@@ -21,6 +23,9 @@ function OnboardingGate() {
 function AuthedShell({ children }: { children: React.ReactNode }) {
   // Bootstrap the account E2EE keypair (Phase 2 + Sprint D) once we're in the authenticated app.
   useE2EEInit();
+  useEffect(() => {
+    void syncPushSubscription();
+  }, []);
   return (
     <SocketProvider>
       <CallProvider>

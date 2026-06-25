@@ -1,7 +1,8 @@
 import type { ID, Timestamp } from "./common.js";
 import type { CallLogMeta } from "./call.js";
+import type { PollMeta } from "./poll.js";
 
-export type MessageType = "text" | "image" | "video" | "file" | "voice" | "call";
+export type MessageType = "text" | "image" | "video" | "file" | "voice" | "call" | "poll";
 
 export type MessageStatus = "sent" | "delivered" | "read";
 
@@ -36,6 +37,8 @@ export interface Message {
   replyTo?: ID;
   /** Present only for `type: "call"` rows — the call's media/outcome/duration. */
   call?: CallLogMeta;
+  /** Present only for `type: "poll"` rows — group poll question, options, and votes. */
+  poll?: PollMeta;
   reactions: Reaction[];
   pinned: boolean;
   deletedFor: ID[];

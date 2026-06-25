@@ -4,6 +4,7 @@ import {
   chatIdParamSchema,
   createGroupSchema,
   createChatSchema,
+  createPollSchema,
   deleteMessageSchema,
   editMessageSchema,
   forwardMessageSchema,
@@ -21,6 +22,7 @@ import {
   updateGroupSchema,
   updateGroupPermissionsSchema,
   uploadMediaBodySchema,
+  votePollSchema,
 } from "@linkr/shared";
 import { requireAuth } from "../../middleware/auth.js";
 import { validate } from "../../middleware/validate.js";
@@ -40,8 +42,10 @@ import {
   postForward,
   postMedia,
   postMessage,
+  postPoll,
   reactMessage,
   removeMessage,
+  votePollMessage,
 } from "./chat.controller.js";
 import {
   deleteGroupAdmin,
@@ -160,6 +164,13 @@ chatRouter.post(
   reactMessage,
 );
 chatRouter.post(
+  "/messages/:messageId/vote",
+  requireAuth,
+  validate(messageIdParamSchema, "params"),
+  validate(votePollSchema),
+  votePollMessage,
+);
+chatRouter.post(
   "/messages/:messageId/forward",
   requireAuth,
   validate(messageIdParamSchema, "params"),
@@ -181,6 +192,13 @@ chatRouter.get(
   validate(chatIdParamSchema, "params"),
   validate(listMessagesQuerySchema, "query"),
   getMessages,
+);
+chatRouter.post(
+  "/:chatId/poll",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  validate(createPollSchema),
+  postPoll,
 );
 chatRouter.post(
   "/:chatId/messages",

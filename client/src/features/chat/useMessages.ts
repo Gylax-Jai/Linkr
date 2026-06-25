@@ -261,6 +261,44 @@ export function useReactMessageMutation(chatId: string | null) {
   });
 }
 
+/** Create a group poll (Phase 7A). */
+export function useCreatePollMutation(chatId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { question: string; options: string[] }) => {
+      if (!chatId) throw new Error("No active chat");
+      const res = await api.post<{ message: MessageDTO }>(`/chat/${chatId}/poll`, input);
+      return res.data.message;
+    },
+    onSuccess: (message) => {
+      if (!chatId) return;
+      queryClient.setQueryData<MessageDTO[]>(chatKeys.messages(chatId), (old) =>
+        old ? [...old, message] : [message],
+      );
+      queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
+        if (!old) return old;
+        const next = patchListLastMessage(old, chatId, message);
+        if (next) writeCachedChatList(next);
+        return next ?? old;
+      });
+    },
+  });
+}
+
+/** Vote on a poll option (toggle). */
+export function useVotePollMutation(chatId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ messageId, optionId }: { messageId: string; optionId: string }) => {
+      const res = await api.post<{ message: MessageDTO }>(`/chat/messages/${messageId}/vote`, { optionId });
+      return res.data.message;
+    },
+    onSuccess: (message) => {
+      if (chatId) patchCachedMessage(queryClient, chatId, message);
+    },
+  });
+}
+
 /**
  * Upload an attachment via multipart/form-data (Sprint 5). The server validates + stores the file,
  * creates the message, and broadcasts MESSAGE_NEW to both members — so the socket handler renders

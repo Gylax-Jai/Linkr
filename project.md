@@ -75,9 +75,12 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Report user | ✅ Done (Phase 4) |
 | Account deletion (15-day soft + immediate purge) | ✅ Done (Phase 4) |
 | Screen share | ❌ Phase 3.3 (deferred) |
+| Group polls (create, vote, live results) | ✅ Done (Phase 7A) |
+| PWA installable web app | ✅ Done (Phase 7B) |
+| Web push (background notifications) | ✅ Done (Phase 7C — needs VAPID env) |
 | **Group voice/video calls** | ❌ **Out of scope** (not planned — 1:1 calls only) |
 
-**You are here:** **Phase 6 group chats + Sprint 6E/6F** are shipped. **Next:** full-history in-chat search pagination, web push (Phase 5), screen share (3.3). Production runs on **Vercel + Render + Atlas** with **Cloudinary** and **Redis**.
+**You are here:** **Phase 7A–7C** shipped (polls, PWA, web push). **Next:** full-history in-chat search pagination, screen share (3.3). Longer backlog → **Future goals** (end of this file). Production runs on **Vercel + Render + Atlas** with **Cloudinary** and **Redis**.
 
 > **Product decision (permanent):** Group **voice and video calls will not be built** — not in Phase 6, not deferred to a later SFU sprint. Realtime calling stays **1:1 only** between accepted friends.
 
@@ -593,69 +596,11 @@ After deploying (Vercel client + Render server) and testing with a friend, a bat
 - **Sprint J — Notification reliability + manage** ✅ **Done** — **deduped** friend-request notifications (one row per `friendshipId`), **delete** stale rows on accept/reject/cancel, **instant optimistic** Accept/Reject/Block that purges duplicate rows + shows inline errors, plus **Clear all** and a **per-row delete icon** (`DELETE /api/notifications` + `DELETE /:id`, both optimistic).
 - **Phase 3 — Realtime calling** — ✅ **voice (3.1) + video (3.2)** + polish through **3.2.3**; remaining: **screen share (3.3)** only. **Group calls: out of scope permanently.**
 - **Phase 4 — Chat UX & account controls** ✅ **Done** — mute, archive, forward, report, privacy UI, share contact, account deletion.
-- **Phase 5 — Notifications++** — web push (Service Worker + VAPID) for background alerts (generic content to preserve E2EE).
-- **Phase 6 — Groups** — **in-chat search v1 ✅**; **group chats + admin ✅ (6A–6E)**; **Sprint 6F ✅** (message permission, lightweight list, media lifecycle). **Group voice/video: out of scope.** Next: full-history search pagination; later stories / disappearing messages / channels / polls.
-- **Phase 7 — AI & mobile** — on-device/opt-in AI assistant, voice transcription, spam detection, React Native app.
-- **Phase 8 — Production & scale** ✅ **Done (core)** — MSG91 OTP, **Vercel + Render + Atlas** deploy, **Cloudinary** media, **Redis** socket adapter, HTTPS/WSS. Optional later: monitoring dashboards, formal CI/CD gates. **Contingency:** MSG91-off + phone-confirm onboarding; backup-code-only recovery; self-hosted coturn TURN (see *Infrastructure contingency* below).
-- **Future / backlog (not scheduled)** — key fingerprint verification UI; QR device linking (needs native app); E2EE media; on-device AI; voice transcription; spam detection; React Native app; **infrastructure contingency** (MSG91 / TURN — see below).
-
----
-
-## Infrastructure contingency — if MSG91 or TURN trials fail
-
-> **Not built yet** — documented recovery plan if paid SMS or managed TURN becomes too expensive or unavailable. Code already has hooks for most of this; the items below are the intended behaviour when we flip the switch.
-
-### A. MSG91 SMS OTP — remove paid SMS
-
-**Trigger:** MSG91 trial ends, billing too high, or provider outage.
-
-**Step 1 — disable MSG91 (no code change):**
-- **Server (Render):** unset `MSG91_AUTH_KEY`
-- **Client (Vercel):** unset `VITE_MSG91_WIDGET_ID` and `VITE_MSG91_WIDGET_TOKEN`
-- Redeploy both. Today this falls back to the built-in dev OTP flow (`POST /api/auth/otp/send` + `/verify`), which still expects a 6-digit code — **not** suitable for production without a real SMS sender.
-
-**Step 2 — planned onboarding change (implement when cutting MSG91):**
-- Phone step becomes: **enter number → confirm checkbox** ("This is my number") → save.
-- No OTP, no MSG91 widget, no SMS cost.
-- Server calls `bindVerifiedPhone()` directly after confirm (new route or relaxed verify path).
-- **Tradeoff:** the number is **not cryptographically verified** — we only enforce **one account per number** when a second person tries to claim it. Acceptable if Google login remains the primary identity.
-
-**Step 3 — planned E2EE recovery change (implement when cutting MSG91):**
-
-| Unlock path | Phone step? |
-|-------------|-------------|
-| **Recovery passphrase** | Unchanged — no phone involved today |
-| **Single-use backup codes** | **Skip phone entirely** — user is already signed in (Google) on the new device; enter backup code only |
-
-Today backup-code redemption also requires MSG91 token or dev OTP (`redeemRecoveryCode` in `keys.service.ts`). The contingency plan removes that phone gate — backup codes are high-entropy (~100 bits) and sufficient as a second factor alongside Google auth.
-
-**Code touchpoints when implementing:** `usePhoneVerification` + `OnboardingWizard` PhoneStep; `server/src/modules/auth/otp.service.ts` (`bindVerifiedPhone`); `server/src/modules/keys/keys.service.ts` (`redeemRecoveryCode`); client unlock UI (`E2EEKeyGuard` / `UnlockPanel`).
-
-**Alternative (keep SMS, swap provider):** wire Twilio / AWS SNS / Vonage into existing `sendOtp()` in `otp.service.ts` — UI stays OTP-based, only the sender changes.
-
----
-
-### B. Metered TURN — self-hosted coturn backup
-
-**Trigger:** Metered Open Relay trial ends, quota exceeded, or cross-network calls fail (ring + accept but stuck on **Connecting** — signaling works, ICE relay missing).
-
-**Already built:** two TURN modes in `server/src/config/env.ts` + `calls.service.ts`:
-
-| Mode | Env vars | Status |
-|------|----------|--------|
-| **Managed static** (current) | `TURN_URLS` + `TURN_USERNAME` + `TURN_CREDENTIAL` | Metered dashboard |
-| **Self-hosted coturn** (backup) | `TURN_URLS` + `TURN_SECRET` | HMAC-minted per-user creds; static creds take precedence if both set |
-
-**Migration steps (when Metered ends):**
-1. Provision a small VPS (e.g. Hetzner / DigitalOcean ~$5–10/mo).
-2. Install **coturn** with `use-auth-secret` / TURN REST API; open **UDP/TCP 3478** (and **5349** if using `turns:`).
-3. **Render server env:** set `TURN_URLS=turn:your-host:3478,...` and `TURN_SECRET=<shared-secret>`; **remove** `TURN_USERNAME` and `TURN_CREDENTIAL`.
-4. Redeploy; confirm startup log: `WebRTC TURN enabled (coturn REST credential mint)`.
-5. Test: caller on Wi‑Fi, callee on mobile data → call connects and audio/video flows.
-
-**Degraded mode (temporary emergency):** clear all TURN vars → **STUN-only** (Google public STUN). Same-network / permissive NAT may still work; **cellular ↔ Wi‑Fi calls will likely fail**.
-
-**Cost note:** self-hosted TURN relays media through your VPS egress — cheap at small scale; monitor bandwidth as usage grows.
+- **Phase 5 — Notifications++** — ✅ **web push** (Service Worker + VAPID + `PushSubscription` model; generic payloads for E2EE). In-app center was Sprint 5.
+- **Phase 6 — Groups** — **in-chat search v1 ✅**; **group chats + admin ✅ (6A–6E)**; **Sprint 6F ✅** (message permission, lightweight list, media lifecycle). **Group voice/video: out of scope.** Next: full-history search pagination; **polls** and other backlog → **Future goals** (end of this file).
+- **Phase 7 — AI & mobile** — on-device/opt-in AI assistant, voice transcription, spam detection, React Native app (see **Future goals**).
+- **Phase 8 — Production & scale** ✅ **Done (core)** — MSG91 OTP, **Vercel + Render + Atlas** deploy, **Cloudinary** media, **Redis** socket adapter, HTTPS/WSS. Optional later: monitoring dashboards, formal CI/CD gates. **Contingency:** MSG91-off + phone-confirm onboarding; backup-code-only recovery; self-hosted coturn TURN (see **Future risk & recovery** at end of this file).
+- **Future / backlog (not scheduled)** — see **Future goals** and **Future risk & recovery** at end of this file.
 
 ---
 
@@ -983,7 +928,7 @@ pnpm build        # production build
 | **Account deletion** | ✅ **Done** (Phase 4) — `POST /api/users/me/delete` (15-day soft delete + immediate purge option) |
 | **keys module** | ✅ **Live** (Phase 2 + Sprint D / D.1) — `POST /api/keys` publishes a public key, `GET /api/keys/:userId` returns it (self/friends only), `GET`/`PUT /api/keys/backup` store the caller's recovery-passphrase-encrypted account-key backup (+ single-use backup-code envelopes), and `POST /api/keys/recover` redeems one backup code (phone-OTP gated) to restore on a new device |
 | **Multi-device / account-level E2EE** | ✅ **Closed** (Sprint D) — recovery-passphrase key backup + restore; new devices unlock history; key reset clears the stale backup. Recovery lives in **Profile → Security** |
-| **MSG91 / TURN provider failure** | ⏭️ **Contingency documented** (not implemented) — if MSG91 billing ends: phone-confirm onboarding (no OTP) + backup-code recovery without phone step; if Metered TURN ends: migrate to self-hosted **coturn** (`TURN_SECRET` mode). See **Infrastructure contingency** in Timeline |
+| **MSG91 / TURN provider failure** | ⏭️ **Contingency documented** (not implemented) — if MSG91 billing ends: phone-confirm onboarding (no OTP) + backup-code recovery without phone step; if Metered TURN ends: migrate to self-hosted **coturn** (`TURN_SECRET` mode). See **Future risk & recovery** (end of this file) |
 
 ---
 
@@ -1004,13 +949,9 @@ pnpm build        # production build
 - ❌ **Group voice/video calls — out of scope permanently** (1:1 calls only; see product decision above)
 
 ### Future / backlog (not scheduled)
-- Key fingerprint verification UI (optional)
-- QR device linking (needs native app)
-- E2EE media
-- On-device / opt-in AI assistant, voice transcription, spam detection
-- React Native app
-- Screen share (Phase 3.3)
-- **Infrastructure contingency** — if MSG91 or Metered TURN trials end: phone-confirm onboarding (no OTP), backup-code recovery without phone step, self-hosted coturn (see **Infrastructure contingency** section in Timeline)
+- Near-term (already in **What's next** above): full-history in-chat search, screen share (3.3)
+- Longer product backlog → **Future goals** (end of this file)
+- Provider / ops contingency → **Future risk & recovery** (end of this file)
 
 ---
 
@@ -1032,7 +973,7 @@ pnpm build        # production build
 ### Sprint 5 — Media + notifications → MVP complete ✅
 - ✅ Media messages (images + files) → Cloudinary **or** local-disk dev fallback, encrypted in transit
 - ✅ In-app notifications (friend request / accepted / message) with live `notification:new` + a header notification center
-- ⏭️ Still open: web **push** notifications (background)
+- ✅ Web **push** notifications (Phase 7C): PWA service worker + VAPID; Settings → Enable notifications
 
 ---
 
@@ -1069,6 +1010,26 @@ pnpm build        # production build
 1. Upload a test image; in Mongo set that message's `createdAt` to **31+ days ago**.
 2. Restart server; wait **~90 seconds** for the purge job.
 3. Message keeps its row but **media fields are cleared**; file deleted from storage.
+
+---
+
+## How to test Phase 7A — Group polls
+
+1. Open a **group chat** → composer shows **📊** (BarChart2) icon **left of Send**.
+2. Tap it → enter question + 2–4 options → **Send poll**.
+3. Poll bubble shows options with live percentages; tap an option to vote (tap again to remove vote).
+4. Other members see updates without refresh (`message:poll-vote`).
+5. **Admin-only groups:** only admins see the poll button / can create polls (same rule as sending messages).
+
+---
+
+## How to test Phase 7B/7C — PWA + web push
+
+1. **PWA:** deploy client (HTTPS) → browser menu → **Install Linkr** / **Add to Home Screen**. App opens standalone.
+2. **VAPID keys (server + optional client):** run `npx web-push generate-vapid-keys`, set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT=mailto:you@example.com` on Render; optionally `VITE_VAPID_PUBLIC_KEY` on Vercel.
+3. **Settings → Notifications → Enable notifications** → allow browser permission.
+4. Close the tab; have another user send a message → generic push ("New message" / "📊 Poll: …") should appear.
+5. Tap notification → opens Linkr (chat deep link when `chatId` is present).
 
 ---
 
@@ -1117,3 +1078,109 @@ If context fills up, start a fresh chat with:
 > Continue Linkr. Read `project.md` and `projectlinkr.md`. Phase 6 group chats + Sprint 6E/6F are done. **Group voice/video calls are out of scope permanently.** Next: full-history in-chat search pagination, web push, screen share (3.3).
 
 Pin or keep `projectlinkr.md` + this `project.md` in the repo root so any new session has full context.
+
+---
+
+## Future risk & recovery
+
+> **Not built yet** — documented recovery plan if paid SMS, managed TURN, or other production dependencies become too expensive or unavailable. Code already has hooks for most of this; the items below are the intended behaviour when we flip the switch.
+
+### A. MSG91 SMS OTP — remove paid SMS
+
+**Trigger:** MSG91 trial ends, billing too high, or provider outage.
+
+**Step 1 — disable MSG91 (no code change):**
+- **Server (Render):** unset `MSG91_AUTH_KEY`
+- **Client (Vercel):** unset `VITE_MSG91_WIDGET_ID` and `VITE_MSG91_WIDGET_TOKEN`
+- Redeploy both. Today this falls back to the built-in dev OTP flow (`POST /api/auth/otp/send` + `/verify`), which still expects a 6-digit code — **not** suitable for production without a real SMS sender.
+
+**Step 2 — planned onboarding change (implement when cutting MSG91):**
+- Phone step becomes: **enter number → confirm checkbox** ("This is my number") → save.
+- No OTP, no MSG91 widget, no SMS cost.
+- Server calls `bindVerifiedPhone()` directly after confirm (new route or relaxed verify path).
+- **Tradeoff:** the number is **not cryptographically verified** — we only enforce **one account per number** when a second person tries to claim it. Acceptable if Google login remains the primary identity.
+
+**Step 3 — planned E2EE recovery change (implement when cutting MSG91):**
+
+| Unlock path | Phone step? |
+|-------------|-------------|
+| **Recovery passphrase** | Unchanged — no phone involved today |
+| **Single-use backup codes** | **Skip phone entirely** — user is already signed in (Google) on the new device; enter backup code only |
+
+Today backup-code redemption also requires MSG91 token or dev OTP (`redeemRecoveryCode` in `keys.service.ts`). The contingency plan removes that phone gate — backup codes are high-entropy (~100 bits) and sufficient as a second factor alongside Google auth.
+
+**Code touchpoints when implementing:** `usePhoneVerification` + `OnboardingWizard` PhoneStep; `server/src/modules/auth/otp.service.ts` (`bindVerifiedPhone`); `server/src/modules/keys/keys.service.ts` (`redeemRecoveryCode`); client unlock UI (`E2EEKeyGuard` / `UnlockPanel`).
+
+**Alternative (keep SMS, swap provider):** wire Twilio / AWS SNS / Vonage into existing `sendOtp()` in `otp.service.ts` — UI stays OTP-based, only the sender changes.
+
+---
+
+### B. Metered TURN — self-hosted coturn backup
+
+**Trigger:** Metered Open Relay trial ends, quota exceeded, or cross-network calls fail (ring + accept but stuck on **Connecting** — signaling works, ICE relay missing).
+
+**Already built:** two TURN modes in `server/src/config/env.ts` + `calls.service.ts`:
+
+| Mode | Env vars | Status |
+|------|----------|--------|
+| **Managed static** (current) | `TURN_URLS` + `TURN_USERNAME` + `TURN_CREDENTIAL` | Metered dashboard |
+| **Self-hosted coturn** (backup) | `TURN_URLS` + `TURN_SECRET` | HMAC-minted per-user creds; static creds take precedence if both set |
+
+**Migration steps (when Metered ends):**
+1. Provision a small VPS (e.g. Hetzner / DigitalOcean ~$5–10/mo).
+2. Install **coturn** with `use-auth-secret` / TURN REST API; open **UDP/TCP 3478** (and **5349** if using `turns:`).
+3. **Render server env:** set `TURN_URLS=turn:your-host:3478,...` and `TURN_SECRET=<shared-secret>`; **remove** `TURN_USERNAME` and `TURN_CREDENTIAL`.
+4. Redeploy; confirm startup log: `WebRTC TURN enabled (coturn REST credential mint)`.
+5. Test: caller on Wi‑Fi, callee on mobile data → call connects and audio/video flows.
+
+**Degraded mode (temporary emergency):** clear all TURN vars → **STUN-only** (Google public STUN). Same-network / permissive NAT may still work; **cellular ↔ Wi‑Fi calls will likely fail**.
+
+**Cost note:** self-hosted TURN relays media through your VPS egress — cheap at small scale; monitor bandwidth as usage grows.
+
+---
+
+## Future goals
+
+> **Not built yet** — product backlog and longer-term ambitions. Polls are the best **next feature** after current near-term work (search pagination, web push, screen share). Group voice/video calls remain **out of scope permanently**.
+
+### Ready to build next
+
+| Goal | Notes |
+|------|--------|
+| **Polls** | ✅ **Done (Phase 7A)** — group-only; 📊 button left of Send; live vote updates via `message:poll-vote`. |
+
+### Chat & social
+
+| Goal | Notes |
+|------|--------|
+| **Stories** | Ephemeral photo/video status rings (24h-style). |
+| **Disappearing messages** | Timer-based auto-delete per chat or per message. |
+| **Channels** | Broadcast rooms — admin posts, members read-only (large audience). |
+
+### Media & E2EE
+
+| Goal | Notes |
+|------|--------|
+| **E2EE media** | Text is E2EE today; images/files are **HTTPS in-transit only** (plaintext at rest on Cloudinary). Encrypt blobs client-side before upload; store ciphertext + metadata only. |
+| **Voice notes** | Record audio in the composer (hold-to-record or tap) and send as a media message — same upload path as images/files. |
+
+### Security & multi-device
+
+| Goal | Notes |
+|------|--------|
+| **Key fingerprint verification UI** | Optional safety number / QR compare so users can confirm E2EE contact identity. |
+| **QR device linking** | Scan to trust a new device — best with a **native app**; limited on mobile web. |
+
+### Platform
+
+| Goal | Notes |
+|------|--------|
+| **React Native app** | iOS/Android shells reusing `@linkr/shared`, REST, and Socket.IO. |
+
+### AI (on-device / opt-in)
+
+| Goal | Notes |
+|------|--------|
+| **On-device AI assistant** | Opt-in only; no server-side message reading. |
+| **Voice transcription** | On-device or user-consented; for accessibility and search. |
+| **Spam detection** | On-device heuristics or opt-in cloud — must not break E2EE promises. |

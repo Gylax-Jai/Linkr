@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
-import { Lock, ArrowLeft, ShieldCheck } from "lucide-react";
+import { Lock, ArrowLeft, ShieldCheck, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RecoveryCard } from "@/features/security";
+import { PushNotificationsCard } from "@/features/push";
 import { PATHS } from "@/routes/paths";
 import { PrivacyCard } from "./PrivacyCard";
 import { SessionsCard } from "./SessionsCard";
@@ -31,6 +32,14 @@ export function SettingsPage() {
             Privacy
           </h2>
           <PrivacyCard />
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
+            <Bell className="h-4 w-4" />
+            Notifications
+          </h2>
+          <PushNotificationsCard />
         </section>
 
         <section className="space-y-3">

@@ -7,6 +7,7 @@ import { notificationsRouter } from "./notifications/notifications.routes.js";
 import { keysRouter } from "./keys/keys.routes.js";
 import { sessionsRouter } from "./sessions/sessions.routes.js";
 import { callsRouter } from "./calls/calls.routes.js";
+import { pushRouter } from "./push/push.routes.js";
 
 /** Aggregates every feature module under a single /api router (mounted in app.ts). */
 export const apiRouter: Router = Router();
@@ -19,3 +20,4 @@ apiRouter.use("/notifications", notificationsRouter);
 apiRouter.use("/keys", keysRouter);
 apiRouter.use("/sessions", sessionsRouter);
 apiRouter.use("/calls", callsRouter);
+apiRouter.use("/push", pushRouter);

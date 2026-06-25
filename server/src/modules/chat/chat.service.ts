@@ -8,6 +8,7 @@ import type {
   ChatParticipantFriendship,
   MessageDTO,
   MessageType,
+  PollMeta,
   ReplyPreview,
 } from "@linkr/shared";
 import { GROUP_MAX_MEMBERS, SOCKET_EVENTS } from "@linkr/shared";
@@ -96,6 +97,24 @@ function toCallLogMeta(raw: unknown): CallLogMeta | undefined {
   };
 }
 
+function toPollMeta(raw: unknown): PollMeta | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const p = raw as Record<string, unknown>;
+  if (typeof p.question !== "string" || !Array.isArray(p.options)) return undefined;
+  const options = p.options
+    .filter((o): o is { id: string; text: string } => {
+      return Boolean(o && typeof o === "object" && typeof (o as { id?: string }).id === "string");
+    })
+    .map((o) => ({ id: o.id, text: o.text }));
+  if (options.length < 2) return undefined;
+  const votes = (Array.isArray(p.votes) ? p.votes : [])
+    .filter((v): v is { user: { toString(): string }; optionId: string } => {
+      return Boolean(v && typeof v === "object" && "user" in v && "optionId" in v);
+    })
+    .map((v) => ({ user: v.user.toString(), optionId: v.optionId }));
+  return { question: p.question, options, votes };
+}
+
 function toMessageDTO(doc: MessageDocument): MessageDTO {
   const deletedForEveryone = Boolean(doc.deletedForEveryone);
   const mediaUrl = deletedForEveryone ? undefined : toPublicMediaUrl(doc);
@@ -116,6 +135,7 @@ function toMessageDTO(doc: MessageDocument): MessageDTO {
     mediaMime: mediaUrl && typeof doc.mediaMime === "string" ? doc.mediaMime : undefined,
     replyTo: toReplyPreview(doc.replyTo),
     call: toCallLogMeta(doc.call),
+    poll: deletedForEveryone ? undefined : toPollMeta(doc.poll),
     reactions: deletedForEveryone
       ? []
       : (doc.reactions ?? []).map((r) => ({ user: String(r.user), emoji: r.emoji })),
@@ -161,6 +181,39 @@ function isSelfChat(chat: ChatDocument): boolean {
 
 function isGroupChat(chat: ChatDocument): boolean {
   return chat.type === "group";
+}
+
+/** Enforce group send permission (messages + polls). */
+function assertCanSendInGroup(chat: ChatDocument, senderId: string): void {
+  if (!isGroupChat(chat)) return;
+  const permission = chat.messagePermission === "admins" ? "admins" : "everyone";
+  if (permission === "admins") {
+    const adminIds = (chat.admins ?? []).map((id) => id.toString());
+    if (!adminIds.includes(senderId)) {
+      throw ApiError.forbidden("ADMINS_ONLY", "Only admins can send messages in this group");
+    }
+  }
+}
+
+async function notifyGroupMembers(
+  chat: ChatDocument,
+  senderId: string,
+  chatId: string,
+  messagePreview: string,
+): Promise<void> {
+  for (const member of chat.members) {
+    const memberId = member.toString();
+    if (memberId === senderId) continue;
+    const mutedByRecipient = (chat.mutedBy ?? []).some((id) => id.toString() === memberId);
+    if (mutedByRecipient) continue;
+    void createNotification({
+      userId: memberId,
+      type: "message",
+      actorId: senderId,
+      chatId,
+      messagePreview,
+    });
+  }
 }
 
 async function getOtherMemberId(chat: ChatDocument, userId: string): Promise<string> {
@@ -586,7 +639,9 @@ function buildMessagePreview(
   media: SendMessageMedia | undefined,
   content?: string,
   encrypted?: boolean,
+  pollQuestion?: string,
 ): string {
+  if (pollQuestion) return `📊 Poll: ${truncatePreview(pollQuestion, 80)}`;
   // E2EE text is opaque to the server, so we can't preview it — use a generic, content-free label.
   if (encrypted && !media) return "🔒 New message";
   if (media) {
@@ -611,13 +666,7 @@ export async function sendMessage(
   }
 
   if (groupChat) {
-    const permission = chat.messagePermission === "admins" ? "admins" : "everyone";
-    if (permission === "admins") {
-      const adminIds = (chat.admins ?? []).map((id) => id.toString());
-      if (!adminIds.includes(senderId)) {
-        throw ApiError.forbidden("ADMINS_ONLY", "Only admins can send messages in this group");
-      }
-    }
+    assertCanSendInGroup(chat, senderId);
   }
 
   if (!selfChat && !groupChat) {
@@ -675,19 +724,12 @@ export async function sendMessage(
 
   // Notify recipients (best-effort). Self chats skip; groups notify all non-muted members except sender.
   if (groupChat) {
-    for (const member of chat.members) {
-      const memberId = member.toString();
-      if (memberId === senderId) continue;
-      const mutedByRecipient = (chat.mutedBy ?? []).some((id) => id.toString() === memberId);
-      if (mutedByRecipient) continue;
-      void createNotification({
-        userId: memberId,
-        type: "message",
-        actorId: senderId,
-        chatId,
-        messagePreview: buildMessagePreview(media, content, encrypted),
-      });
-    }
+    void notifyGroupMembers(
+      chat,
+      senderId,
+      chatId,
+      buildMessagePreview(media, content, encrypted),
+    );
   } else {
     const otherId = await getOtherMemberId(chat, senderId);
     const mutedByRecipient = (chat.mutedBy ?? []).some((id) => id.toString() === otherId);
@@ -803,6 +845,7 @@ export async function deleteMessage(
     message.deletedForEveryone = true;
     message.set("content", undefined);
     message.set("reactions", []);
+    message.set("poll", undefined);
     await message.save();
 
     const dto = toMessageDTO(message);
@@ -854,6 +897,93 @@ export async function reactToMessage(
   return dto;
 }
 
+/** Create a group poll message (Phase 7A). Groups only; respects admin-only send permission. */
+export async function createPoll(
+  chatId: string,
+  senderId: string,
+  input: { question: string; options: string[] },
+): Promise<MessageDTO> {
+  const chat = await getChatForUser(chatId, senderId);
+  if (!isGroupChat(chat)) {
+    throw ApiError.badRequest("Polls are only available in group chats");
+  }
+  assertCanSendInGroup(chat, senderId);
+
+  const question = input.question.trim();
+  const optionTexts = input.options.map((o) => o.trim()).filter(Boolean);
+  const unique = [...new Set(optionTexts)];
+  if (unique.length !== optionTexts.length) {
+    throw ApiError.badRequest("Poll options must be unique");
+  }
+
+  const pollOptions = optionTexts.map((text) => ({
+    id: crypto.randomUUID(),
+    text,
+  }));
+
+  const message = await MessageModel.create({
+    chatId,
+    sender: senderId,
+    type: "poll",
+    poll: { question, options: pollOptions, votes: [] },
+    status: "sent",
+    readBy: [senderId],
+  });
+
+  chat.lastMessage = message._id;
+  if ((chat.hiddenFor ?? []).length > 0) chat.set("hiddenFor", []);
+  await chat.save();
+
+  const dto = toMessageDTO(message);
+  emitToChatMembers(chat, SOCKET_EVENTS.MESSAGE_NEW, { message: dto });
+  void notifyGroupMembers(chat, senderId, chatId, buildMessagePreview(undefined, undefined, false, question));
+  return dto;
+}
+
+/** Vote on a poll (toggle: same option removes vote; different option switches). */
+export async function votePoll(
+  messageId: string,
+  userId: string,
+  optionId: string,
+): Promise<MessageDTO> {
+  const message = await MessageModel.findById(messageId);
+  if (!message) throw ApiError.notFound("Message not found");
+  if (message.type !== "poll" || !message.poll) {
+    throw ApiError.badRequest("This message is not a poll");
+  }
+
+  const chat = await getChatForUser(String(message.chatId), userId);
+  if (!isGroupChat(chat)) {
+    throw ApiError.badRequest("Polls are only available in group chats");
+  }
+  if (message.deletedForEveryone) {
+    throw ApiError.badRequest("Cannot vote on a deleted poll");
+  }
+
+  const pollDoc = message.poll as { options: { id: string; text: string }[]; votes: { user: { toString(): string }; optionId: string }[]; question: string } | undefined;
+  if (!pollDoc) throw ApiError.badRequest("Invalid poll");
+
+  const validOption = pollDoc.options.some((o) => o.id === optionId);
+  if (!validOption) throw ApiError.badRequest("Invalid poll option");
+
+  const existing = pollDoc.votes.find((v) => v.user.toString() === userId);
+  let nextVotes = pollDoc.votes.filter((v) => v.user.toString() !== userId);
+  if (!existing || existing.optionId !== optionId) {
+    nextVotes.push({
+      user: userId as unknown as (typeof pollDoc.votes)[number]["user"],
+      optionId,
+    });
+  }
+
+  message.set("poll.votes", nextVotes);
+  await message.save();
+  await message.populate(REPLY_POPULATE);
+
+  const dto = toMessageDTO(message);
+  emitToChatMembers(chat, SOCKET_EVENTS.MESSAGE_POLL_VOTE, { message: dto });
+  return dto;
+}
+
 /**
  * Forward a message to a friend (Phase 4). Resolves/creates the 1:1 chat with `targetUserId`
  * (friendship enforced by getOrCreateDirectChat), then re-creates the message there flagged as a
@@ -869,6 +999,7 @@ export async function forwardMessage(
   const source = await getMessageForUser(messageId, userId);
   if (source.deletedForEveryone) throw ApiError.badRequest("Cannot forward a deleted message");
   if (source.type === "call") throw ApiError.badRequest("Cannot forward a call log");
+  if (source.type === "poll") throw ApiError.badRequest("Cannot forward a poll");
 
   const targetChat = await getOrCreateDirectChat(userId, options.targetUserId);
   const targetChatId = targetChat._id.toString();

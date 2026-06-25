@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
+  BarChart2,
   Archive,
   ArchiveRestore,
   ArrowLeft,
@@ -58,6 +59,7 @@ import {
   MessageMedia,
   useArchiveChatMutation,
   useChatById,
+  useCreatePollMutation,
   useDeleteMessageMutation,
   useEditMessageMutation,
   useLeaveGroupMutation,
@@ -67,6 +69,7 @@ import {
   useReactMessageMutation,
   useSendMessageMutation,
   useUploadMediaMutation,
+  useVotePollMutation,
   useChatInMessageSearch,
   useGroupMembers,
 } from "@/features/chat";
@@ -85,6 +88,8 @@ import { useCallActions } from "@/features/calls";
 import { useTheme } from "@/lib/theme";
 import { useDecryptedText, usePeerHasKey } from "@/lib/crypto";
 import { EmojiPickerPopover } from "@/features/chat/EmojiPicker";
+import { PollCreateModal } from "@/features/chat/PollCreateModal";
+import { PollBubble } from "@/features/chat/PollBubble";
 import { bubbleRadiusClasses, getBubblePosition } from "@/lib/utils/bubbleGrouping";
 import { formatDayLabel, formatMessageTime } from "@/lib/utils/formatTime";
 import { canShowProfileDetails, getPresenceLabel, showOnlineDot } from "@/lib/utils/privacy";
@@ -958,6 +963,7 @@ function MessageList({
   const { data: groupMembers = [] } = useGroupMembers(chatId, isGroup);
   const markRead = useMarkReadMutation(chatId);
   const react = useReactMessageMutation(chatId);
+  const votePoll = useVotePollMutation(chatId);
   const del = useDeleteMessageMutation(chatId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1054,6 +1060,8 @@ function MessageList({
               onForward={() => onForward(message)}
               onDelete={(scope) => del.mutate({ messageId: message._id, scope })}
               onReact={(emoji) => react.mutate({ messageId: message._id, emoji })}
+              onVote={(optionId) => votePoll.mutate({ messageId: message._id, optionId })}
+              votePending={votePoll.isPending}
             />
           </div>
         );
@@ -1156,6 +1164,8 @@ function MessageActions({
   onDownload,
   onDelete,
   onReact,
+  hideEdit = false,
+  hideForward = false,
 }: {
   mine: boolean;
   deleted: boolean;
@@ -1170,6 +1180,8 @@ function MessageActions({
   onDownload: () => void;
   onDelete: (scope: "me" | "everyone") => void;
   onReact: (emoji: string) => void;
+  hideEdit?: boolean;
+  hideForward?: boolean;
 }) {
   const [menu, setMenu] = useState<null | "react" | "more">(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -1233,10 +1245,12 @@ function MessageActions({
               Download
             </MenuItem>
           ) : null}
-          <MenuItem icon={<Forward className="h-4 w-4" />} onClick={() => { onForward(); setMenu(null); }}>
-            Forward
-          </MenuItem>
-          {mine ? (
+          {!hideForward ? (
+            <MenuItem icon={<Forward className="h-4 w-4" />} onClick={() => { onForward(); setMenu(null); }}>
+              Forward
+            </MenuItem>
+          ) : null}
+          {mine && !hideEdit ? (
             <MenuItem icon={<Pencil className="h-4 w-4" />} onClick={() => { onEdit(); setMenu(null); }}>
               Edit
             </MenuItem>
@@ -1367,6 +1381,8 @@ function MessageBubble({
   onForward,
   onDelete,
   onReact,
+  onVote,
+  votePending = false,
 }: {
   message: MessageDTO & { senderKey: string };
   mine: boolean;
@@ -1382,9 +1398,12 @@ function MessageBubble({
   onForward: () => void;
   onDelete: (scope: "me" | "everyone") => void;
   onReact: (emoji: string) => void;
+  onVote?: (optionId: string) => void;
+  votePending?: boolean;
 }) {
   const groupedWithPrev = position === "middle" || position === "last";
   const deleted = message.deletedForEveryone;
+  const isPoll = message.type === "poll" && !!message.poll;
 
   // Decrypt the body for display (Phase 2). Plaintext (bot/media caption) passes through unchanged.
   const body = useDecryptedText({ id: message._id, content: message.content, encrypted: message.encrypted });
@@ -1423,6 +1442,8 @@ function MessageBubble({
           onDownload={handleDownload}
           onDelete={onDelete}
           onReact={onReact}
+          hideEdit={isPoll}
+          hideForward={isPoll}
         />
       ) : null}
 
@@ -1455,6 +1476,13 @@ function MessageBubble({
           ) : null}
           {deleted ? (
             <span className="italic opacity-70">This message was deleted</span>
+          ) : isPoll ? (
+            <PollBubble
+              message={message}
+              userId={userId}
+              disabled={votePending}
+              onVote={(optionId) => onVote?.(optionId)}
+            />
           ) : (
             <>
               {message.mediaUrl ? (
@@ -1512,6 +1540,8 @@ function MessageBubble({
           onDownload={handleDownload}
           onDelete={onDelete}
           onReact={onReact}
+          hideEdit={isPoll}
+          hideForward={isPoll}
         />
       ) : null}
     </div>
@@ -1651,9 +1681,11 @@ function Composer({
   const [stagedFile, setStagedFile] = useState<File | null>(null);
   const [stagedPreviewUrl, setStagedPreviewUrl] = useState<string | null>(null);
   const send = useSendMessageMutation(chatId);
+  const createPoll = useCreatePollMutation(chatId);
   const edit = useEditMessageMutation(chatId);
   const upload = useUploadMediaMutation(chatId);
   const userId = useAuthStore((s) => s.user?._id);
+  const [pollOpen, setPollOpen] = useState(false);
   // Drive the emoji picker's light/dark skin from the ACTUAL applied theme mode (the legacy
   // themeStore.colorMode is unused and always "light", which is why the picker looked light).
   const { mode } = useTheme();
@@ -2107,6 +2139,18 @@ function Composer({
           aria-label="Message input"
           className="composer-input min-h-8 min-w-0 flex-1 resize-none bg-transparent px-0 py-0 text-sm leading-8 text-text placeholder:text-text-muted focus:outline-none sm:min-h-[2.25rem] sm:px-1 sm:py-2 sm:leading-normal"
         />
+        {isGroup && !isEditing ? (
+          <button
+            type="button"
+            aria-label="Create poll"
+            title="Create poll"
+            disabled={upload.isPending || createPoll.isPending}
+            onClick={() => setPollOpen(true)}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface hover:text-text disabled:opacity-50 sm:h-9 sm:w-9"
+          >
+            <BarChart2 className="h-4 w-4" />
+          </button>
+        ) : null}
         <Button
           type="submit"
           variant="gradient"
@@ -2126,6 +2170,19 @@ function Composer({
           <EmojiPickerPopover docked onSelect={insertEmoji} theme={mode} />
         </div>
       ) : null}
+      <PollCreateModal
+        open={pollOpen}
+        pending={createPoll.isPending}
+        onClose={() => setPollOpen(false)}
+        onSubmit={(input) => {
+          createPoll.mutate(input, {
+            onSuccess: () => {
+              setPollOpen(false);
+              scrollToBottom?.();
+            },
+          });
+        }}
+      />
     </form>
   );
 }

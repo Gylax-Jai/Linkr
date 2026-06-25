@@ -45,6 +45,28 @@ const messageSchema = new Schema(
       ),
       required: false,
     },
+    /** Group poll metadata for `type: "poll"` rows (Phase 7A). */
+    poll: {
+      type: new Schema(
+        {
+          question: { type: String, required: true },
+          options: [
+            {
+              id: { type: String, required: true },
+              text: { type: String, required: true },
+            },
+          ],
+          votes: [
+            {
+              user: { type: Types.ObjectId, ref: "User", required: true },
+              optionId: { type: String, required: true },
+            },
+          ],
+        },
+        { _id: false },
+      ),
+      required: false,
+    },
     reactions: [
       {
         user: { type: Types.ObjectId, ref: "User", required: true },

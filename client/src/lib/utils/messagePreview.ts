@@ -9,6 +9,7 @@ export type DecryptedPreview =
 export function isPreviewableMessage(message: MessageDTO): boolean {
   if (message.deletedForEveryone) return true;
   if (message.type === "call") return true;
+  if (message.type === "poll" && message.poll) return true;
   if (message.content) return true;
   if (message.mediaUrl || message.mediaType === "image") return true;
   return false;
@@ -40,6 +41,10 @@ export function formatMessagePreview(
       return `${prefix}📞 ${kind} · ${dur}`;
     }
     return `${prefix}📞 ${kind}`;
+  }
+
+  if (last.type === "poll" && last.poll) {
+    return `${prefix}📊 Poll: ${last.poll.question}`;
   }
 
   if (last.content) {

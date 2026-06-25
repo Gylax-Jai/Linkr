@@ -71,6 +71,12 @@ const envSchema = z.object({
   TURN_SECRET: z.string().optional(),
   /** Lifetime (seconds) of minted TURN credentials (coturn mode). Default 1 hour. */
   TURN_TTL: z.coerce.number().int().positive().default(3600),
+
+  /** Web Push (Phase 5) — VAPID keys for background notifications. Generate with `npx web-push generate-vapid-keys`. */
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  /** mailto: or https: contact for VAPID (required by web-push). */
+  VAPID_SUBJECT: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -110,4 +116,6 @@ export const features = {
   turnStatic,
   /** TURN relay enabled in either mode. */
   turn: turnCoturn || turnStatic,
+  /** Web Push (VAPID) — all three vars must be set. */
+  webPush: has(env.VAPID_PUBLIC_KEY) && has(env.VAPID_PRIVATE_KEY) && has(env.VAPID_SUBJECT),
 };
