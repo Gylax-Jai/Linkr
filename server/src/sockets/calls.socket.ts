@@ -399,6 +399,7 @@ export function deliverPendingCalls(io: Server, userId: string): void {
 async function resolvePeer(userId: string, chatId: string): Promise<string | null> {
   try {
     const chat = await getChatForUser(chatId, userId);
+    if (chat.type === "group") return null;
     const otherId = await getOtherMemberId(chat, userId);
     if (!otherId || otherId === userId) return null;
     if (!(await areFriends(userId, otherId))) return null;

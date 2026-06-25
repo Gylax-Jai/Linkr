@@ -14,6 +14,7 @@ import {
   ShieldOff,
   UserPlus,
   VolumeX,
+  Users,
   X,
 } from "lucide-react";
 import type { ChatParticipantFriendship, MessageDTO } from "@linkr/shared";
@@ -32,7 +33,8 @@ import { MessageMedia, useArchiveChatMutation, useChatById, useMessages, useMute
 import { useAuthedObjectUrl } from "@/lib/hooks/useAuthedObjectUrl";
 import { useAuthStore, useUIStore } from "@/lib/store";
 import { shareContact } from "@/lib/utils/share";
-import { canShowContactCard, canShowDisplayName, canShowProfileDetails, canZoomAvatar, getPresenceLabel, showOnlineDot } from "@/lib/utils/privacy";
+import { chatAvatarSrc, chatDisplayName, isGroupChat, isSelfChatItem } from "@/lib/utils/chatDisplay";
+import { canShowContactCard, canShowProfileDetails, canZoomAvatar, getPresenceLabel, showOnlineDot } from "@/lib/utils/privacy";
 import { cn } from "@/lib/utils";
 
 type TabId = "profile" | "media" | "files";
@@ -107,17 +109,17 @@ function DetailsContent() {
   const [tab, setTab] = useState<TabId>("profile");
 
   const participant = chat?.participant;
-  // Self chat: own space, no presence/relationship/block actions (Sprint C.2).
-  const isSelf = chat?.type === "self";
+  const isSelf = chat ? isSelfChatItem(chat) : false;
+  const isGroup = chat ? isGroupChat(chat) : false;
   const showProfileDetails = participant ? canShowProfileDetails(participant) : true;
-  const showDisplayName = participant ? canShowDisplayName(participant) : true;
   const showAvatar = participant ? canShowContactCard(participant) : true;
   const avatarZoomable = participant ? canZoomAvatar(participant) : true;
-  const headerName = isSelf ? "Self chat" : showDisplayName ? participant?.displayName : "Linkr user";
+  const headerName = chat ? chatDisplayName(chat) : undefined;
   const displayName = headerName;
-  const online = !isSelf && participant ? (onlineOverrides[participant._id] ?? participant.online) : false;
-  const presenceLabel = participant && !isSelf ? getPresenceLabel(participant, online) : null;
-  const showDot = participant && !isSelf ? showOnlineDot(participant, online) : false;
+  const avatarSrc = chat ? chatAvatarSrc(chat) : undefined;
+  const online = !isSelf && !isGroup && participant ? (onlineOverrides[participant._id] ?? participant.online) : false;
+  const presenceLabel = participant && !isSelf && !isGroup ? getPresenceLabel(participant, online) : null;
+  const showDot = participant && !isSelf && !isGroup ? showOnlineDot(participant, online) : false;
 
   const block = useBlockUserMutation();
   const unblock = useUnblockUserMutation();
@@ -133,18 +135,24 @@ function DetailsContent() {
       <div className="flex flex-col items-center gap-3 border-b border-border px-6 py-8 text-center">
         <Avatar
           name={isSelf ? (sessionUser?.displayName ?? "You") : (headerName ?? "Linkr")}
-          src={showAvatar ? participant?.avatar : undefined}
+          src={showAvatar || isGroup ? avatarSrc : undefined}
           size="xl"
           ring
           online={showDot}
           pulseRing={showDot}
           zoomable={avatarZoomable}
-          icon={isSelf ? <NotepadText className="h-7 w-7" /> : undefined}
+          icon={
+            isSelf ? (
+              <NotepadText className="h-7 w-7" />
+            ) : isGroup ? (
+              <Users className="h-7 w-7" />
+            ) : undefined
+          }
         />
         <div className="space-y-1">
           <p className="text-lg font-semibold tracking-tight">{displayName ?? "Select a chat"}</p>
           <p className="font-mono text-xs text-text-muted">
-            {isSelf ? "Only you" : participant?.username ? `@${participant.username}` : "—"}
+            {isSelf ? "Only you" : isGroup ? `${chat?.group?.memberCount ?? 0} members` : participant?.username ? `@${participant.username}` : "—"}
           </p>
           {/* Presence under the name (Sprint F): on phones this replaces the "Private chat" badge
               (which is hidden < sm) so the contact's last seen is visible where it matters most. */}
@@ -158,7 +166,7 @@ function DetailsContent() {
             </p>
           ) : null}
         </div>
-        <EncryptedBadge className="mt-1 hidden sm:inline-flex" />
+        <EncryptedBadge className="mt-1 hidden sm:inline-flex" group={isGroup} />
       </div>
 
       <div className="flex border-b border-border px-2">
@@ -180,6 +188,24 @@ function DetailsContent() {
       <div className="flex-1 overflow-y-auto p-5">
         {tab === "profile" ? (
           <div className="space-y-4">
+            {isGroup ? (
+              <DetailSection icon={<Users className="h-4 w-4" />} label="Members">
+                <ul className="space-y-2">
+                  {(chat?.group?.members ?? []).map((m) => (
+                    <li key={m._id} className="flex items-center gap-2">
+                      <Avatar name={m.displayName} src={m.avatar} size="sm" online={showOnlineDot(m, onlineOverrides[m._id] ?? m.online)} />
+                      <span className="min-w-0 flex-1 truncate text-sm">{m.displayName}</span>
+                      {chat?.group?.admins.includes(m._id) ? (
+                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary">
+                          Admin
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </DetailSection>
+            ) : (
+              <>
             <DetailSection icon={<Info className="h-4 w-4" />} label="About">
               {isSelf
                 ? "Your personal space — jot notes, save links, and message yourself. Messages here are just for you."
@@ -200,6 +226,8 @@ function DetailsContent() {
                 <span className="mt-1 block font-mono text-xs text-text-muted">You are @{sessionUser.username}</span>
               ) : null}
             </DetailSection>
+              </>
+            )}
           </div>
         ) : null}
 
@@ -208,7 +236,7 @@ function DetailsContent() {
         {tab === "files" ? <FilesTab chatId={activeChatId} /> : null}
       </div>
 
-      {participant && !isSelf ? (
+      {participant && !isSelf && !isGroup ? (
         <RelationshipControl participantId={participant._id} friendship={participant.friendship} />
       ) : null}
 
@@ -238,7 +266,7 @@ function DetailsContent() {
           </Button>
         </div>
         <div className="flex gap-2">
-          {isSelf ? null : blocked && !blockedByMe ? (
+          {isSelf || isGroup ? null : blocked && !blockedByMe ? (
             // A block placed by the other user can't be lifted here.
             <Button variant="ghost" size="sm" disabled className="flex-1" title="This user has blocked you">
               <Ban className="h-4 w-4" />
@@ -267,7 +295,7 @@ function DetailsContent() {
               Block
             </Button>
           )}
-          {isSelf ? null : (
+          {isSelf || isGroup ? null : (
             <Button
               variant="ghost"
               size="sm"

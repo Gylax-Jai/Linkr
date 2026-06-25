@@ -25,6 +25,8 @@ export const FRIENDSHIP_STATUSES = ["pending", "accepted", "rejected", "blocked"
 export const MESSAGE_TYPES = ["text", "image", "video", "file", "voice", "call"] as const;
 export const MESSAGE_STATUSES = ["sent", "delivered", "read"] as const;
 export const CHAT_TYPES = ["1:1", "group", "self"] as const;
+export const GROUP_MAX_MEMBERS = 16;
+export const GROUP_NAME_MAX = 50;
 export const VISIBILITY_VALUES = ["everyone", "friends", "nobody"] as const;
 /** Profile bio/status/avatar visibility: everyone, friends only, or hidden. */
 export const PROFILE_VISIBILITY_VALUES = ["everyone", "friends", "nobody"] as const;

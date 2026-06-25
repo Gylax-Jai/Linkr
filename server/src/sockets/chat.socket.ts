@@ -9,6 +9,7 @@ import {
   markMessageDelivered,
   markMessagesRead,
   sendMessage,
+  emitToChatMembers,
 } from "../modules/chat/chat.service.js";
 import { maybeAutoReply } from "../modules/bot/bot.service.js";
 import { requireSocketUser } from "./auth.socket.js";
@@ -49,12 +50,19 @@ export function registerChatHandlers(io: Server, socket: Socket): void {
       }
 
       const chat = await getChatForUser(payload.chatId, userId);
-      const otherId = await getOtherMemberId(chat, userId);
-      // Self ("Saved messages") chats have no peer — otherId === userId, so skip the friend gate.
-      const selfChat = otherId === userId;
+      const selfChat = chat.type === "self" || chat.members.length === 1;
+      const groupChat = chat.type === "group";
 
-      if (!selfChat && !(await areFriends(userId, otherId))) {
-        ack?.("NOT_FRIENDS");
+      if (!selfChat && !groupChat) {
+        const otherId = await getOtherMemberId(chat, userId);
+        if (!(await areFriends(userId, otherId))) {
+          ack?.("NOT_FRIENDS");
+          return;
+        }
+      }
+
+      if (groupChat && payload.encrypted) {
+        ack?.("Group messages cannot be end-to-end encrypted");
         return;
       }
 
@@ -63,16 +71,13 @@ export function registerChatHandlers(io: Server, socket: Socket): void {
         replyTo: payload.replyTo,
         encrypted: payload.encrypted,
       });
-      // Always deliver to the sender; for a real 1:1 also deliver to the peer (avoid a duplicate
-      // MESSAGE_NEW to the same room in a self chat).
-      if (!selfChat) io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
-      io.to(`user:${userId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
+      emitToChatMembers(chat, SOCKET_EVENTS.MESSAGE_NEW, { message });
       ack?.();
 
-      // Dev/test bot: if the peer is the bot, it will type + auto-reply (no-op otherwise). The bot
-      // can only read PLAINTEXT, so pass the raw payload; humans only send plaintext to the bot
-      // because the bot never publishes a public key (the client falls back to plaintext for it).
-      void maybeAutoReply(payload.chatId, userId, payload.content.trim());
+      // Dev/test bot: only for 1:1 chats with a plaintext peer.
+      if (!selfChat && !groupChat) {
+        void maybeAutoReply(payload.chatId, userId, payload.content.trim());
+      }
     } catch (err) {
       logger.warn("message:send failed", { userId, err: err instanceof Error ? err.message : String(err) });
       ack?.(err instanceof ApiError ? err.message : "Send failed");
@@ -98,8 +103,11 @@ export function registerChatHandlers(io: Server, socket: Socket): void {
       if (messages.length === 0) return;
 
       const chat = await getChatForUser(payload.chatId, userId);
-      const otherId = await getOtherMemberId(chat, userId);
-      io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_READ, { chatId: payload.chatId, messages });
+      for (const member of chat.members) {
+        const memberId = member.toString();
+        if (memberId === userId) continue;
+        io.to(`user:${memberId}`).emit(SOCKET_EVENTS.MESSAGE_READ, { chatId: payload.chatId, messages });
+      }
     } catch {
       /* ignore */
     }
@@ -114,14 +122,23 @@ export function registerTypingHandler(io: Server, socket: Socket): void {
     try {
       if (!payload?.chatId) return;
       const chat = await getChatForUser(payload.chatId, userId);
-      const otherId = await getOtherMemberId(chat, userId);
+      const selfChat = chat.type === "self" || chat.members.length === 1;
+      const groupChat = chat.type === "group";
 
-      if (!(await areFriends(userId, otherId))) return;
+      if (!selfChat && !groupChat) {
+        const otherId = await getOtherMemberId(chat, userId);
+        if (!(await areFriends(userId, otherId))) return;
+        io.to(`user:${otherId}`).emit(event, { chatId: payload.chatId, userId });
+        return;
+      }
 
-      io.to(`user:${otherId}`).emit(event, {
-        chatId: payload.chatId,
-        userId,
-      });
+      if (groupChat) {
+        for (const member of chat.members) {
+          const memberId = member.toString();
+          if (memberId === userId) continue;
+          io.to(`user:${memberId}`).emit(event, { chatId: payload.chatId, userId });
+        }
+      }
     } catch {
       /* ignore */
     }

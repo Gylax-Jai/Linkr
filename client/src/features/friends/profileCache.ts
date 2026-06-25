@@ -22,7 +22,7 @@ export function mergePeerProfile(queryClient: QueryClient, profile: UserSearchRe
   queryClient.setQueryData<ChatListItem[]>(chatKeys.list(), (old) => {
     if (!old) return old;
     return old.map((chat) => {
-      if (chat.participant._id !== userId) return chat;
+      if (!chat.participant || chat.participant._id !== userId) return chat;
       return { ...chat, participant: mergeParticipant(chat.participant, profile) };
     });
   });

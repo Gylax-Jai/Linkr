@@ -3,7 +3,7 @@
 > **Living document:** everything built so far, how to run it, and what's next.  
 > For the original product blueprint (vision, rules, full roadmap), see [`projectlinkr.md`](./projectlinkr.md).
 
-**Last updated:** June 25, 2026 — **Sprint 3.2.2 (call fix + chat polish)**: fixes the **~3-minute auto hangup** (calls were force-ended by a 3-min "safety TTL" that started at dial — now **30s ring cap** for unanswered + **2h cap** for connected calls, started on accept); adds **rear/front camera flip** in video calls (mobile, `replaceTrack`); fixes the **typing flicker** (typing↔online) and moves the typing indicator to the **bottom of the chat** (WhatsApp-style); the image **⋮ menu shows Download** (not "Copy text") and tapping an image opens it **inside LINKr's lightbox** instead of a new browser tab. Earlier — **Sprint 3.2 (video calls)**: 1:1 **video calls are live** on the same WebRTC engine/signaling as voice (no server changes) — camera+mic capture via `requestCallMediaAccess`, full-screen remote video with a mirrored local PiP, **camera on/off** toggle, 720p target bitrate; remote audio still routes through the engine's `<audio>` element so earpiece/speaker/BT switching is unchanged; the header **Video** button is now live for accepted friends. Earlier — **Phase 4.2 patch (round 3)**: privacy is now **two independent settings** — **Profile details** (display name, status, bio) and **Profile picture** (avatar thumbnail + zoom); `@username` always visible; **Everyone** picture = strangers see photo **without zoom**, friends can zoom; **`user:profile-changed`** socket + silent cache merge keeps search/contact card/chat list fresh **without modal flicker** (15s background refetch fallback). Builds on **round 2** (E2EE prompt, interim split privacy, contact-card poll fix) and **round 1** (sidebar previews, call reliability, privacy enforcement).
+**Last updated:** June 25, 2026 — **Phase 6C (in-chat search, v1)**: search within the open chat — **desktop** header Search icon, **mobile** ⋮ → Search, compact header search bar with **↑/↓ match navigation**, **highlight + scroll-to-match**; searches **decrypted text client-side** over **loaded messages** (~50 most recent per chat today; **full-history pagination** is a follow-up). Earlier — **Sprint 3.2.3 (mobile chat UX)**: **`user:typing-stop`** clears typing instantly on send/idle; typing pill moved **inside the scroll area** (below timestamps); **mobile keyboard scroll-to-bottom** on composer focus; tighter composer (90% width, aligned icons/text); self chat icon → **NotepadText**. Earlier — **Sprint 3.2.2 (call fix + chat polish)**: fixes the **~3-minute auto hangup** (calls were force-ended by a 3-min "safety TTL" that started at dial — now **30s ring cap** for unanswered + **2h cap** for connected calls, started on accept); adds **rear/front camera flip** in video calls (mobile, `replaceTrack`); fixes the **typing flicker** (typing↔online) and moves the typing indicator to the **bottom of the chat** (WhatsApp-style); the image **⋮ menu shows Download** (not "Copy text") and tapping an image opens it **inside LINKr's lightbox** instead of a new browser tab. **Production infra:** **Cloudinary** media + avatars, **Redis** for multi-instance Socket.IO, **Vercel + Render + Atlas** deploy — all live.
 
 Earlier (Sprint C.2.2 — Contact info button now toggles the profile pane open/closed; self chat renamed "Self chat" everywhere and now shows your own custom-status chip)
 
@@ -58,14 +58,20 @@ Earlier (Sprint C.2 — Contact info opens a side profile (right-drawer on table
 | Video calls (WebRTC, 720p, camera toggle + local PiP) | ✅ Done (Sprint 3.2) |
 | Call duration fix (30s ring / 2h active) + camera flip | ✅ Done (Sprint 3.2.2) |
 | Chat polish: bottom typing, no flicker, image download + lightbox | ✅ Done (Sprint 3.2.2) |
+| Mobile chat UX (typing-stop, keyboard scroll, composer align) | ✅ Done (Sprint 3.2.3) |
+| In-chat search (loaded messages, client-side decrypt) | ✅ Done v1 (Phase 6C) |
+| Cloudinary media + avatar storage | ✅ Done (production) |
+| Redis (multi-instance Socket.IO adapter) | ✅ Done (production) |
+| Deploy (Vercel client + Render server + Atlas) | ✅ Done |
 | Mute notifications + archive chats (per-user) | ✅ Done (Phase 4) |
 | Privacy settings UI (last seen / profile / requests) | ✅ Done (Phase 4) |
 | Forward message (friends only) + share contact | ✅ Done (Phase 4) |
 | Report user | ✅ Done (Phase 4) |
 | Account deletion (15-day soft + immediate purge) | ✅ Done (Phase 4) |
 | Screen share, groups | ❌ Phase 3 (3.3+) / Phase 6 |
+| Group voice/video calls | ❌ Phase 6 (deferred — SFU TBD) |
 
-**You are here:** **MVP complete — Sprints 0–5 done, plus Sprint 5.5 UX & social polish, Sprint 5.6 social actions + emoji + media galleries, and Sprint 5.7 "Add friend" reachability + not-friends composer gate.** Sprint 5 shipped media messages (images + files, encrypted **in transit**, with Cloudinary-or-local-disk storage) and in-app notifications (a real notification center replacing the bell stub, live over the `notification:new` socket event). Sprint 5.5 added **Block/Unblock everywhere** (the block stub is now a real round-trip), **friend-request Accept/Reject/Block inside the bell**, **profile photo upload** (same hardening as chat media), **desktop close-chat**, **blue read ticks + Online/Offline labels**, **page-scroll lock**, and **explanatory media-upload errors**. **Phase 2 then shipped end-to-end encryption for text** (libsodium sealed boxes; the server stores ciphertext only; the badge is now a real dynamic "End-to-end encrypted"). The dev bot is kept **plaintext by design** (it has no key, so the client auto-falls back) rather than retired, and **media stays in-transit only** for now — E2EE media + multi-device key sync are the remaining items in that theme. **Phase 8 has now kicked off** with pre-deploy hardening: onboarding uses a **real SMS OTP provider (MSG91 widget + server-side token re-verification)** with the dev code as a fallback, the onboarding profile step gained an **Add a photo** upload, and a dark-theme **input autofill contrast** bug was fixed.
+**You are here:** **MVP complete** — Sprints 0–5, Phase 2 E2EE, Phase 4 account/social controls, Sprints D–J, Phase 3 voice + video (through 3.2.3), and **Phase 6C in-chat search v1** are shipped. **Next up: Phase 6 group chats** (create group from sidebar icon → multi-select friends → admin controls; groups **plaintext at rest** with an honest "not E2EE" badge for v1). Group calls and full-history search are planned follow-ups. Production runs on **Vercel + Render + Atlas** with **Cloudinary** and **Redis**.
 
 ---
 
@@ -230,6 +236,21 @@ Five self-contained sprints layering social/UX controls and account lifecycle on
   - **Two privacy toggles:** `privacy.profileDetails` (display name, custom status, bio) and `privacy.profilePicture` (avatar thumbnail + zoom) replace the single combined `privacy.profile` (legacy field still migrated on read). Settings → **Profile details** + **Profile picture** rows in `PrivacyCard`.
   - **Rules:** `@username` always visible. **Picture → Everyone:** all see thumbnail, **only friends zoom**. **Picture → Friends:** strangers see no photo; friends see + zoom. **Picture → Nobody:** photo hidden. **Details → Everyone/Friends/Nobody:** gates name/status/bio independently (display name no longer tied to avatar visibility).
   - **Live sync:** `notifyProfileChanged()` emits **`user:profile-changed`** to friends + 1:1 chat partners on profile/privacy/avatar updates. Client `profileCache.ts` **merges** the refreshed `GET /users/:id/profile` into search, contact card, chat list, and friends caches (no invalidate → no flicker). **15s silent refetch** on `useUserSearch` / `useUserProfile` as fallback for strangers not in a chat.
+
+### Sprint 3.2.3 — Mobile chat UX + accurate typing stop 📱
+Follow-up polish after 3.2.2 — mobile composer, typing indicator placement, and instant typing clear.
+- **`USER_TYPING_STOP` (`shared/events.ts`, `chat.socket.ts`, `SocketProvider.tsx`):** explicit stop event on send / clear / idle (1.5s) / unmount so the peer's typing indicator clears **immediately** instead of lingering ~1s.
+- **Typing row inside scroll area (`ConversationPane.tsx`):** bottom **typing…** pill sits **below message timestamps** (never overlapping "4:42 am"); header still shows **typing…** in place of presence.
+- **Mobile keyboard (`ConversationPane.tsx`, `globals.css`):** composer focus + `visualViewport` resize scrolls the thread to the bottom (WhatsApp-style); textarea/icon row height aligned on mobile.
+- **Composer tightening:** ~90% width on mobile, tighter attach/emoji spacing; self chat icon → **`NotepadText`** (sidebar, header, details, forward modal).
+
+### Phase 6C — In-chat search (v1) 🔍
+Search within the **currently open chat** — client-side over decrypted message bodies (E2EE: server stores ciphertext only, so search must run on the device after decrypt).
+- **Entry points:** **Search icon** in the chat header on **desktop (sm+)**; **⋮ → Search** on **mobile**.
+- **UI:** compact header search bar replaces the title row while active — input, **↑/↓** navigation, **N/M** counter, **✕** / Escape to close; Enter / Shift+Enter for next/prev match.
+- **Matches:** highlights text in bubbles + **ring** on the active match + **scrollIntoView**.
+- **Scope (v1):** searches messages **already loaded** in the client cache (~**50 most recent** per chat — the default `GET /api/chat/:chatId/messages` page). **Deleted-for-everyone** (body cleared) and **deleted-for-me** (server-filtered) are not searchable.
+- **Follow-up:** paginate and load **full chat history** when search opens so January messages are findable in May.
 
 ### Sprint 3.2.2 — Call duration cap fix + camera flip + chat polish 🛠️
 Fixes the **~3-minute auto hangup** and bundles four UX fixes (rear camera, typing flicker, bottom typing indicator, image menu/viewer).
@@ -562,12 +583,13 @@ After deploying (Vercel client + Render server) and testing with a friend, a bat
 - **Sprint H — Full-screen mobile chat + overlay status** ✅ **Done** — the **Linkr top bar hides on phones when a chat is open** (app-like full-screen; returns on the list, unchanged on desktop); the status bubble is now a true **overlay** (fixed `h-16` header + `overflow-visible`), removing the empty `pb-12` strip that made it look like a message.
 - **Sprint I — Mobile soft-keyboard fix** ✅ **Done** — focusing the composer no longer scrolls the header off-screen: `interactive-widget=resizes-content` + a `useVisualViewport` hook driving `--app-vh` on `#root`, plus a `sticky` chat header and `min-h-0 overflow-hidden` flex chain so only the message list shrinks above the keyboard.
 - **Sprint J — Notification reliability + manage** ✅ **Done** — **deduped** friend-request notifications (one row per `friendshipId`), **delete** stale rows on accept/reject/cancel, **instant optimistic** Accept/Reject/Block that purges duplicate rows + shows inline errors, plus **Clear all** and a **per-row delete icon** (`DELETE /api/notifications` + `DELETE /:id`, both optimistic).
-- **Phase 3 — Realtime calling** — ✅ **voice (3.1) + video (3.2) + Metered TURN (3.2.1) + duration-cap fix & camera flip (3.2.2)**; remaining: **screen share (3.3)**, group calls (Phase 6).
-- **Phase 4 — Chat UX & account controls** — mute, archive, share, message forward, report user, privacy-settings UI (API exists), account deletion.
+- **Phase 3 — Realtime calling** — ✅ **voice (3.1) + video (3.2) + Metered TURN (3.2.1) + duration-cap fix & camera flip (3.2.2) + mobile chat polish (3.2.3)**; remaining: **screen share (3.3)**, group calls (Phase 6).
+- **Phase 4 — Chat UX & account controls** ✅ **Done** — mute, archive, forward, report, privacy UI, share contact, account deletion.
 - **Phase 5 — Notifications++** — web push (Service Worker + VAPID) for background alerts (generic content to preserve E2EE).
-- **Phase 6 — Groups & discovery** — group chats + admins, group calls, in-chat search; later stories / disappearing messages / channels / polls.
+- **Phase 6 — Groups & discovery** — **in-chat search v1 ✅**; **next: group chats + admins** (plaintext at rest for v1, honest badge); group calls (voice up to ~15 → likely SFU); full-history search pagination; later stories / disappearing messages / channels / polls.
 - **Phase 7 — AI & mobile** — on-device/opt-in AI assistant, voice transcription, spam detection, React Native app.
-- **Phase 8 — Production & scale** — ✅ **real OTP provider (MSG91)** done; remaining: deploy (Vercel + Render/Railway + Atlas), Cloudinary, Redis for multi-instance sockets, HTTPS/WSS, monitoring, CI/CD.
+- **Phase 8 — Production & scale** ✅ **Done (core)** — MSG91 OTP, **Vercel + Render + Atlas** deploy, **Cloudinary** media, **Redis** socket adapter, HTTPS/WSS. Optional later: monitoring dashboards, formal CI/CD gates.
+- **Future / backlog (not scheduled)** — key fingerprint verification UI; QR device linking (needs native app); E2EE media; on-device AI; voice transcription; spam detection; React Native app.
 
 ---
 
@@ -876,8 +898,9 @@ pnpm build        # production build
 | Item | Notes |
 |------|--------|
 | **E2EE** | ✅ **Text is end-to-end encrypted** (Phase 2) — libsodium sealed boxes, server stores ciphertext only, dynamic "End-to-end encrypted" badge. **Media is still in-transit only** (text-only scope); the **dev bot stays plaintext by design** (no published key → automatic fallback). ✅ **Multi-device (Sprint D)** — a recovery-passphrase-encrypted key backup lets a new device restore your key and read history; **E2EE media** is the remaining gap |
-| **Calls** | ✅ **Voice (3.1) + video (3.2) live** in the header for accepted friends (WebRTC, 720p video, camera toggle + local PiP). Remaining: screen share (3.3), group calls (Phase 6), optional TURN for strict-NAT reliability |
-| **Details pane Mute / Share** | Still stubs — **Block/Unblock is wired**; **Unfriend** lives in FriendActions + the sidebar ⋯ menu; **Add friend / Accept / Requested** now reachable from the details pane (Sprint 5.7) |
+| **Calls** | ✅ **Voice (3.1) + video (3.2) live** in the header for accepted friends (WebRTC, 720p video, camera toggle + local PiP). Remaining: screen share (3.3), **group calls (Phase 6 — SFU TBD for 15-way voice)**, Metered TURN live in production |
+| **Details pane Mute / Share** | ✅ **Wired** (Phase 4) — mute/archive in header ⋮ + details footer; **Share contact** in details pane via `shareContact` |
+| **In-chat search** | ✅ **v1 (Phase 6C)** — client-side over **loaded** messages (~50 recent); E2EE bodies decrypted on device first. ⏭️ **Full history** (paginate all pages when search opens) |
 | **Add friend after unblock/unfriend** | ✅ **Closed** (Sprint 5.7) — reachable from the chat's ⋯ menu, the details pane, and the composer; the composer now gates on **not-friends**, not only blocked |
 | **Details Media / Files tabs** | ✅ **Wired** (Sprint 5.6) — thumbnail grid of images + a download list of files, derived from the active chat's messages |
 | **Mobile details bottom sheet** | ✅ **Closed** (Sprint 5.8) — `MobileDetailsSheet` (`lg:hidden` slide-up, backdrop/✕/Escape) shares `DetailsContent` with the desktop aside |
@@ -889,14 +912,35 @@ pnpm build        # production build
 | **Duplicate Settings/Logout in the sidebar row** | ✅ **Closed** (Sprint 5.11) — removed from the sidebar user row (they still live in the header user menu); replaced with **Find friends** (`UserPlus`) + **New chat** (`PenSquare`), both opening friend search |
 | **Profile photo preview before save** | ✅ **Closed** (Sprint 5.9) — picking a photo stages a local preview (no auto-upload); **Save changes** uploads the avatar then patches the profile so the store ends correct; Discard reverts |
 | **Click profile → details** | ✅ **Closed** (Sprint 5.8) — the header avatar + name is a button that opens the details aside (desktop) / sheet (mobile) |
-| **Redis** | Optional; single-instance sockets work without it |
-| **Account deletion** | Blueprint §4 — not implemented yet |
+| **Cloudinary** | ✅ **Done** — chat media + avatars in production (local-disk fallback remains for dev without credentials) |
+| **Redis** | ✅ **Done** — Socket.IO adapter for multi-instance Render deploys |
+| **Account deletion** | ✅ **Done** (Phase 4) — `POST /api/users/me/delete` (15-day soft delete + immediate purge option) |
 | **keys module** | ✅ **Live** (Phase 2 + Sprint D / D.1) — `POST /api/keys` publishes a public key, `GET /api/keys/:userId` returns it (self/friends only), `GET`/`PUT /api/keys/backup` store the caller's recovery-passphrase-encrypted account-key backup (+ single-use backup-code envelopes), and `POST /api/keys/recover` redeems one backup code (phone-OTP gated) to restore on a new device |
 | **Multi-device / account-level E2EE** | ✅ **Closed** (Sprint D) — recovery-passphrase key backup + restore; new devices unlock history; key reset clears the stale backup. Recovery lives in **Profile → Security** |
 
 ---
 
 ## What's next
+
+### Phase 6C — In-chat search ✅ v1 Done
+- ✅ Desktop header Search icon + mobile ⋮ → Search
+- ✅ Header search bar, match navigation, highlight + scroll-to-match
+- ✅ Client-side decrypt-then-search (E2EE-safe)
+- ⏭️ **Full history:** paginate `GET /api/chat/:chatId/messages?before=&limit=100` until empty when search opens
+
+### Phase 6 — Group chats (next build)
+- Create group from **sidebar icon** → multi-select friends (min 1) → name → create
+- Group messaging, member list, admin promote/demote, admin toggles (voice/video off, admin-only messaging)
+- **Plaintext at rest for v1** — honest **"Not end-to-end encrypted"** badge on group chats
+- **Group calls** deferred (voice up to ~15 members → SFU evaluation later)
+
+### Future / backlog (not scheduled)
+- Key fingerprint verification UI (optional)
+- QR device linking (needs native app)
+- E2EE media
+- On-device / opt-in AI assistant, voice transcription, spam detection
+- React Native app
+- Screen share (Phase 3.3)
 
 ### Phase 2 — E2EE (text) ✅ Done
 - ✅ libsodium keypairs (private key in IndexedDB, public key on server via `/api/keys`)
@@ -916,7 +960,16 @@ pnpm build        # production build
 ### Sprint 5 — Media + notifications → MVP complete ✅
 - ✅ Media messages (images + files) → Cloudinary **or** local-disk dev fallback, encrypted in transit
 - ✅ In-app notifications (friend request / accepted / message) with live `notification:new` + a header notification center
-- Still open for later: voice/video media, web **push** notifications (background), archive/mute full wiring, per-chat Media/Files galleries
+- ⏭️ Still open: web **push** notifications (background)
+
+---
+
+## How to test Phase 6C — In-chat search
+1. Open any chat with text messages → **desktop:** click the **Search** icon in the header; **mobile:** **⋮ → Search**.
+2. Type a word you know appears in a recent message → matches highlight; counter shows **1/N**; **↑/↓** or Enter / Shift+Enter jumps between matches; the active bubble gets a ring and scrolls into view.
+3. **Escape** or **✕** closes search and restores the normal header.
+4. **E2EE chat:** search waits for decrypt (same as bubble render) — if a message shows "Decrypting…" in the thread, it won't match until decrypted.
+5. **Scope:** only the **~50 most recently loaded** messages are searched today; older history (e.g. January) requires the planned full-pagination follow-up.
 
 ---
 
@@ -952,6 +1005,6 @@ LINKr/
 
 If context fills up, start a fresh chat with:
 
-> Continue Linkr. Read `project.md` and `projectlinkr.md`. We finished Sprints 0–4 (message actions, pin chats, dev bot, UX). E2EE is deferred to its own sprint. Start Sprint 5 (encrypted media + notifications).
+> Continue Linkr. Read `project.md` and `projectlinkr.md`. Phase 6C in-chat search v1 is done. Next: Phase 6 group chats (plaintext v1, admin controls). Group calls deferred.
 
 Pin or keep `projectlinkr.md` + this `project.md` in the repo root so any new session has full context.

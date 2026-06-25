@@ -36,6 +36,7 @@ import {
   Trash2,
   UserMinus,
   UserPlus,
+  Users,
   Video,
   X,
 } from "lucide-react";
@@ -85,6 +86,13 @@ import { shareContact } from "@/lib/utils/share";
 import { getApiErrorCode } from "@/lib/utils/apiError";
 import { cn } from "@/lib/utils";
 import { highlightText } from "@/lib/utils/highlightText";
+import {
+  chatAvatarSrc,
+  chatDisplayName,
+  isGroupChat,
+  isSelfChatItem,
+  memberNameById,
+} from "@/lib/utils/chatDisplay";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -196,9 +204,9 @@ export function ConversationPane() {
     );
   }
 
-  const isSelf = chat.type === "self";
-  // Self chat reflects your own (live) status; a normal chat shows the contact's status.
-  const status = (isSelf ? sessionUser?.status : chat.participant.status)?.trim() ?? "";
+  const isSelf = isSelfChatItem(chat);
+  const isGroup = isGroupChat(chat);
+  const status = (isSelf ? sessionUser?.status : chat.participant?.status)?.trim() ?? "";
 
   return (
     <section className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg">
@@ -219,7 +227,9 @@ export function ConversationPane() {
       />
       <MessageList
         chatId={activeChatId}
+        chat={chat}
         isSelf={isSelf}
+        isGroup={isGroup}
         participant={chat.participant}
         onReply={(m) => setTarget({ replyTo: m, editing: null })}
         onEdit={(m) => setTarget({ replyTo: null, editing: m })}
@@ -233,10 +243,11 @@ export function ConversationPane() {
       />
       <Composer
         chatId={activeChatId}
-        participantId={chat.participant._id}
-        participantName={chat.participant.displayName}
-        friendship={chat.participant.friendship}
+        participantId={chat.participant?._id ?? ""}
+        participantName={chat.participant?.displayName ?? chatDisplayName(chat)}
+        friendship={chat.participant?.friendship}
         isSelf={isSelf}
+        isGroup={isGroup}
         target={target}
         onClearTarget={() => setTarget({ replyTo: null, editing: null })}
         scrollToBottom={() => scrollChatToBottomRef.current()}
@@ -342,28 +353,31 @@ function ConversationHeader({
   const setDetailsOpen = useUIStore((s) => s.setDetailsOpen);
   const openMobileDetails = useUIStore((s) => s.openMobileDetails);
   const closeMobileDetails = useUIStore((s) => s.closeMobileDetails);
-  const online = onlineOverrides[chat.participant._id] ?? chat.participant.online;
+  const online = chat.participant ? (onlineOverrides[chat.participant._id] ?? chat.participant.online) : false;
   const isTyping = typingByChat[chat._id];
-  const presenceLabel = getPresenceLabel(chat.participant, online);
-  const showDot = showOnlineDot(chat.participant, online);
-  const showStatus = canShowProfileDetails(chat.participant);
-  // E2EE is active for this chat once the peer has published a public key (Phase 2).
-  const e2ee = usePeerHasKey(chat.participant._id) === true;
-  // Self chat: no peer presence/friend actions, but your own custom status still shows (Sprint C.2).
-  const isSelf = chat.type === "self";
-  const title = isSelf ? "Self chat" : chat.participant.displayName;
+  const isGroup = isGroupChat(chat);
+  const isSelf = isSelfChatItem(chat);
+  const title = chatDisplayName(chat);
+  const avatarSrc = chatAvatarSrc(chat);
+  const presenceLabel = chat.participant ? getPresenceLabel(chat.participant, online) : null;
+  const showDot = chat.participant && !isSelf && !isGroup ? showOnlineDot(chat.participant, online) : false;
+  const showStatus = chat.participant ? canShowProfileDetails(chat.participant) : false;
+  const peerId = chat.participant?._id ?? "";
+  const peerHasKey = usePeerHasKey(peerId);
+  const e2ee = !isGroup && peerHasKey === true;
 
-  // Calling (Sprint 3.1): only between accepted friends in a 1:1 chat (never self / strangers).
   const { startCall } = useCallActions();
-  const canCall = !isSelf && chat.participant.friendship?.status === "accepted";
-  const callPeer = {
-    _id: chat.participant._id,
-    username: chat.participant.username,
-    displayName: chat.participant.displayName,
-    avatar: chat.participant.avatar,
-  };
-  const startVoiceCall = () => startCall({ chatId: chat._id, peer: callPeer, media: "audio" });
-  const startVideoCall = () => startCall({ chatId: chat._id, peer: callPeer, media: "video" });
+  const canCall = !isSelf && !isGroup && chat.participant?.friendship?.status === "accepted";
+  const callPeer = chat.participant
+    ? {
+        _id: chat.participant._id,
+        username: chat.participant.username,
+        displayName: chat.participant.displayName,
+        avatar: chat.participant.avatar,
+      }
+    : null;
+  const startVoiceCall = () => callPeer && startCall({ chatId: chat._id, peer: callPeer, media: "audio" });
+  const startVideoCall = () => callPeer && startCall({ chatId: chat._id, peer: callPeer, media: "video" });
 
   // Clicking the name/avatar always reveals the profile (desktop aside + mobile/tablet sheet).
   const openDetails = () => {
@@ -418,10 +432,16 @@ function ConversationHeader({
         <span className="relative shrink-0">
           <Avatar
             name={title}
-            src={chat.participant.avatar}
+            src={avatarSrc}
             size="sm"
-            online={isSelf ? false : showDot}
-            icon={isSelf ? <NotepadText className="h-4 w-4" /> : undefined}
+            online={showDot}
+            icon={
+              isSelf ? (
+                <NotepadText className="h-4 w-4" />
+              ) : isGroup ? (
+                <Users className="h-4 w-4" />
+              ) : undefined
+            }
           />
           {/* WhatsApp-style status hanging under the avatar (mobile only). */}
           {status ? (
@@ -434,6 +454,16 @@ function ConversationHeader({
           <p className="truncate text-sm font-semibold">{title}</p>
           {isSelf ? (
             <p className="truncate text-xs text-text-muted">Message yourself</p>
+          ) : isGroup ? (
+            <p className="truncate text-xs text-text-muted">
+              {isTyping ? (
+                <span className="text-primary">
+                  <TypingLabel />
+                </span>
+              ) : (
+                `${chat.group?.memberCount ?? 0} members`
+              )}
+            </p>
           ) : isTyping ? (
             <p className="truncate text-xs text-primary">
               <TypingLabel />
@@ -443,13 +473,13 @@ function ConversationHeader({
           ) : null}
         </div>
       </button>
-      {showStatus && chat.participant.status?.trim() ? (
+      {!isGroup && showStatus && chat.participant?.status?.trim() ? (
         <StatusChip status={chat.participant.status.trim()} />
       ) : null}
-      <EncryptedBadge iconOnly e2ee={e2ee} />
+      <EncryptedBadge iconOnly e2ee={e2ee} group={isGroup} />
       <div className="flex shrink-0 items-center gap-0.5">
-        {/* Voice + video calls are live (Sprint 3.1 / 3.2) for accepted friends. Compact on
-            phones (see CallButton) so the name + last seen stay readable. */}
+        {!isGroup ? (
+          <>
         <CallButton
           label="Voice call"
           icon={<Phone className="h-4 w-4" />}
@@ -462,6 +492,8 @@ function ConversationHeader({
           disabled={!canCall}
           onClick={canCall ? startVideoCall : undefined}
         />
+          </>
+        ) : null}
         <CallButton
           label="Search in chat"
           icon={<Search className="h-4 w-4" />}
@@ -655,9 +687,10 @@ function HeaderMenu({
   const archiveChat = useArchiveChatMutation();
   const [reportOpen, setReportOpen] = useState(false);
 
+  const isGroup = isGroupChat(chat);
+  const isSelf = isSelfChatItem(chat);
   const participant = chat.participant;
-  const friendship = participant.friendship;
-  const isSelf = chat.type === "self";
+  const friendship = participant?.friendship;
   const blocked = friendship?.status === "blocked";
   const blockedByMe = Boolean(friendship?.blockedByMe);
   const isFriend = friendship?.status === "accepted";
@@ -713,7 +746,7 @@ function HeaderMenu({
               onClick={() => run(onOpenSearch)}
             />
           </div>
-          <HeaderMenuItem icon={<Info className="h-4 w-4" />} label="Contact info" onClick={() => run(onViewInfo)} />
+          <HeaderMenuItem icon={<Info className="h-4 w-4" />} label={isGroup ? "Group info" : "Contact info"} onClick={() => run(onViewInfo)} />
           <HeaderMenuItem
             icon={chat.muted ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
             label={chat.muted ? "Unmute" : "Mute notifications"}
@@ -725,7 +758,7 @@ function HeaderMenu({
             onClick={() => run(() => archiveChat.mutate({ chatId: chat._id, archived: !chat.archived }))}
           />
           {/* Friend/block/share actions are meaningless for the self ("Saved messages") chat. */}
-          {!isSelf && isFriend ? (
+          {!isSelf && !isGroup && isFriend && participant ? (
             <HeaderMenuItem
               icon={<UserMinus className="h-4 w-4" />}
               label="Unfriend"
@@ -733,14 +766,14 @@ function HeaderMenu({
               onClick={() => run(() => unfriend.mutate(participant._id))}
             />
           ) : null}
-          {!isSelf && blocked && blockedByMe ? (
+          {!isSelf && !isGroup && blocked && blockedByMe && participant ? (
             <HeaderMenuItem
               icon={<ShieldOff className="h-4 w-4" />}
               label="Unblock"
               disabled={pending}
               onClick={() => run(() => unblock.mutate(participant._id))}
             />
-          ) : !isSelf && !blocked ? (
+          ) : !isSelf && !isGroup && !blocked && participant ? (
             <HeaderMenuItem
               icon={<Ban className="h-4 w-4" />}
               label="Block"
@@ -749,7 +782,7 @@ function HeaderMenu({
               onClick={() => run(() => block.mutate(participant._id))}
             />
           ) : null}
-          {!isSelf ? (
+          {!isSelf && !isGroup && participant ? (
             <HeaderMenuItem
               icon={<Share2 className="h-4 w-4" />}
               label="Share contact"
@@ -760,7 +793,7 @@ function HeaderMenu({
               }
             />
           ) : null}
-          {!isSelf ? (
+          {!isSelf && !isGroup && participant ? (
             <HeaderMenuItem
               icon={<Flag className="h-4 w-4" />}
               label="Report"
@@ -772,7 +805,7 @@ function HeaderMenu({
       ) : null}
 
       <ReportUserModal
-        target={reportOpen ? { userId: participant._id, name: participant.displayName } : null}
+        target={reportOpen && participant ? { userId: participant._id, name: participant.displayName } : null}
         onClose={() => setReportOpen(false)}
       />
     </div>
@@ -850,7 +883,9 @@ function CallButton({
 
 function MessageList({
   chatId,
+  chat,
   isSelf = false,
+  isGroup = false,
   participant,
   onReply,
   onEdit,
@@ -861,18 +896,16 @@ function MessageList({
   activeMatchId = null,
 }: {
   chatId: string;
+  chat: ChatListItem;
   isSelf?: boolean;
-  participant: ChatListItem["participant"];
+  isGroup?: boolean;
+  participant?: ChatListItem["participant"];
   onReply: (m: MessageDTO) => void;
   onEdit: (m: MessageDTO) => void;
   onForward: (m: MessageDTO) => void;
-  /** Reports whether the list is scrolled near the bottom — drives the mobile status strip (Sprint F). */
   onAtBottomChange?: (atBottom: boolean) => void;
-  /** Lets the composer scroll the thread when the mobile keyboard opens (WhatsApp-style). */
   onRegisterScrollToBottom?: (fn: () => void) => void;
-  /** Non-empty when in-chat search is active — highlights matches in bubbles. */
   searchQuery?: string;
-  /** The message id of the currently focused search match (scroll + strong highlight). */
   activeMatchId?: string | null;
 }) {
   const userId = useAuthStore((s) => s.user?._id);
@@ -917,13 +950,17 @@ function MessageList({
 
   useEffect(() => {
     if (!messages.length || !userId) return;
-    const hasUnread = messages.some((m) => m.sender === participant._id && !m.readBy.includes(userId));
+    const hasUnread = isGroup
+      ? messages.some((m) => m.sender !== userId && !m.readBy.includes(userId))
+      : participant
+        ? messages.some((m) => m.sender === participant._id && !m.readBy.includes(userId))
+        : false;
     if (hasUnread) markRead.mutate();
-  }, [messages, participant._id, userId]);
+  }, [messages, participant?._id, userId, isGroup, markRead]);
 
   const grouped = messages.map((m) => ({
     ...m,
-    senderKey: m.sender === userId ? "me" : "them",
+    senderKey: m.sender === userId ? "me" : isGroup ? m.sender : "them",
   }));
 
   let lastDay = "";
@@ -952,6 +989,8 @@ function MessageList({
           );
         }
 
+        const senderName = isGroup ? memberNameById(chat, message.sender) : (participant?.displayName ?? "Contact");
+
         return (
           <div key={message._id} data-message-id={message._id}>
             {showDay ? <DateSeparator label={day} /> : null}
@@ -961,7 +1000,8 @@ function MessageList({
               position={position}
               showTimestamp={showTimestamp}
               userId={userId}
-              participantName={participant.displayName}
+              participantName={senderName}
+              showSenderName={isGroup && !mine && (position === "first" || position === "single")}
               searchQuery={searchQuery}
               isActiveSearchMatch={message._id === activeMatchId}
               onReply={() => onReply(message)}
@@ -1274,6 +1314,7 @@ function MessageBubble({
   showTimestamp,
   userId,
   participantName,
+  showSenderName = false,
   searchQuery = "",
   isActiveSearchMatch = false,
   onReply,
@@ -1288,6 +1329,7 @@ function MessageBubble({
   showTimestamp: boolean;
   userId?: string;
   participantName: string;
+  showSenderName?: boolean;
   searchQuery?: string;
   isActiveSearchMatch?: boolean;
   onReply: () => void;
@@ -1340,6 +1382,9 @@ function MessageBubble({
       ) : null}
 
       <div className={cn("flex max-w-[88%] flex-col sm:max-w-[65%]", mine ? "items-end" : "items-start")}>
+        {showSenderName ? (
+          <p className="mb-0.5 px-1 text-[11px] font-medium text-primary">{participantName}</p>
+        ) : null}
         <div
           className={cn(
             "px-4 py-2.5 text-sm leading-relaxed",
@@ -1534,6 +1579,7 @@ function Composer({
   participantName,
   friendship,
   isSelf = false,
+  isGroup = false,
   target,
   onClearTarget,
   scrollToBottom,
@@ -1543,6 +1589,7 @@ function Composer({
   participantName: string;
   friendship?: ChatParticipantFriendship;
   isSelf?: boolean;
+  isGroup?: boolean;
   target: ComposerTarget;
   onClearTarget: () => void;
   /** Scroll the message list when the input is focused (mobile keyboard — WhatsApp-style). */
@@ -1746,7 +1793,7 @@ function Composer({
   // Messaging is gated server-side by friendship (NOT_FRIENDS / blocked). Rather than render an input
   // that would just fail on send, show a friendly inline notice with the right action (Sprint 5.7).
   // Self ("Saved messages") chats have no peer, so they're never gated (Sprint C.2).
-  if (!isSelf && friendship?.status !== "accepted") {
+  if (!isSelf && !isGroup && friendship?.status !== "accepted") {
     return (
       <ComposerGate
         participantId={participantId}

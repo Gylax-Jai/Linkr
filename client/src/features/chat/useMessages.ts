@@ -9,13 +9,14 @@ import { useCryptoStore } from "@/lib/crypto";
 import { chatKeys } from "./useChats";
 import { patchListLastMessage, writeCachedChatList } from "./chatListCache";
 
-/** Find the 1:1 chat's other member from the cached chat list (used to pick an encryption target). */
+/** Find the chat's encryption target (1:1/self only). Groups send plaintext. */
 function resolveRecipientId(
   queryClient: ReturnType<typeof useQueryClient>,
   chatId: string,
 ): string | undefined {
-  const list = queryClient.getQueryData<ChatListItem[]>(chatKeys.list());
-  return list?.find((c) => c._id === chatId)?.participant._id;
+  const chat = queryClient.getQueryData<ChatListItem[]>(chatKeys.list())?.find((c) => c._id === chatId);
+  if (!chat || chat.type === "group") return undefined;
+  return chat.participant?._id;
 }
 
 /**

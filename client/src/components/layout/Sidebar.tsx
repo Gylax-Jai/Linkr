@@ -17,6 +17,7 @@ import {
   Trash2,
   UserMinus,
   UserPlus,
+  Users,
   VolumeX,
 } from "lucide-react";
 import type { ChatListItem } from "@linkr/shared";
@@ -31,6 +32,7 @@ import {
   useMuteChatMutation,
   usePinChatMutation,
 } from "@/features/chat";
+import { CreateGroupModal } from "@/features/chat/CreateGroupModal";
 import {
   useAcceptFriendRequestMutation,
   useBlockUserMutation,
@@ -43,6 +45,7 @@ import { useAuthStore, useUIStore } from "@/lib/store";
 import { useDecryptedText } from "@/lib/crypto";
 import { formatChatListTime } from "@/lib/utils/formatTime";
 import { formatMessagePreview } from "@/lib/utils/messagePreview";
+import { chatAvatarSrc, chatDisplayName, isGroupChat, isSelfChatItem } from "@/lib/utils/chatDisplay";
 import { showOnlineDot } from "@/lib/utils/privacy";
 import { cn } from "@/lib/utils";
 
@@ -67,8 +70,13 @@ function ChatPreview({ chat, userId }: { chat: ChatListItem; userId: string }) {
 function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean; userId: string }) {
   const setActiveChat = useUIStore((s) => s.setActiveChat);
   const onlineOverrides = useUIStore((s) => s.onlineOverrides);
-  const online = onlineOverrides[chat.participant._id] ?? chat.participant.online;
-  const showDot = showOnlineDot(chat.participant, online);
+  const isGroup = isGroupChat(chat);
+  const isSelf = isSelfChatItem(chat);
+  const participant = chat.participant;
+  const displayName = chatDisplayName(chat);
+  const avatarSrc = chatAvatarSrc(chat);
+  const online = participant ? (onlineOverrides[participant._id] ?? participant.online) : false;
+  const showDot = participant && !isSelf && !isGroup ? showOnlineDot(participant, online) : false;
   const pinChat = usePinChatMutation();
   const muteChat = useMuteChatMutation();
   const archiveChat = useArchiveChatMutation();
@@ -101,19 +109,15 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
   };
   useEffect(() => cancelLongPress, []);
 
-  const participantId = chat.participant._id;
-  const friendship = chat.participant.friendship;
-  // Self chat: own notes, no presence/friend actions (Sprint C.2).
-  const isSelf = chat.type === "self";
-  const displayName = isSelf ? "Self chat" : chat.participant.displayName;
+  const participantId = participant?._id ?? "";
+  const friendship = participant?.friendship;
   const isFriend = friendship?.status === "accepted";
   const isBlocked = friendship?.status === "blocked";
   const blockedByMe = Boolean(friendship?.blockedByMe);
   const isPending = friendship?.status === "pending";
   const pendingOutgoing = isPending && friendship?.direction === "outgoing";
   const pendingIncoming = isPending && friendship?.direction === "incoming";
-  // No friendship (or a stale rejected row) = strangers → offer to add them. Never for self.
-  const isStranger = !isSelf && !isFriend && !isBlocked && !isPending;
+  const isStranger = !isSelf && !isGroup && !isFriend && !isBlocked && !isPending;
   const friendshipId = friendship?.friendshipId;
 
   useEffect(() => {
@@ -176,10 +180,16 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
       />
       <Avatar
         name={displayName}
-        src={chat.participant.avatar}
+        src={avatarSrc}
         size="md"
-        online={isSelf ? false : showDot}
-        icon={isSelf ? <NotepadText className="h-4 w-4" /> : undefined}
+        online={showDot}
+        icon={
+          isSelf ? (
+            <NotepadText className="h-4 w-4" />
+          ) : isGroup ? (
+            <Users className="h-4 w-4" />
+          ) : undefined
+        }
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
@@ -261,7 +271,7 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
               {chat.archived ? "Unarchive chat" : "Archive chat"}
             </ChatMenuItem>
 
-            {isStranger ? (
+            {!isSelf && !isGroup && isStranger ? (
               <ChatMenuItem
                 icon={<UserPlus className="h-4 w-4" />}
                 onClick={() => {
@@ -273,7 +283,7 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
               </ChatMenuItem>
             ) : null}
 
-            {pendingOutgoing && friendshipId ? (
+            {!isSelf && !isGroup && pendingOutgoing && friendshipId ? (
               <ChatMenuItem
                 icon={<Clock className="h-4 w-4" />}
                 onClick={() => {
@@ -285,7 +295,7 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
               </ChatMenuItem>
             ) : null}
 
-            {pendingIncoming && friendshipId ? (
+            {!isSelf && !isGroup && pendingIncoming && friendshipId ? (
               <ChatMenuItem
                 icon={<Check className="h-4 w-4" />}
                 onClick={() => {
@@ -297,14 +307,14 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
               </ChatMenuItem>
             ) : null}
 
-            {isFriend ? (
+            {!isSelf && !isGroup && isFriend ? (
               <ChatMenuItem
                 icon={<UserMinus className="h-4 w-4" />}
                 onClick={() => {
                   setMenuOpen(false);
                   if (
                     window.confirm(
-                      `Remove ${chat.participant.displayName} from your friends? You won't be able to message until you're friends again.`,
+                      `Remove ${displayName} from your friends? You won't be able to message until you're friends again.`,
                     )
                   ) {
                     removeFriend.mutate(participantId);
@@ -315,7 +325,7 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
               </ChatMenuItem>
             ) : null}
 
-            {isBlocked && blockedByMe ? (
+            {!isSelf && !isGroup && isBlocked && blockedByMe ? (
               <ChatMenuItem
                 icon={<ShieldOff className="h-4 w-4" />}
                 onClick={() => {
@@ -325,7 +335,7 @@ function ChatRow({ chat, active, userId }: { chat: ChatListItem; active: boolean
               >
                 Unblock
               </ChatMenuItem>
-            ) : !isBlocked ? (
+            ) : !isSelf && !isGroup && !isBlocked ? (
               <ChatMenuItem
                 icon={<Ban className="h-4 w-4" />}
                 onClick={() => {
@@ -431,6 +441,7 @@ export function Sidebar() {
   const openFriendSearch = useUIStore((s) => s.openFriendSearch);
   const closeFriendSearch = useUIStore((s) => s.closeFriendSearch);
   const [search, setSearch] = useState("");
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
   const view = useUIStore((s) => s.sidebarView);
   const setView = useUIStore((s) => s.setSidebarView);
   // "Self chat": open (or create) the user's own self chat (Sprint C.2).
@@ -441,12 +452,16 @@ export function Sidebar() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return chats;
-    return chats.filter(
-      (c) =>
-        (c.type === "self" && "self chat".includes(q)) ||
-        c.participant.displayName.toLowerCase().includes(q) ||
-        c.participant.username?.toLowerCase().includes(q),
-    );
+    return chats.filter((c) => {
+      if (c.type === "self" && "self chat".includes(q)) return true;
+      if (c.type === "group") {
+        return c.group?.name.toLowerCase().includes(q) ?? false;
+      }
+      return (
+        c.participant?.displayName.toLowerCase().includes(q) ||
+        c.participant?.username?.toLowerCase().includes(q)
+      );
+    });
   }, [chats, search]);
 
   // Archived chats live in their own collapsible section and never mix into Pinned/Recent.
@@ -469,6 +484,15 @@ export function Sidebar() {
               {user.username ? `@${user.username}` : user.email}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => setGroupModalOpen(true)}
+            aria-label="New group"
+            title="New group chat"
+            className="grid h-8 w-8 place-items-center rounded-full text-text-muted transition-colors hover:bg-surface-2 hover:text-primary"
+          >
+            <Users className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={() => openSelfChat.mutate(user._id)}
@@ -554,6 +578,7 @@ export function Sidebar() {
       )}
 
       <FriendSearchModal open={friendSearchOpen} onClose={closeFriendSearch} />
+      <CreateGroupModal open={groupModalOpen} onClose={() => setGroupModalOpen(false)} />
     </aside>
   );
 }

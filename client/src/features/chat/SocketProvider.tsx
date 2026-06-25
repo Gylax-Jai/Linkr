@@ -137,15 +137,15 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     const onOnline = ({ userId }: { userId: string }) => {
       const list = queryClient.getQueryData<ChatListItem[]>(chatKeys.list());
-      const row = list?.find((c) => c.participant._id === userId);
-      if (row?.participant.presenceVisible === false) return;
+      const row = list?.find((c) => c.participant?._id === userId);
+      if (row?.participant?.presenceVisible === false) return;
       setParticipantOnline(userId, true);
     };
 
     const onOffline = ({ userId }: { userId: string }) => {
       const list = queryClient.getQueryData<ChatListItem[]>(chatKeys.list());
-      const row = list?.find((c) => c.participant._id === userId);
-      if (row?.participant.presenceVisible === false) return;
+      const row = list?.find((c) => c.participant?._id === userId);
+      if (row?.participant?.presenceVisible === false) return;
       setParticipantOnline(userId, false);
     };
 

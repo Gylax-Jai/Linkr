@@ -2,6 +2,7 @@ import type { Request } from "express";
 import type {
   ArchiveChatInput,
   CreateChatInput,
+  CreateGroupInput,
   DeleteMessageInput,
   EditMessageInput,
   ForwardMessageInput,
@@ -16,6 +17,7 @@ import { ApiError } from "../../utils/ApiError.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { getSocketServer } from "../../sockets/io.js";
 import {
+  createGroup,
   deleteChatForUser,
   deleteMessage,
   editMessage,
@@ -23,7 +25,6 @@ import {
   getChatForUser,
   getMessageForUser,
   getOrCreateDirectChat,
-  getOtherMemberId,
   listChatsForUser,
   listMessages,
   markMessagesRead,
@@ -32,6 +33,7 @@ import {
   setChatArchived,
   setChatMuted,
   setChatPinned,
+  emitToChatMembers,
 } from "./chat.service.js";
 import { resolveLocalMediaPath, storeMedia, validateUpload } from "./chat.media.service.js";
 
@@ -51,6 +53,13 @@ export const createChat = asyncHandler(async (req, res) => {
   const { participantId } = req.body as CreateChatInput;
   const chat = await getOrCreateDirectChat(requireUserId(req), participantId);
   res.status(200).json({ chatId: chat._id.toString() });
+});
+
+/** POST /api/chat/group — create a group chat with friends (Phase 6). */
+export const createGroupChat = asyncHandler(async (req, res) => {
+  const { name, memberIds } = req.body as CreateGroupInput;
+  const chat = await createGroup(requireUserId(req), { name, memberIds });
+  res.status(201).json({ chatId: chat._id.toString() });
 });
 
 /** GET /api/chat/:chatId/messages — paginated message history. */
@@ -105,10 +114,7 @@ export const postMedia = asyncHandler(async (req, res) => {
   const io = getSocketServer();
   if (io) {
     const chat = await getChatForUser(chatId, userId);
-    const otherId = await getOtherMemberId(chat, userId);
-    io.to(`user:${userId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
-    // Skip the peer emit for self ("Saved messages") chats — otherId === userId there.
-    if (otherId !== userId) io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message });
+    emitToChatMembers(chat, SOCKET_EVENTS.MESSAGE_NEW, { message });
   }
 
   res.status(201).json({ message });
@@ -214,9 +220,10 @@ export const markChatRead = asyncHandler(async (req, res) => {
   const io = getSocketServer();
   if (io && messages.length > 0) {
     const chat = await getChatForUser(chatId, userId);
-    const otherId = await getOtherMemberId(chat, userId);
-    if (otherId !== userId) {
-      io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_READ, { chatId, messages });
+    for (const member of chat.members) {
+      const memberId = member.toString();
+      if (memberId === userId) continue;
+      io.to(`user:${memberId}`).emit(SOCKET_EVENTS.MESSAGE_READ, { chatId, messages });
     }
   }
 

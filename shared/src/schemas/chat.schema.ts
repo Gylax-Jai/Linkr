@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { MEDIA_CAPTION_MAX } from "../constants/limits.js";
 
+export const createGroupSchema = z.object({
+  /** Display name for the group (Phase 6). */
+  name: z.string().trim().min(1).max(50),
+  /** Friend user ids to add (excluding yourself). At least one required; total members capped at 16. */
+  memberIds: z.array(z.string().min(1)).min(1).max(15),
+});
+
 export const createChatSchema = z.object({
   /** Friend's user id — server creates or returns the existing 1:1 chat. */
   participantId: z.string().min(1),
@@ -96,6 +103,7 @@ export const uploadMediaBodySchema = z.object({
   caption: z.string().trim().max(MEDIA_CAPTION_MAX).optional(),
 });
 
+export type CreateGroupInput = z.infer<typeof createGroupSchema>;
 export type CreateChatInput = z.infer<typeof createChatSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;
 export type EditMessageInput = z.infer<typeof editMessageSchema>;

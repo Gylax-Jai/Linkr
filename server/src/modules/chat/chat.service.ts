@@ -4,12 +4,13 @@ import type {
   CallMedia,
   CallOutcome,
   ChatListItem,
+  ChatParticipant,
   ChatParticipantFriendship,
   MessageDTO,
   MessageType,
   ReplyPreview,
 } from "@linkr/shared";
-import { SOCKET_EVENTS } from "@linkr/shared";
+import { GROUP_MAX_MEMBERS, SOCKET_EVENTS } from "@linkr/shared";
 import { ChatModel, type ChatDoc } from "../../models/Chat.js";
 import { FriendshipModel } from "../../models/Friendship.js";
 import { MessageModel, type MessageDoc } from "../../models/Message.js";
@@ -158,6 +159,11 @@ function isSelfChat(chat: ChatDocument): boolean {
   return chat.type === "self" || chat.members.length === 1;
 }
 
+/** Group chats (Phase 6): plaintext at rest, multi-member. */
+function isGroupChat(chat: ChatDocument): boolean {
+  return chat.type === "group";
+}
+
 async function getOtherMemberId(chat: ChatDocument, userId: string): Promise<string> {
   // Self chats have no "other" side — the counterpart is the user themselves.
   if (isSelfChat(chat)) return userId;
@@ -226,11 +232,104 @@ export async function getOrCreateDirectChat(userId: string, participantId: strin
   });
 }
 
-/** List all 1:1 chats for the user with participant info and last message preview. */
+type ParticipantUser = {
+  id: string;
+  username?: string | null;
+  displayName: string;
+  avatar?: string | null;
+  online?: boolean;
+  lastSeen?: Date | null;
+  bio?: string | null;
+  status?: string | null;
+  statusExpiresAt?: Date | null;
+  privacy?: Parameters<typeof canViewLastSeen>[0];
+};
+
+/** Build a ChatParticipant DTO with privacy + friendship context for the viewing user. */
+function buildChatParticipant(
+  user: ParticipantUser,
+  viewerId: string,
+  relationship: { status: string; actionBy: { toString(): string }; _id: { toString(): string }; requester: { toString(): string } } | null,
+  selfParticipant: boolean,
+): ChatParticipant {
+  let friendship: ChatParticipantFriendship | undefined;
+  if (relationship) {
+    friendship = {
+      status: relationship.status as ChatParticipantFriendship["status"],
+      blockedByMe:
+        relationship.status === "blocked" && relationship.actionBy.toString() === viewerId,
+      friendshipId: relationship._id.toString(),
+      ...(relationship.status === "pending"
+        ? {
+            direction:
+              relationship.requester.toString() === viewerId ? ("outgoing" as const) : ("incoming" as const),
+          }
+        : {}),
+    };
+  }
+
+  const viewerIsFriend = selfParticipant || relationship?.status === "accepted";
+  const presenceVisible = selfParticipant || canViewLastSeen(user.privacy, viewerIsFriend);
+  const profileDetailsVisible =
+    selfParticipant || canViewProfileDetails(user.privacy, viewerIsFriend);
+  const avatarVisible = selfParticipant || canViewAvatarThumbnail(user.privacy, viewerIsFriend);
+  const avatarZoomable = selfParticipant || canZoomAvatar(user.privacy, viewerIsFriend);
+
+  return {
+    _id: user.id,
+    username: user.username ?? undefined,
+    displayName: profileDetailsVisible ? user.displayName : "Linkr user",
+    avatar: avatarVisible ? resolveAvatarUrl(user.avatar, user.id) : undefined,
+    online: presenceVisible ? Boolean(user.online) : false,
+    lastSeen: presenceVisible ? user.lastSeen?.toISOString() : undefined,
+    presenceVisible,
+    profileDetailsVisible,
+    contactCardVisible: avatarVisible,
+    avatarZoomable,
+    bio: profileDetailsVisible ? user.bio ?? undefined : undefined,
+    status: profileDetailsVisible ? activeStatus(user.status, user.statusExpiresAt) : undefined,
+    friendship,
+  };
+}
+
+/** Create a group chat with friends (Phase 6). Creator is admin; max 16 members total. */
+export async function createGroup(
+  creatorId: string,
+  options: { name: string; memberIds: string[] },
+): Promise<ChatDocument> {
+  const name = options.name.trim();
+  const uniqueMemberIds = [...new Set(options.memberIds.filter((id) => id !== creatorId))];
+
+  if (uniqueMemberIds.length === 0) {
+    throw ApiError.badRequest("Select at least one friend");
+  }
+
+  if (uniqueMemberIds.length + 1 > GROUP_MAX_MEMBERS) {
+    throw ApiError.badRequest(`Groups can have at most ${GROUP_MAX_MEMBERS} members`);
+  }
+
+  for (const memberId of uniqueMemberIds) {
+    const user = await UserModel.findById(memberId);
+    if (!user?.onboarded) throw ApiError.notFound("User not found");
+    if (!(await areFriends(creatorId, memberId))) {
+      throw ApiError.forbidden("NOT_FRIENDS", "All members must be your friends");
+    }
+  }
+
+  return ChatModel.create({
+    type: "group",
+    name,
+    members: [creatorId, ...uniqueMemberIds],
+    admins: [creatorId],
+    pinnedBy: [],
+  });
+}
+
+/** List all chats for the user with participant/group info and last message preview. */
 export async function listChatsForUser(userId: string): Promise<ChatListItem[]> {
   const chats = await ChatModel.find({
     members: userId,
-    type: { $in: ["1:1", "self"] },
+    type: { $in: ["1:1", "self", "group"] },
     hiddenFor: { $ne: userId },
   })
     .sort({ updatedAt: -1 })
@@ -241,26 +340,49 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
     });
 
   // Batch participant + friendship lookups (Phase 4.2 — avoid N+1 per chat row).
-  const chatMeta: Array<{ chat: ChatDocument; selfChat: boolean; participantId: string }> = [];
+  const directMeta: Array<{ chat: ChatDocument; selfChat: boolean; participantId: string }> = [];
+  const groupChats: ChatDocument[] = [];
   const participantIdSet = new Set<string>();
+  const groupMemberIdSet = new Set<string>();
 
   for (const chat of chats) {
+    if (isGroupChat(chat)) {
+      groupChats.push(chat);
+      for (const m of chat.members) groupMemberIdSet.add(m.toString());
+      continue;
+    }
     const selfChat = isSelfChat(chat);
     const participantId = selfChat
       ? userId
       : chat.members.find((m) => m.toString() !== userId)?.toString();
     if (!participantId) continue;
-    chatMeta.push({ chat, selfChat, participantId });
+    directMeta.push({ chat, selfChat, participantId });
     participantIdSet.add(participantId);
   }
 
-  const participantIds = [...participantIdSet];
+  const participantIds = [...new Set([...participantIdSet, ...groupMemberIdSet, userId])];
   const participants = participantIds.length
     ? await UserModel.find({ _id: { $in: participantIds } }).select(
         "username displayName avatar online lastSeen bio status statusExpiresAt privacy",
       )
     : [];
-  const participantById = new Map(participants.map((p) => [p.id, p]));
+  const participantById = new Map(
+    participants.map((p) => [
+      p.id,
+      {
+        id: p.id,
+        username: p.username,
+        displayName: p.displayName,
+        avatar: p.avatar,
+        online: p.online,
+        lastSeen: p.lastSeen,
+        bio: p.bio,
+        status: p.status,
+        statusExpiresAt: p.statusExpiresAt,
+        privacy: p.privacy,
+      } satisfies ParticipantUser,
+    ]),
+  );
 
   const peerIds = participantIds.filter((id) => id !== userId);
   const friendships = peerIds.length
@@ -280,9 +402,9 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
 
   const items: ChatListItem[] = [];
 
-  for (const { chat, selfChat, participantId } of chatMeta) {
-    const participant = participantById.get(participantId);
-    if (!participant) continue;
+  for (const { chat, selfChat, participantId } of directMeta) {
+    const user = participantById.get(participantId);
+    if (!user) continue;
 
     const pinned = (chat.pinnedBy ?? []).some((id) => id.toString() === userId);
     const muted = (chat.mutedBy ?? []).some((id) => id.toString() === userId);
@@ -295,51 +417,57 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
     }
 
     const relationship = selfChat ? null : friendshipByPeer.get(participantId) ?? null;
-    let friendship: ChatParticipantFriendship | undefined;
-    if (relationship) {
-      friendship = {
-        status: relationship.status,
-        blockedByMe:
-          relationship.status === "blocked" && relationship.actionBy.toString() === userId,
-        friendshipId: relationship._id.toString(),
-        ...(relationship.status === "pending"
-          ? {
-              direction:
-                relationship.requester.toString() === userId ? ("outgoing" as const) : ("incoming" as const),
-            }
-          : {}),
-      };
-    }
-
-    const viewerIsFriend = selfChat || relationship?.status === "accepted";
-    const presenceVisible = selfChat || canViewLastSeen(participant.privacy, viewerIsFriend);
-    const profileDetailsVisible =
-      selfChat || canViewProfileDetails(participant.privacy, viewerIsFriend);
-    const avatarVisible =
-      selfChat || canViewAvatarThumbnail(participant.privacy, viewerIsFriend);
-    const avatarZoomable = selfChat || canZoomAvatar(participant.privacy, viewerIsFriend);
+    const participant = buildChatParticipant(user, userId, relationship, selfChat);
 
     items.push({
       _id: chat._id.toString(),
       type: selfChat ? "self" : "1:1",
-      participant: {
-        _id: participant.id,
-        username: participant.username ?? undefined,
-        displayName: profileDetailsVisible ? participant.displayName : "Linkr user",
-        avatar: avatarVisible
-          ? resolveAvatarUrl(participant.avatar, participant.id)
-          : undefined,
-        online: presenceVisible ? Boolean(participant.online) : false,
-        lastSeen: presenceVisible ? participant.lastSeen?.toISOString() : undefined,
-        presenceVisible,
-        profileDetailsVisible,
-        contactCardVisible: avatarVisible,
-        avatarZoomable,
-        bio: profileDetailsVisible ? participant.bio ?? undefined : undefined,
-        status: profileDetailsVisible
-          ? activeStatus(participant.status, participant.statusExpiresAt)
-          : undefined,
-        friendship,
+      participant,
+      lastMessage: lastMsg,
+      pinned,
+      muted,
+      archived,
+      unreadCount,
+      updatedAt: (chat.updatedAt instanceof Date ? chat.updatedAt : chat.createdAt).toISOString(),
+    });
+  }
+
+  for (const chat of groupChats) {
+    const pinned = (chat.pinnedBy ?? []).some((id) => id.toString() === userId);
+    const muted = (chat.mutedBy ?? []).some((id) => id.toString() === userId);
+    const archived = (chat.archivedBy ?? []).some((id) => id.toString() === userId);
+    const lastMsg = chat.lastMessage ? toMessageDTO(chat.lastMessage as MessageDocument) : undefined;
+
+    let unreadCount = 0;
+    if (lastMsg && lastMsg.sender !== userId && !lastMsg.readBy.includes(userId)) {
+      unreadCount = 1;
+    }
+
+    const memberIds = chat.members.map((m) => m.toString());
+    const members: ChatParticipant[] = [];
+    for (const memberId of memberIds) {
+      const user = participantById.get(memberId);
+      if (!user) continue;
+      const selfParticipant = memberId === userId;
+      const relationship = selfParticipant ? null : friendshipByPeer.get(memberId) ?? null;
+      members.push(buildChatParticipant(user, userId, relationship, selfParticipant));
+    }
+
+    const adminIds = (chat.admins ?? []).map((id) => id.toString());
+
+    items.push({
+      _id: chat._id.toString(),
+      type: "group",
+      group: {
+        name: typeof chat.name === "string" && chat.name.trim() ? chat.name.trim() : "Group",
+        avatar:
+          typeof chat.avatar === "string" && chat.avatar
+            ? resolveAvatarUrl(chat.avatar, chat._id.toString())
+            : undefined,
+        memberCount: memberIds.length,
+        members,
+        admins: adminIds,
+        isAdmin: adminIds.includes(userId),
       },
       lastMessage: lastMsg,
       pinned,
@@ -426,12 +554,18 @@ export async function sendMessage(
   options: SendMessageOptions,
 ): Promise<MessageDTO> {
   const chat = await getChatForUser(chatId, senderId);
-  const otherId = await getOtherMemberId(chat, senderId);
   const selfChat = isSelfChat(chat);
+  const groupChat = isGroupChat(chat);
 
-  // Self ("Saved messages") chats have no peer to befriend; only gate real 1:1 chats on friendship.
-  if (!selfChat && !(await areFriends(senderId, otherId))) {
-    throw ApiError.forbidden("NOT_FRIENDS", "You must be friends to send messages");
+  if (groupChat && options.encrypted) {
+    throw ApiError.badRequest("Group messages are not end-to-end encrypted");
+  }
+
+  if (!selfChat && !groupChat) {
+    const otherId = await getOtherMemberId(chat, senderId);
+    if (!(await areFriends(senderId, otherId))) {
+      throw ApiError.forbidden("NOT_FRIENDS", "You must be friends to send messages");
+    }
   }
 
   const content = options.content?.trim() ? options.content.trim() : undefined;
@@ -449,8 +583,8 @@ export async function sendMessage(
     }
   }
 
-  // Media is not encrypted in Phase 2 (text-only E2EE); only flag a text body as encrypted.
-  const encrypted = Boolean(options.encrypted) && !media;
+  // Media is not encrypted in Phase 2 (text-only E2EE); groups are always plaintext.
+  const encrypted = !groupChat && Boolean(options.encrypted) && !media;
 
   const message = await MessageModel.create({
     chatId,
@@ -474,18 +608,33 @@ export async function sendMessage(
 
   if (replyId) await message.populate(REPLY_POPULATE);
 
-  // Notify the recipient (best-effort; never blocks or breaks the send). Skip for self chats —
-  // there's no one else to notify, and you shouldn't ping yourself. Skip too when the recipient has
-  // MUTED this chat (Phase 4) — no in-app notification (and, later, no push) for muted threads.
-  const mutedByRecipient = (chat.mutedBy ?? []).some((id) => id.toString() === otherId);
-  if (!selfChat && !mutedByRecipient) {
-    void createNotification({
-      userId: otherId,
-      type: "message",
-      actorId: senderId,
-      chatId,
-      messagePreview: buildMessagePreview(media, content, encrypted),
-    });
+  // Notify recipients (best-effort). Self chats skip; groups notify all non-muted members except sender.
+  if (groupChat) {
+    for (const member of chat.members) {
+      const memberId = member.toString();
+      if (memberId === senderId) continue;
+      const mutedByRecipient = (chat.mutedBy ?? []).some((id) => id.toString() === memberId);
+      if (mutedByRecipient) continue;
+      void createNotification({
+        userId: memberId,
+        type: "message",
+        actorId: senderId,
+        chatId,
+        messagePreview: buildMessagePreview(media, content, encrypted),
+      });
+    }
+  } else {
+    const otherId = await getOtherMemberId(chat, senderId);
+    const mutedByRecipient = (chat.mutedBy ?? []).some((id) => id.toString() === otherId);
+    if (!selfChat && !mutedByRecipient) {
+      void createNotification({
+        userId: otherId,
+        type: "message",
+        actorId: senderId,
+        chatId,
+        messagePreview: buildMessagePreview(media, content, encrypted),
+      });
+    }
   }
 
   return toMessageDTO(message);
@@ -540,6 +689,9 @@ export async function editMessage(
   if (!message) throw ApiError.notFound("Message not found");
 
   const chat = await getChatForUser(String(message.chatId), userId);
+  if (isGroupChat(chat) && encrypted) {
+    throw ApiError.badRequest("Group messages are not end-to-end encrypted");
+  }
   if (String(message.sender) !== userId) {
     throw ApiError.forbidden("NOT_SENDER", "You can only edit your own messages");
   }
@@ -600,9 +752,11 @@ export async function reactToMessage(
   if (!message) throw ApiError.notFound("Message not found");
 
   const chat = await getChatForUser(String(message.chatId), userId);
-  const otherId = await getOtherMemberId(chat, userId);
-  if (!(await areFriends(userId, otherId))) {
-    throw ApiError.forbidden("NOT_FRIENDS", "You must be friends to react");
+  if (!isSelfChat(chat) && !isGroupChat(chat)) {
+    const otherId = await getOtherMemberId(chat, userId);
+    if (!(await areFriends(userId, otherId))) {
+      throw ApiError.forbidden("NOT_FRIENDS", "You must be friends to react");
+    }
   }
   if (message.deletedForEveryone) {
     throw ApiError.badRequest("Cannot react to a deleted message");
@@ -670,9 +824,7 @@ export async function forwardMessage(
   // Render live for both members (sendMessage persists but doesn't broadcast; mirror the media path).
   const io = getSocketServer();
   if (io) {
-    const otherId = await getOtherMemberId(targetChat, userId);
-    io.to(`user:${userId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message: dto });
-    if (otherId !== userId) io.to(`user:${otherId}`).emit(SOCKET_EVENTS.MESSAGE_NEW, { message: dto });
+    emitToChatMembers(targetChat, SOCKET_EVENTS.MESSAGE_NEW, { message: dto });
   }
 
   return dto;
@@ -825,4 +977,4 @@ export async function markMessagesRead(chatId: string, userId: string): Promise<
   return updated;
 }
 
-export { getChatForUser, getMessageForUser, getOtherMemberId, toMessageDTO };
+export { getChatForUser, getMessageForUser, getOtherMemberId, toMessageDTO, emitToChatMembers };

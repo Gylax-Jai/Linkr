@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   archiveChatSchema,
   chatIdParamSchema,
+  createGroupSchema,
   createChatSchema,
   deleteMessageSchema,
   editMessageSchema,
@@ -21,6 +22,7 @@ import { singleFileUpload } from "../../middleware/upload.js";
 import {
   archiveChat,
   createChat,
+  createGroupChat,
   deleteChat,
   getChats,
   getMedia,
@@ -47,6 +49,7 @@ export const chatRouter: Router = Router();
 
 chatRouter.get("/", requireAuth, getChats);
 chatRouter.post("/", requireAuth, validate(createChatSchema), createChat);
+chatRouter.post("/group", requireAuth, validate(createGroupSchema), createGroupChat);
 
 // Per-message actions (declared before /:chatId routes is unnecessary — paths don't collide).
 chatRouter.patch(

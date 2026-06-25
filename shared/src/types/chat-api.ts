@@ -90,12 +90,25 @@ export interface MessageDTO {
   deletedForEveryone: boolean;
 }
 
+/** Summary of a group chat embedded in list/detail responses (Phase 6). */
+export interface GroupChatSummary {
+  name: string;
+  avatar?: string;
+  memberCount: number;
+  members: ChatParticipant[];
+  admins: ID[];
+  /** True when the current user is a group admin. */
+  isAdmin: boolean;
+}
+
 /** Chat list row returned by GET /api/chat. */
 export interface ChatListItem {
   _id: ID;
-  /** "self" is the user's own "Saved messages" chat (Sprint C.2); otherwise a 1:1. */
-  type: "1:1" | "self";
-  participant: ChatParticipant;
+  type: "1:1" | "self" | "group";
+  /** Present for 1:1 and self chats. */
+  participant?: ChatParticipant;
+  /** Present for group chats. */
+  group?: GroupChatSummary;
   lastMessage?: MessageDTO;
   pinned: boolean;
   /** Notifications for this chat are silenced for the current user (Phase 4). */

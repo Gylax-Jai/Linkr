@@ -10,12 +10,8 @@ import { cn } from "@/lib/utils";
  */
 const E2EE_TOOLTIP = "End-to-end encrypted · only you and your contact can read these messages";
 const TRANSIT_TOOLTIP = "Encrypted in transit · end-to-end encryption applies once your contact has a key";
+const GROUP_TOOLTIP = "Not end-to-end encrypted · group messages are stored on the server";
 
-/**
- * Custom hover/focus tooltip anchored to the badge. Replaces the native `title=` (whose huge white
- * OS bubble bled across the header on hover). Constrained width + right-aligned so it never spills
- * off-screen; pointer-events-none so it can't trap hover.
- */
 function BadgeTooltip({ text }: { text: string }) {
   return (
     <span
@@ -31,14 +27,28 @@ export function EncryptedBadge({
   className,
   iconOnly = false,
   e2ee = false,
+  group = false,
 }: {
   className?: string;
   iconOnly?: boolean;
   /** True when the active chat is end-to-end encrypted (peer has a published key). */
   e2ee?: boolean;
+  /** True for group chats (plaintext at rest, honest badge). */
+  group?: boolean;
 }) {
-  const tooltip = e2ee ? E2EE_TOOLTIP : TRANSIT_TOOLTIP;
-  const Icon = e2ee ? ShieldCheck : Lock;
+  const tooltip = group ? GROUP_TOOLTIP : e2ee ? E2EE_TOOLTIP : TRANSIT_TOOLTIP;
+  const Icon = group ? Lock : e2ee ? ShieldCheck : Lock;
+  const groupStyle = group
+    ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+    : e2ee
+      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+      : "border-primary/20 bg-primary/10 text-primary";
+  const pillStyle = group
+    ? "border-amber-500/30 bg-amber-500/10"
+    : e2ee
+      ? "border-emerald-500/30 bg-emerald-500/10"
+      : "border-primary/20 bg-primary/10";
+  const label = group ? "Not E2EE" : e2ee ? "End-to-end encrypted" : "Private chat";
 
   if (iconOnly) {
     return (
@@ -47,9 +57,7 @@ export function EncryptedBadge({
         aria-label={tooltip}
         className={cn(
           "group relative grid h-8 w-8 place-items-center rounded-full border outline-none",
-          e2ee
-            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-            : "border-primary/20 bg-primary/10 text-primary",
+          groupStyle,
           className,
         )}
       >
@@ -65,12 +73,12 @@ export function EncryptedBadge({
       aria-label={tooltip}
       className={cn(
         "group relative inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-wide text-text outline-none",
-        e2ee ? "border-emerald-500/30 bg-emerald-500/10" : "border-primary/20 bg-primary/10",
+        pillStyle,
         className,
       )}
     >
-      <Icon className={cn("h-3 w-3", e2ee ? "text-emerald-600 dark:text-emerald-400" : "text-primary")} />
-      {e2ee ? "End-to-end encrypted" : "Private chat"}
+      <Icon className={cn("h-3 w-3", group ? "text-amber-700 dark:text-amber-400" : e2ee ? "text-emerald-600 dark:text-emerald-400" : "text-primary")} />
+      {label}
       <BadgeTooltip text={tooltip} />
     </span>
   );

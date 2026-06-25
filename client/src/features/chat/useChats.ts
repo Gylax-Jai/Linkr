@@ -25,6 +25,22 @@ export function useChatList() {
   });
 }
 
+export function useCreateGroupMutation() {
+  const queryClient = useQueryClient();
+  const setActiveChat = useUIStore((s) => s.setActiveChat);
+
+  return useMutation({
+    mutationFn: async ({ name, memberIds }: { name: string; memberIds: string[] }) => {
+      const res = await api.post<{ chatId: string }>("/chat/group", { name, memberIds });
+      return res.data.chatId;
+    },
+    onSuccess: (chatId) => {
+      void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+      setActiveChat(chatId);
+    },
+  });
+}
+
 export function useCreateChatMutation() {
   const queryClient = useQueryClient();
   const setActiveChat = useUIStore((s) => s.setActiveChat);

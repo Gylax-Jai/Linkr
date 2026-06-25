@@ -1,6 +1,7 @@
 export {
   useChatList,
   useCreateChatMutation,
+  useCreateGroupMutation,
   useChatById,
   usePinChatMutation,
   useMuteChatMutation,
@@ -21,5 +22,6 @@ export {
 } from "./useMessages";
 export { MessageMedia, downloadMessageMedia } from "./MessageMedia";
 export { ForwardMessageModal } from "./ForwardMessageModal";
+export { CreateGroupModal } from "./CreateGroupModal";
 export { SocketProvider, emitTyping, emitTypingStop } from "./SocketProvider";
 export { useChatInMessageSearch } from "./useChatInMessageSearch";
