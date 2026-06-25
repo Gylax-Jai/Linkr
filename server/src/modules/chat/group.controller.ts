@@ -13,11 +13,20 @@ import {
   setGroupAvatar,
   updateGroupName,
 } from "./group.service.js";
+import { listGroupMembersForChat } from "./chat.service.js";
 
 function requireUserId(req: Request): string {
   if (!req.user) throw ApiError.unauthorized();
   return req.user.id;
 }
+
+/** GET /api/chat/group/:chatId/members — full member roster (lazy; not in GET /chat list). */
+export const getGroupMembers = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  if (!chatId) throw ApiError.badRequest("Missing chatId");
+  const members = await listGroupMembersForChat(chatId, requireUserId(req));
+  res.status(200).json({ members });
+});
 
 /** PATCH /api/chat/group/:chatId — rename group (admin). */
 export const patchGroup = asyncHandler(async (req, res) => {

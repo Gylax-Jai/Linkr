@@ -8,6 +8,7 @@ export const chatKeys = {
   all: ["chats"] as const,
   list: () => [...chatKeys.all, "list"] as const,
   messages: (chatId: string) => [...chatKeys.all, "messages", chatId] as const,
+  groupMembers: (chatId: string) => [...chatKeys.all, "group-members", chatId] as const,
 };
 
 export function useChatList() {

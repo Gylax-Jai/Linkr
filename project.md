@@ -589,8 +589,66 @@ After deploying (Vercel client + Render server) and testing with a friend, a bat
 - **Phase 5 — Notifications++** — web push (Service Worker + VAPID) for background alerts (generic content to preserve E2EE).
 - **Phase 6 — Groups & discovery** — **in-chat search v1 ✅**; **next: group chats + admins** (plaintext at rest for v1, honest badge); group calls (voice up to ~15 → likely SFU); full-history search pagination; later stories / disappearing messages / channels / polls.
 - **Phase 7 — AI & mobile** — on-device/opt-in AI assistant, voice transcription, spam detection, React Native app.
-- **Phase 8 — Production & scale** ✅ **Done (core)** — MSG91 OTP, **Vercel + Render + Atlas** deploy, **Cloudinary** media, **Redis** socket adapter, HTTPS/WSS. Optional later: monitoring dashboards, formal CI/CD gates.
-- **Future / backlog (not scheduled)** — key fingerprint verification UI; QR device linking (needs native app); E2EE media; on-device AI; voice transcription; spam detection; React Native app.
+- **Phase 8 — Production & scale** ✅ **Done (core)** — MSG91 OTP, **Vercel + Render + Atlas** deploy, **Cloudinary** media, **Redis** socket adapter, HTTPS/WSS. Optional later: monitoring dashboards, formal CI/CD gates. **Contingency:** MSG91-off + phone-confirm onboarding; backup-code-only recovery; self-hosted coturn TURN (see *Infrastructure contingency* below).
+- **Future / backlog (not scheduled)** — key fingerprint verification UI; QR device linking (needs native app); E2EE media; on-device AI; voice transcription; spam detection; React Native app; **infrastructure contingency** (MSG91 / TURN — see below).
+
+---
+
+## Infrastructure contingency — if MSG91 or TURN trials fail
+
+> **Not built yet** — documented recovery plan if paid SMS or managed TURN becomes too expensive or unavailable. Code already has hooks for most of this; the items below are the intended behaviour when we flip the switch.
+
+### A. MSG91 SMS OTP — remove paid SMS
+
+**Trigger:** MSG91 trial ends, billing too high, or provider outage.
+
+**Step 1 — disable MSG91 (no code change):**
+- **Server (Render):** unset `MSG91_AUTH_KEY`
+- **Client (Vercel):** unset `VITE_MSG91_WIDGET_ID` and `VITE_MSG91_WIDGET_TOKEN`
+- Redeploy both. Today this falls back to the built-in dev OTP flow (`POST /api/auth/otp/send` + `/verify`), which still expects a 6-digit code — **not** suitable for production without a real SMS sender.
+
+**Step 2 — planned onboarding change (implement when cutting MSG91):**
+- Phone step becomes: **enter number → confirm checkbox** ("This is my number") → save.
+- No OTP, no MSG91 widget, no SMS cost.
+- Server calls `bindVerifiedPhone()` directly after confirm (new route or relaxed verify path).
+- **Tradeoff:** the number is **not cryptographically verified** — we only enforce **one account per number** when a second person tries to claim it. Acceptable if Google login remains the primary identity.
+
+**Step 3 — planned E2EE recovery change (implement when cutting MSG91):**
+
+| Unlock path | Phone step? |
+|-------------|-------------|
+| **Recovery passphrase** | Unchanged — no phone involved today |
+| **Single-use backup codes** | **Skip phone entirely** — user is already signed in (Google) on the new device; enter backup code only |
+
+Today backup-code redemption also requires MSG91 token or dev OTP (`redeemRecoveryCode` in `keys.service.ts`). The contingency plan removes that phone gate — backup codes are high-entropy (~100 bits) and sufficient as a second factor alongside Google auth.
+
+**Code touchpoints when implementing:** `usePhoneVerification` + `OnboardingWizard` PhoneStep; `server/src/modules/auth/otp.service.ts` (`bindVerifiedPhone`); `server/src/modules/keys/keys.service.ts` (`redeemRecoveryCode`); client unlock UI (`E2EEKeyGuard` / `UnlockPanel`).
+
+**Alternative (keep SMS, swap provider):** wire Twilio / AWS SNS / Vonage into existing `sendOtp()` in `otp.service.ts` — UI stays OTP-based, only the sender changes.
+
+---
+
+### B. Metered TURN — self-hosted coturn backup
+
+**Trigger:** Metered Open Relay trial ends, quota exceeded, or cross-network calls fail (ring + accept but stuck on **Connecting** — signaling works, ICE relay missing).
+
+**Already built:** two TURN modes in `server/src/config/env.ts` + `calls.service.ts`:
+
+| Mode | Env vars | Status |
+|------|----------|--------|
+| **Managed static** (current) | `TURN_URLS` + `TURN_USERNAME` + `TURN_CREDENTIAL` | Metered dashboard |
+| **Self-hosted coturn** (backup) | `TURN_URLS` + `TURN_SECRET` | HMAC-minted per-user creds; static creds take precedence if both set |
+
+**Migration steps (when Metered ends):**
+1. Provision a small VPS (e.g. Hetzner / DigitalOcean ~$5–10/mo).
+2. Install **coturn** with `use-auth-secret` / TURN REST API; open **UDP/TCP 3478** (and **5349** if using `turns:`).
+3. **Render server env:** set `TURN_URLS=turn:your-host:3478,...` and `TURN_SECRET=<shared-secret>`; **remove** `TURN_USERNAME` and `TURN_CREDENTIAL`.
+4. Redeploy; confirm startup log: `WebRTC TURN enabled (coturn REST credential mint)`.
+5. Test: caller on Wi‑Fi, callee on mobile data → call connects and audio/video flows.
+
+**Degraded mode (temporary emergency):** clear all TURN vars → **STUN-only** (Google public STUN). Same-network / permissive NAT may still work; **cellular ↔ Wi‑Fi calls will likely fail**.
+
+**Cost note:** self-hosted TURN relays media through your VPS egress — cheap at small scale; monitor bandwidth as usage grows.
 
 ---
 
@@ -918,6 +976,7 @@ pnpm build        # production build
 | **Account deletion** | ✅ **Done** (Phase 4) — `POST /api/users/me/delete` (15-day soft delete + immediate purge option) |
 | **keys module** | ✅ **Live** (Phase 2 + Sprint D / D.1) — `POST /api/keys` publishes a public key, `GET /api/keys/:userId` returns it (self/friends only), `GET`/`PUT /api/keys/backup` store the caller's recovery-passphrase-encrypted account-key backup (+ single-use backup-code envelopes), and `POST /api/keys/recover` redeems one backup code (phone-OTP gated) to restore on a new device |
 | **Multi-device / account-level E2EE** | ✅ **Closed** (Sprint D) — recovery-passphrase key backup + restore; new devices unlock history; key reset clears the stale backup. Recovery lives in **Profile → Security** |
+| **MSG91 / TURN provider failure** | ⏭️ **Contingency documented** (not implemented) — if MSG91 billing ends: phone-confirm onboarding (no OTP) + backup-code recovery without phone step; if Metered TURN ends: migrate to self-hosted **coturn** (`TURN_SECRET` mode). See **Infrastructure contingency** in Timeline |
 
 ---
 
@@ -944,6 +1003,9 @@ pnpm build        # production build
 - On-device / opt-in AI assistant, voice transcription, spam detection
 - React Native app
 - Screen share (Phase 3.3)
+- **Infrastructure contingency** — if MSG91 or Metered TURN trials end: phone-confirm onboarding (no OTP), backup-code recovery without phone step, self-hosted coturn (see **Infrastructure contingency** section in Timeline)
+
+---
 
 ### Phase 2 — E2EE (text) ✅ Done
 - ✅ libsodium keypairs (private key in IndexedDB, public key on server via `/api/keys`)

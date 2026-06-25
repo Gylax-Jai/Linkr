@@ -142,7 +142,7 @@ function DetailsContent() {
     if (!chat?.group || !sessionUser) return;
     const admins = chat.group.admins;
     const isSoleAdmin = chat.group.isAdmin && admins.length === 1 && admins.includes(sessionUser._id);
-    const hasOthers = chat.group.members.some((m) => m._id !== sessionUser._id);
+    const hasOthers = (chat.group.memberCount ?? 0) > 1;
     if (isSoleAdmin && hasOthers) {
       setLeaveOpen(true);
       return;

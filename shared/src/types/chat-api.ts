@@ -95,7 +95,8 @@ export interface GroupChatSummary {
   name: string;
   avatar?: string;
   memberCount: number;
-  members: ChatParticipant[];
+  /** Full roster — only on GET /api/chat/group/:chatId/members (omitted from GET /chat list). */
+  members?: ChatParticipant[];
   admins: ID[];
   /** True when the current user is a group admin. */
   isAdmin: boolean;

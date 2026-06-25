@@ -37,3 +37,4 @@ export {
 } from "./useGroupAdmin";
 export { SocketProvider, emitTyping, emitTypingStop } from "./SocketProvider";
 export { useChatInMessageSearch } from "./useChatInMessageSearch";
+export { useGroupMembers } from "./useGroupMembers";

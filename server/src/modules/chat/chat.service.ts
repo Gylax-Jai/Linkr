@@ -342,12 +342,10 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
   const directMeta: Array<{ chat: ChatDocument; selfChat: boolean; participantId: string }> = [];
   const groupChats: ChatDocument[] = [];
   const participantIdSet = new Set<string>();
-  const groupMemberIdSet = new Set<string>();
 
   for (const chat of chats) {
     if (isGroupChat(chat)) {
       groupChats.push(chat);
-      for (const m of chat.members) groupMemberIdSet.add(m.toString());
       continue;
     }
     const selfChat = isSelfChat(chat);
@@ -359,7 +357,7 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
     participantIdSet.add(participantId);
   }
 
-  const participantIds = [...new Set([...participantIdSet, ...groupMemberIdSet, userId])];
+  const participantIds = [...new Set([...participantIdSet, userId])];
   const participants = participantIds.length
     ? await UserModel.find({ _id: { $in: participantIds } }).select(
         "username displayName avatar online lastSeen bio status statusExpiresAt privacy",
@@ -443,15 +441,6 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
     }
 
     const memberIds = chat.members.map((m) => m.toString());
-    const members: ChatParticipant[] = [];
-    for (const memberId of memberIds) {
-      const user = participantById.get(memberId);
-      if (!user) continue;
-      const selfParticipant = memberId === userId;
-      const relationship = selfParticipant ? null : friendshipByPeer.get(memberId) ?? null;
-      members.push(buildChatParticipant(user, userId, relationship, selfParticipant));
-    }
-
     const adminIds = (chat.admins ?? []).map((id) => id.toString());
 
     items.push({
@@ -464,7 +453,6 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
             ? resolveGroupAvatarUrl(chat.avatar, chat._id.toString())
             : undefined,
         memberCount: memberIds.length,
-        members,
         admins: adminIds,
         isAdmin: adminIds.includes(userId),
       },
@@ -483,6 +471,65 @@ export async function listChatsForUser(userId: string): Promise<ChatListItem[]> 
   });
 
   return items;
+}
+
+/** Full member roster for a group (lazy-loaded by the client — not included in GET /chat). */
+export async function listGroupMembersForChat(chatId: string, userId: string): Promise<ChatParticipant[]> {
+  const chat = await getChatForUser(chatId, userId);
+  if (!isGroupChat(chat)) {
+    throw ApiError.badRequest("Not a group chat");
+  }
+
+  const memberIds = chat.members.map((m) => m.toString());
+  const participants = memberIds.length
+    ? await UserModel.find({ _id: { $in: memberIds } }).select(
+        "username displayName avatar online lastSeen bio status statusExpiresAt privacy",
+      )
+    : [];
+
+  const participantById = new Map(
+    participants.map((p) => [
+      p.id,
+      {
+        id: p.id,
+        username: p.username,
+        displayName: p.displayName,
+        avatar: p.avatar,
+        online: p.online,
+        lastSeen: p.lastSeen,
+        bio: p.bio,
+        status: p.status,
+        statusExpiresAt: p.statusExpiresAt,
+        privacy: p.privacy,
+      } satisfies ParticipantUser,
+    ]),
+  );
+
+  const peerIds = memberIds.filter((id) => id !== userId);
+  const friendships = peerIds.length
+    ? await FriendshipModel.find({
+        $or: [
+          { requester: userId, recipient: { $in: peerIds } },
+          { recipient: userId, requester: { $in: peerIds } },
+        ],
+      })
+    : [];
+  const friendshipByPeer = new Map<string, (typeof friendships)[number]>();
+  for (const f of friendships) {
+    const requesterId = f.requester.toString();
+    const peerId = requesterId === userId ? f.recipient.toString() : requesterId;
+    friendshipByPeer.set(peerId, f);
+  }
+
+  const members: ChatParticipant[] = [];
+  for (const memberId of memberIds) {
+    const user = participantById.get(memberId);
+    if (!user) continue;
+    const selfParticipant = memberId === userId;
+    const relationship = selfParticipant ? null : friendshipByPeer.get(memberId) ?? null;
+    members.push(buildChatParticipant(user, userId, relationship, selfParticipant));
+  }
+  return members;
 }
 
 /** Paginated message history (newest first in DB query, returned chronological). */

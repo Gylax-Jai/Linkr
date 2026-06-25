@@ -202,8 +202,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     };
 
     const onGroupUpdated = ({ chatId }: { chatId: string }) => {
+      void queryClient.invalidateQueries({ queryKey: chatKeys.groupMembers(chatId) });
       void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
-      void queryClient.invalidateQueries({ queryKey: chatKeys.messages(chatId) });
     };
 
     const onGroupDeleted = ({ chatId }: { chatId: string }) => {
@@ -214,6 +214,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         return next;
       });
       queryClient.removeQueries({ queryKey: chatKeys.messages(chatId) });
+      queryClient.removeQueries({ queryKey: chatKeys.groupMembers(chatId) });
       if (useUIStore.getState().activeChatId === chatId) {
         useUIStore.getState().setActiveChat(null);
       }

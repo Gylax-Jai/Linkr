@@ -4,6 +4,7 @@ import type { ChatListItem } from "@linkr/shared";
 import { Avatar } from "@/components/ui/Avatar";
 import { useFriends } from "@/features/friends";
 import { useAddGroupMemberMutation } from "./useGroupAdmin";
+import { useGroupMembers } from "./useGroupMembers";
 
 /** Pick a friend to add to an existing group (admin only). */
 export function AddGroupMemberModal({
@@ -17,13 +18,11 @@ export function AddGroupMemberModal({
 }) {
   const { data, isLoading } = useFriends();
   const addMember = useAddGroupMemberMutation(chat?._id ?? null);
+  const { data: roster = [] } = useGroupMembers(chat?._id ?? null, open);
   const [query, setQuery] = useState("");
   const [pendingId, setPendingId] = useState<string | null>(null);
 
-  const memberIds = useMemo(
-    () => new Set((chat?.group?.members ?? []).map((m) => m._id)),
-    [chat?.group?.members],
-  );
+  const memberIds = useMemo(() => new Set(roster.map((m) => m._id)), [roster]);
 
   useEffect(() => {
     if (!open) {

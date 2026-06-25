@@ -27,6 +27,7 @@ import {
   useUpdateGroupNameMutation,
   useUploadGroupAvatarMutation,
 } from "./useGroupAdmin";
+import { useGroupMembers } from "./useGroupMembers";
 
 function MemberActions({
   chatId,
@@ -157,6 +158,7 @@ export function GroupProfilePanel({
   const fileRef = useRef<HTMLInputElement>(null);
   const rename = useUpdateGroupNameMutation(chat._id);
   const uploadAvatar = useUploadGroupAvatarMutation(chat._id);
+  const { data: members = [], isLoading: membersLoading } = useGroupMembers(chat._id);
 
   const saveName = async () => {
     const next = nameDraft.trim();
@@ -258,7 +260,10 @@ export function GroupProfilePanel({
           ) : null}
         </div>
         <ul className="space-y-2">
-          {(chat.group?.members ?? []).map((m) => {
+          {membersLoading ? (
+            <li className="px-1 py-2 text-sm text-text-muted">Loading members…</li>
+          ) : null}
+          {members.map((m) => {
             const memberIsAdmin = chat.group?.admins.includes(m._id) ?? false;
             return (
               <li key={m._id} className="flex items-center gap-2">

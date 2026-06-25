@@ -1,4 +1,4 @@
-import type { ChatListItem } from "@linkr/shared";
+import type { ChatListItem, ChatParticipant } from "@linkr/shared";
 
 export function isGroupChat(chat: ChatListItem): boolean {
   return chat.type === "group";
@@ -19,9 +19,6 @@ export function chatAvatarSrc(chat: ChatListItem): string | undefined {
   return chat.participant?.avatar;
 }
 
-export function memberNameById(chat: ChatListItem, memberId: string): string {
-  if (chat.type === "group") {
-    return chat.group?.members.find((m) => m._id === memberId)?.displayName ?? "Member";
-  }
-  return chat.participant?.displayName ?? "Member";
+export function memberNameById(members: ChatParticipant[] | undefined, memberId: string): string {
+  return members?.find((m) => m._id === memberId)?.displayName ?? "Member";
 }

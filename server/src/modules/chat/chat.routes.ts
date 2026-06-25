@@ -46,6 +46,7 @@ import {
   deleteGroupAdmin,
   deleteGroupMember,
   getGroupAvatar,
+  getGroupMembers,
   patchGroup,
   postGroupAdmin,
   postGroupAvatar,
@@ -66,6 +67,13 @@ export const chatRouter: Router = Router();
 chatRouter.get("/", requireAuth, getChats);
 chatRouter.post("/", requireAuth, validate(createChatSchema), createChat);
 chatRouter.post("/group", requireAuth, validate(createGroupSchema), createGroupChat);
+
+chatRouter.get(
+  "/group/:chatId/members",
+  requireAuth,
+  validate(chatIdParamSchema, "params"),
+  getGroupMembers,
+);
 
 chatRouter.patch(
   "/group/:chatId",

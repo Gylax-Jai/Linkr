@@ -3,8 +3,9 @@ import { api } from "@/lib/api";
 import { useUIStore } from "@/lib/store";
 import { chatKeys } from "./useChats";
 
-function invalidateChats(queryClient: ReturnType<typeof useQueryClient>) {
+function invalidateChats(queryClient: ReturnType<typeof useQueryClient>, chatId: string | null) {
   void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+  if (chatId) void queryClient.invalidateQueries({ queryKey: chatKeys.groupMembers(chatId) });
 }
 
 export function useUpdateGroupNameMutation(chatId: string | null) {
@@ -14,7 +15,7 @@ export function useUpdateGroupNameMutation(chatId: string | null) {
       if (!chatId) throw new Error("No chat");
       await api.patch(`/chat/group/${chatId}`, { name });
     },
-    onSuccess: () => invalidateChats(queryClient),
+    onSuccess: () => invalidateChats(queryClient, chatId),
   });
 }
 
@@ -28,7 +29,7 @@ export function useUploadGroupAvatarMutation(chatId: string | null) {
       const res = await api.post<{ avatarUrl?: string }>(`/chat/group/${chatId}/avatar`, form);
       return res.data.avatarUrl;
     },
-    onSuccess: () => invalidateChats(queryClient),
+    onSuccess: () => invalidateChats(queryClient, chatId),
   });
 }
 
@@ -39,7 +40,7 @@ export function useAddGroupMemberMutation(chatId: string | null) {
       if (!chatId) throw new Error("No chat");
       await api.post(`/chat/group/${chatId}/members`, { userId });
     },
-    onSuccess: () => invalidateChats(queryClient),
+    onSuccess: () => invalidateChats(queryClient, chatId),
   });
 }
 
@@ -50,7 +51,7 @@ export function useRemoveGroupMemberMutation(chatId: string | null) {
       if (!chatId) throw new Error("No chat");
       await api.delete(`/chat/group/${chatId}/members/${userId}`);
     },
-    onSuccess: () => invalidateChats(queryClient),
+    onSuccess: () => invalidateChats(queryClient, chatId),
   });
 }
 
@@ -61,7 +62,7 @@ export function usePromoteGroupAdminMutation(chatId: string | null) {
       if (!chatId) throw new Error("No chat");
       await api.post(`/chat/group/${chatId}/admins/${userId}`);
     },
-    onSuccess: () => invalidateChats(queryClient),
+    onSuccess: () => invalidateChats(queryClient, chatId),
   });
 }
 
@@ -72,7 +73,7 @@ export function useDemoteGroupAdminMutation(chatId: string | null) {
       if (!chatId) throw new Error("No chat");
       await api.delete(`/chat/group/${chatId}/admins/${userId}`);
     },
-    onSuccess: () => invalidateChats(queryClient),
+    onSuccess: () => invalidateChats(queryClient, chatId),
   });
 }
 
@@ -90,7 +91,8 @@ export function useLeaveGroupMutation(chatId: string | null) {
       return res.data;
     },
     onSuccess: () => {
-      invalidateChats(queryClient);
+      invalidateChats(queryClient, chatId);
+      if (chatId) queryClient.removeQueries({ queryKey: chatKeys.groupMembers(chatId) });
       if (activeChatId === chatId) setActiveChat(null);
     },
   });

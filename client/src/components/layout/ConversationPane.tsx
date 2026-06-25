@@ -66,6 +66,7 @@ import {
   useSendMessageMutation,
   useUploadMediaMutation,
   useChatInMessageSearch,
+  useGroupMembers,
 } from "@/features/chat";
 import {
   ReportUserModal,
@@ -230,7 +231,6 @@ export function ConversationPane() {
       />
       <MessageList
         chatId={activeChatId}
-        chat={chat}
         isSelf={isSelf}
         isGroup={isGroup}
         participant={chat.participant}
@@ -727,7 +727,7 @@ function HeaderMenu({
     if (!chat.group || !sessionUser) return;
     const admins = chat.group.admins;
     const isSoleAdmin = chat.group.isAdmin && admins.length === 1 && admins.includes(sessionUser._id);
-    const hasOthers = chat.group.members.some((m) => m._id !== sessionUser._id);
+    const hasOthers = (chat.group.memberCount ?? 0) > 1;
     if (isSoleAdmin && hasOthers) {
       setLeaveOpen(true);
       return;
@@ -913,7 +913,6 @@ function CallButton({
 
 function MessageList({
   chatId,
-  chat,
   isSelf = false,
   isGroup = false,
   participant,
@@ -926,7 +925,6 @@ function MessageList({
   activeMatchId = null,
 }: {
   chatId: string;
-  chat: ChatListItem;
   isSelf?: boolean;
   isGroup?: boolean;
   participant?: ChatListItem["participant"];
@@ -941,6 +939,7 @@ function MessageList({
   const userId = useAuthStore((s) => s.user?._id);
   const isTyping = useUIStore((s) => s.typingByChat[chatId]);
   const { data: messages = [] } = useMessages(chatId);
+  const { data: groupMembers = [] } = useGroupMembers(chatId, isGroup);
   const markRead = useMarkReadMutation(chatId);
   const react = useReactMessageMutation(chatId);
   const del = useDeleteMessageMutation(chatId);
@@ -1019,7 +1018,7 @@ function MessageList({
           );
         }
 
-        const senderName = isGroup ? memberNameById(chat, message.sender) : (participant?.displayName ?? "Contact");
+        const senderName = isGroup ? memberNameById(groupMembers, message.sender) : (participant?.displayName ?? "Contact");
 
         return (
           <div key={message._id} data-message-id={message._id}>

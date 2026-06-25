@@ -4,6 +4,7 @@ import type { ChatListItem } from "@linkr/shared";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/lib/store";
 import { useLeaveGroupMutation } from "./useGroupAdmin";
+import { useGroupMembers } from "./useGroupMembers";
 
 /**
  * Sole admin leaving a group must pick a successor. Regular members get a simple confirm elsewhere.
@@ -19,11 +20,12 @@ export function LeaveGroupModal({
 }) {
   const userId = useAuthStore((s) => s.user?._id);
   const leave = useLeaveGroupMutation(chat?._id ?? null);
+  const { data: members = [] } = useGroupMembers(chat?._id ?? null, open);
   const [successorId, setSuccessorId] = useState("");
 
   if (!open || !chat?.group || !userId) return null;
 
-  const others = chat.group.members.filter((m) => m._id !== userId);
+  const others = members.filter((m) => m._id !== userId);
   const admins = chat.group.admins;
   const isSoleAdmin = chat.group.isAdmin && admins.filter((id) => id === userId).length > 0 && admins.length === 1;
 

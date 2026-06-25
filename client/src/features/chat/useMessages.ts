@@ -9,6 +9,17 @@ import { useCryptoStore } from "@/lib/crypto";
 import { chatKeys } from "./useChats";
 import { patchListLastMessage, writeCachedChatList } from "./chatListCache";
 
+/** Groups use socket cache patches only — skip list/message refetch after send (1:1 unchanged). */
+function isGroupChatId(
+  queryClient: ReturnType<typeof useQueryClient>,
+  chatId: string,
+): boolean {
+  return (
+    queryClient.getQueryData<ChatListItem[]>(chatKeys.list())?.find((c) => c._id === chatId)?.type ===
+    "group"
+  );
+}
+
 /** Find the chat's encryption target (1:1/self only). Groups send plaintext. */
 function resolveRecipientId(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -145,7 +156,7 @@ export function useSendMessageMutation(chatId: string | null) {
       queryClient.setQueryData(chatKeys.messages(chatId), context.previous);
     },
     onSettled: () => {
-      if (!chatId) return;
+      if (!chatId || isGroupChatId(queryClient, chatId)) return;
       void queryClient.invalidateQueries({ queryKey: chatKeys.messages(chatId) });
       void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
     },
@@ -267,7 +278,7 @@ export function useUploadMediaMutation(chatId: string | null) {
       return res.data.message;
     },
     onSettled: () => {
-      if (!chatId) return;
+      if (!chatId || isGroupChatId(queryClient, chatId)) return;
       void queryClient.invalidateQueries({ queryKey: chatKeys.messages(chatId) });
       void queryClient.invalidateQueries({ queryKey: chatKeys.list() });
     },
