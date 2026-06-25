@@ -1781,21 +1781,61 @@ function Composer({
     setStagedFile(null);
   };
 
+  /** Stage an attachment for review (paperclip, paste, keyboard GIF — same path as file picker). */
+  const stageAttachment = (file: File) => {
+    setUploadError(null);
+    if (!withinSizeLimit(file)) return;
+    clearStaged();
+    setStagedFile(file);
+    if (file.type.startsWith("image/")) {
+      setStagedPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
+  /** Name clipboard blobs that arrive without a filename (keyboard GIFs, screenshots). */
+  const normalizePastedFile = (file: File): File => {
+    if (file.name && file.name !== "image.png" && file.name !== "blob") return file;
+    const ext =
+      file.type === "image/gif"
+        ? ".gif"
+        : file.type === "image/png"
+          ? ".png"
+          : file.type === "image/webp"
+            ? ".webp"
+            : file.type === "image/jpeg"
+              ? ".jpg"
+              : ".png";
+    return new File([file], `pasted${ext}`, { type: file.type || "image/png" });
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (upload.isPending || isEditing) return;
+    const dt = e.clipboardData;
+    if (!dt) return;
+
+    for (const item of Array.from(dt.items)) {
+      if (!item.type.startsWith("image/")) continue;
+      const raw = item.getAsFile();
+      if (!raw) continue;
+      e.preventDefault();
+      stageAttachment(normalizePastedFile(raw));
+      return;
+    }
+
+    const fromFiles = dt.files?.[0];
+    if (fromFiles?.type.startsWith("image/")) {
+      e.preventDefault();
+      stageAttachment(normalizePastedFile(fromFiles));
+    }
+  };
+
   // Picking a file no longer auto-sends — it stages the file (with an image preview) so the user can
   // add a caption and review before hitting Send.
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-picking the same file later
     if (!file) return;
-
-    setUploadError(null);
-    if (!withinSizeLimit(file)) return;
-
-    clearStaged();
-    setStagedFile(file);
-    if (file.type.startsWith("image/")) {
-      setStagedPreviewUrl(URL.createObjectURL(file));
-    }
+    stageAttachment(file);
   };
 
   // Safety net: revoke any outstanding preview URL when the composer unmounts.
@@ -2050,6 +2090,7 @@ function Composer({
           ref={inputRef}
           value={text}
           onChange={(e) => handleChange(e.target.value)}
+          onPaste={handlePaste}
           onFocus={bumpScrollForKeyboard}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
