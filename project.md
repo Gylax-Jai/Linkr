@@ -1040,7 +1040,7 @@ pnpm build        # production build
 4. **Leave group:** footer **Leave group** button (or header **⋮ → Leave group**). Regular members get a confirm dialog; the **sole admin** must pick a successor in the modal.
 5. **Last member leaving** deletes the group for everyone (`group:deleted` closes the chat).
 6. Other members should see renames, avatar, and membership changes without refresh (`group:updated`).
-
+7.added +91 by default in onboard
 ---
 
 ## Repo layout (quick reference)

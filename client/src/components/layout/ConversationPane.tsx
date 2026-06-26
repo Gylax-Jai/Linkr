@@ -1796,9 +1796,14 @@ function Composer({
 
   // Reject oversized files up front (server enforces this too); returns true when within the cap.
   const withinSizeLimit = (file: File): boolean => {
-    const cap = file.type.startsWith("image/") ? MEDIA_IMAGE_MAX_BYTES : MEDIA_FILE_MAX_BYTES;
+    const isImage = file.type.startsWith("image/");
+    const cap = isImage ? MEDIA_IMAGE_MAX_BYTES : MEDIA_FILE_MAX_BYTES;
     if (file.size > cap) {
-      setUploadError(`File is too large (max ${Math.round(cap / (1024 * 1024))} MB).`);
+      const message = isImage
+        ? `Images over ${Math.round(MEDIA_IMAGE_MAX_BYTES / (1024 * 1024))} MB can't be uploaded.`
+        : `File is too large (max ${Math.round(MEDIA_FILE_MAX_BYTES / (1024 * 1024))} MB).`;
+      setUploadError(message);
+      window.alert(message);
       return false;
     }
     return true;

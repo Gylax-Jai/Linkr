@@ -9,6 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const rootEnvPath = path.resolve(here, "../../../.env");
 dotenv.config({ path: rootEnvPath });
 
+
 /**
  * Env schema. In Sprint 0 every external credential is OPTIONAL so the app boots without
  * MongoDB/Redis/Google. Validation here only guards shape/format and supplies safe defaults;

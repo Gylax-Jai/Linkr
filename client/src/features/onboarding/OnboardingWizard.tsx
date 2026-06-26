@@ -44,7 +44,7 @@ export function OnboardingWizard() {
 
   const [step, setStep] = useState(1);
   const [username, setUsername] = useState("");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState("+91");
   const [phoneVerified, setPhoneVerified] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [bio, setBio] = useState("");
@@ -239,7 +239,7 @@ function PhoneStep({
     <div className="space-y-5">
       <Field
         label="Phone number"
-        hint={<span className="text-text-muted">International format, e.g. +14155552671. One account per number.</span>}
+        hint={<span className="text-text-muted">India code is filled in. Enter your mobile number after +91.</span>}
       >
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -247,7 +247,7 @@ function PhoneStep({
             <TextInput
               value={phone}
               onChange={(e) => onPhoneChange(e.target.value.trim())}
-              placeholder="+14155552671"
+              placeholder="+919876543210"
               inputMode="tel"
               disabled={verified}
               className="pl-9 font-mono"
